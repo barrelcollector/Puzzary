@@ -74,7 +74,7 @@ def health() -> dict[str, str]:
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def login_page(request: Request, db: Session = Depends(get_db)):
     users = db.scalars(select(User).order_by(User.display_name)).all()
     return templates.TemplateResponse("login.html", {"request": request, "users": users})
 
@@ -85,7 +85,7 @@ def login(
     user_id: str = Form(""),
     display_name: str = Form(""),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+):
     user: User | None = None
     if user_id:
         user = db.get(User, int(user_id))
@@ -101,18 +101,18 @@ def login(
 
 
 @app.post("/logout")
-def logout(request: Request) -> RedirectResponse:
+def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def home(request: Request, db: Session = Depends(get_db)):
     return library(request, db)
 
 
 @app.get("/library", response_class=HTMLResponse)
-def library(request: Request, db: Session = Depends(get_db)) -> HTMLResponse | RedirectResponse:
+def library(request: Request, db: Session = Depends(get_db)):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
@@ -131,7 +131,7 @@ def web_generate_puzzle(
     theme: str = Form("daily_stripe"),
     difficulty: str = Form("easy"),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
@@ -140,13 +140,13 @@ def web_generate_puzzle(
 
 
 @app.post("/web/users")
-def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)) -> RedirectResponse:
+def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)):
     create_user(UserCreate(display_name=display_name), db)
     return RedirectResponse(url="/library", status_code=303)
 
 
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
-def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> HTMLResponse | RedirectResponse:
+def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
@@ -172,7 +172,7 @@ def web_attempt_puzzle(
     request: Request,
     answer: str = Form(...),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
@@ -187,7 +187,7 @@ def web_upload_photo(
     notes: str = Form(""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
