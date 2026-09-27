@@ -31,19 +31,21 @@
           <span data-word="{{ word }}">{{ word }}</span>
         {% endfor %}
       </div>
-      <p class="muted">Drag across a word to mark it found. Found words are submitted automatically in the answer box.</p>
+      <p class="muted" id="word-search-status">Drag across a word to mark it found.</p>
     {% endif %}
   </div>
 
   <aside class="side">
-    <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/attempts">
-      <h2>Submit Answer</h2>
-      <label>
-        Found words
-        <textarea id="answer-box" name="answer" rows="4" placeholder="MERIDIAN, PUZZLE, ZEBRA" required></textarea>
-      </label>
-      <button type="submit">Check</button>
-    </form>
+    {% if puzzle.puzzle_type != "word_search" %}
+      <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/attempts">
+        <h2>Submit Answer</h2>
+        <label>
+          Answer
+          <textarea id="answer-box" name="answer" rows="4" required></textarea>
+        </label>
+        <button type="submit">Check</button>
+      </form>
+    {% endif %}
 
     <details class="panel">
       <summary>Hints</summary>
@@ -67,24 +69,26 @@
 </section>
 
 <section class="history">
-  <div class="panel">
-    <h2>Attempts</h2>
-    {% if attempts %}
-      <div class="list compact">
-        {% for attempt in attempts %}
-          <div class="row">
-            <span>
-              <strong>{{ "Correct" if attempt.is_correct else "Not yet" }}</strong>
-              <small>{{ attempt.answer }}</small>
-            </span>
-            <small>{{ attempt.created_at }}</small>
-          </div>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="muted">No attempts yet.</p>
-    {% endif %}
-  </div>
+  {% if puzzle.puzzle_type != "word_search" %}
+    <div class="panel">
+      <h2>Attempts</h2>
+      {% if attempts %}
+        <div class="list compact">
+          {% for attempt in attempts %}
+            <div class="row">
+              <span>
+                <strong>{{ "Correct" if attempt.is_correct else "Not yet" }}</strong>
+                <small>{{ attempt.answer }}</small>
+              </span>
+              <small>{{ attempt.created_at }}</small>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No attempts yet.</p>
+      {% endif %}
+    </div>
+  {% endif %}
 
   <div class="panel">
     <h2>Photos</h2>
@@ -105,5 +109,5 @@
     {% endif %}
   </div>
 </section>
-<script src="/static/word-search.js?v=3"></script>
+<script src="/static/word-search.js?v=4"></script>
 {% endblock %}

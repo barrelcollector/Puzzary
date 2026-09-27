@@ -2,10 +2,10 @@
   const grid = document.querySelector(".word-grid.interactive");
   if (!grid) return;
 
-  const answerBox = document.getElementById("answer-box");
   const wordList = document.getElementById("word-list");
+  const status = document.getElementById("word-search-status");
   const words = new Set((grid.dataset.words || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
-  const found = new Set((answerBox.value || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
+  const found = new Set();
   const cells = Array.from(grid.querySelectorAll("button[data-letter]"));
   const cellsByCoord = new Map(cells.map((cell) => [`${cell.dataset.x},${cell.dataset.y}`, cell]));
   let dragging = false;
@@ -14,11 +14,15 @@
   let lastCell = null;
   let selected = [];
 
-  function syncAnswer() {
-    answerBox.value = Array.from(found).sort().join(", ");
+  function syncFoundWords() {
     wordList.querySelectorAll("[data-word]").forEach((item) => {
       item.classList.toggle("found", found.has(item.dataset.word.toUpperCase()));
     });
+    if (status) {
+      status.textContent = found.size === words.size
+        ? "All words found."
+        : `${found.size} of ${words.size} words found.`;
+    }
   }
 
   function clearSelected() {
@@ -84,7 +88,7 @@
         cell.classList.add("found-cell");
       });
       selected = [];
-      syncAnswer();
+      syncFoundWords();
       return;
     }
 
@@ -144,5 +148,5 @@
     clearSelected();
   });
 
-  syncAnswer();
+  syncFoundWords();
 })();
