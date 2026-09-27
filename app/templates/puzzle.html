@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ puzzle.title }} - Puzzary{% endblock %}
+{% block content %}
+<section class="puzzle-head">
+  <div>
+    <h1>{{ puzzle.title }}</h1>
+    <p class="muted">{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</p>
+  </div>
+  <code>{{ puzzle.id }}</code>
+</section>
+
+<section class="puzzle-layout">
+  <div class="panel">
+    <p>{{ puzzle.prompt }}</p>
+    {% if puzzle.puzzle_type == "word_search" %}
+      <div class="word-grid" style="--grid-size: {{ puzzle.play_payload.grid | length }}">
+        {% for row in puzzle.play_payload.grid %}
+          {% for letter in row %}
+            <span>{{ letter }}</span>
+          {% endfor %}
+        {% endfor %}
+      </div>
+      <h2>Words</h2>
+      <p class="word-list">{{ puzzle.play_payload.words | join(" / ") }}</p>
+    {% endif %}
+  </div>
+
+  <aside class="side">
+    <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/attempts">
+      <h2>Submit Answer</h2>
+      <label>
+        User
+        <select name="user_id">
+          <option value="">Guest</option>
+          {% for user in users %}
+            <option value="{{ user.id }}">{{ user.display_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Answer
+        <textarea name="answer" rows="4" placeholder="MERIDIAN, PUZZLE, ZEBRA" required></textarea>
+      </label>
+      <button type="submit">Check</button>
+    </form>
+
+    <details class="panel">
+      <summary>Hints</summary>
+      <ol>
+        {% for hint in puzzle.hints | sort(attribute="order") %}
+          <li>{{ hint.text }}</li>
+        {% endfor %}
+      </ol>
+    </details>
+
+    <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/photos" enctype="multipart/form-data">
+      <h2>Upload Work</h2>
+      <label>
+        User
+        <select name="user_id">
+          <option value="">Guest</option>
+          {% for user in users %}
+            <option value="{{ user.id }}">{{ user.display_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Notes
+        <input name="notes" autocomplete="off">
+      </label>
+      <input type="file" name="file" accept="image/*" required>
+      <button type="submit">Upload</button>
+    </form>
+  </aside>
+</section>
+
+<section class="history">
+  <div class="panel">
+    <h2>Attempts</h2>
+    {% if attempts %}
+      <div class="list compact">
+        {% for attempt in attempts %}
+          <div class="row">
+            <span>
+              <strong>{{ "Correct" if attempt.is_correct else "Not yet" }}</strong>
+              <small>{{ attempt.answer }}</small>
+            </span>
+            <small>{{ attempt.created_at }}</small>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No attempts yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Photos</h2>
+    {% if photos %}
+      <div class="list compact">
+        {% for photo in photos %}
+          <div class="row">
+            <span>
+              <strong>{{ photo.original_filename }}</strong>
+              <small>{{ photo.notes }}</small>
+            </span>
+            <small>{{ photo.created_at }}</small>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No photo submissions yet.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

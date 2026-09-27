@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Puzzary{% endblock %}
+{% block content %}
+<section class="toolbar">
+  <form class="panel" method="post" action="/web/puzzles/generate">
+    <h1>Generate Puzzle</h1>
+    <label>
+      Type
+      <select name="puzzle_type">
+        <option value="word_search">Word search</option>
+      </select>
+    </label>
+    <label>
+      Theme
+      <select name="theme">
+        <option value="daily_stripe">Daily Stripe</option>
+        <option value="home">Home</option>
+        <option value="weather">Weather</option>
+        <option value="space">Space</option>
+        <option value="technology">Technology</option>
+      </select>
+    </label>
+    <label>
+      Difficulty
+      <select name="difficulty">
+        <option value="easy">Easy</option>
+        <option value="medium">Medium</option>
+        <option value="hard">Hard</option>
+      </select>
+    </label>
+    <button type="submit">Generate</button>
+  </form>
+
+  <form class="panel" method="post" action="/web/users">
+    <h1>Add User</h1>
+    <label>
+      Display name
+      <input name="display_name" autocomplete="off" required>
+    </label>
+    <button type="submit">Add</button>
+    {% if users %}
+      <p class="muted">Current users: {{ users | map(attribute="display_name") | join(", ") }}</p>
+    {% endif %}
+  </form>
+</section>
+
+<section>
+  <h1>Recent Puzzles</h1>
+  {% if puzzles %}
+    <div class="list">
+      {% for puzzle in puzzles %}
+        <a class="row" href="/puzzles/{{ puzzle.id }}">
+          <span>
+            <strong>{{ puzzle.title }}</strong>
+            <small>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</small>
+          </span>
+          <code>{{ puzzle.id }}</code>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No puzzles yet. Generate the first one above.</p>
+  {% endif %}
+</section>
+{% endblock %}
