@@ -14,9 +14,17 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db, init_db
-from app.models import Puzzle, PuzzleAttempt, PuzzleHint, PuzzlePhoto, User
+from app.models import Puzzle, PuzzleAttempt, PuzzleHint, PuzzlePhoto, PuzzleProgress, User
 from app.puzzles import check_word_search_answer, generate_word_search
-from app.schemas import PuzzleAttemptCreate, PuzzleAttemptResponse, PuzzleGenerateRequest, PuzzleSummary, UserCreate
+from app.schemas import (
+    PuzzleAttemptCreate,
+    PuzzleAttemptResponse,
+    PuzzleGenerateRequest,
+    PuzzleProgressResponse,
+    PuzzleProgressUpdate,
+    PuzzleSummary,
+    UserCreate,
+)
 
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
@@ -66,6 +74,33 @@ def require_web_user(request: Request, db: Session) -> User | RedirectResponse:
     if user is None:
         return RedirectResponse(url="/login", status_code=303)
     return user
+
+
+def found_words_for_progress(progress: PuzzleProgress | None) -> list[str]:
+    if progress is None:
+        return []
+    words = progress.progress_payload.get("found_words", [])
+    if not isinstance(words, list):
+        return []
+    return [str(word).upper() for word in words]
+
+
+def normalize_found_words(words: list[str], puzzle: Puzzle) -> list[str]:
+    expected = {str(word).upper() for word in puzzle.solution_payload.get("words", [])}
+    supplied = {str(word).strip().upper() for word in words if str(word).strip()}
+    return sorted(expected & supplied)
+
+
+def progress_response(puzzle: Puzzle, user: User, progress: PuzzleProgress | None) -> PuzzleProgressResponse:
+    expected_count = len(puzzle.solution_payload.get("words", []))
+    found_words = found_words_for_progress(progress)
+    return PuzzleProgressResponse(
+        puzzle_id=puzzle.id,
+        user_id=user.id,
+        found_words=found_words,
+        expected_count=expected_count,
+        found_count=len(found_words),
+    )
 
 
 @app.get("/health")
@@ -118,9 +153,18 @@ def library(request: Request, db: Session = Depends(get_db)):
         return user
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(50)).all()
     users = db.scalars(select(User).order_by(User.display_name)).all()
+    progress_rows = db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id)).all()
+    progress_by_puzzle = {
+        puzzle.id: {"found": 0, "total": len(puzzle.solution_payload.get("words", []))}
+        for puzzle in puzzles
+        if puzzle.puzzle_type == "word_search"
+    }
+    for progress in progress_rows:
+        if progress.puzzle_id in progress_by_puzzle:
+            progress_by_puzzle[progress.puzzle_id]["found"] = len(found_words_for_progress(progress))
     return templates.TemplateResponse(
         "home.html",
-        {"request": request, "puzzles": puzzles, "users": users, "current_user": user},
+        {"request": request, "puzzles": puzzles, "users": users, "current_user": user, "progress_by_puzzle": progress_by_puzzle},
     )
 
 
@@ -160,9 +204,18 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     photos = db.scalars(
         select(PuzzlePhoto).where(PuzzlePhoto.puzzle_id == puzzle_id).order_by(desc(PuzzlePhoto.created_at)).limit(10)
     ).all()
+    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
     return templates.TemplateResponse(
         "puzzle.html",
-        {"request": request, "puzzle": puzzle, "users": users, "attempts": attempts, "photos": photos, "current_user": user},
+        {
+            "request": request,
+            "puzzle": puzzle,
+            "users": users,
+            "attempts": attempts,
+            "photos": photos,
+            "current_user": user,
+            "progress_found_words": found_words_for_progress(progress),
+        },
     )
 
 
@@ -240,6 +293,43 @@ def get_puzzle(puzzle_id: str, db: Session = Depends(get_db)) -> PuzzleSummary:
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
     return serialize_puzzle(puzzle)
+
+
+@app.get("/api/puzzles/{puzzle_id}/progress", response_model=PuzzleProgressResponse)
+def get_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleProgressResponse:
+    user = current_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Login required")
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
+    return progress_response(puzzle, user, progress)
+
+
+@app.post("/api/puzzles/{puzzle_id}/progress", response_model=PuzzleProgressResponse)
+def save_progress(
+    puzzle_id: str,
+    payload: PuzzleProgressUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PuzzleProgressResponse:
+    user = current_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Login required")
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+
+    found_words = normalize_found_words(payload.found_words, puzzle)
+    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
+    if progress is None:
+        progress = PuzzleProgress(puzzle_id=puzzle_id, user_id=user.id, progress_payload={})
+        db.add(progress)
+    progress.progress_payload = {"found_words": found_words}
+    db.commit()
+    db.refresh(progress)
+    return progress_response(puzzle, user, progress)
 
 
 @app.post("/api/puzzles/{puzzle_id}/attempts", response_model=PuzzleAttemptResponse)

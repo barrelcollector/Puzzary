@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -17,6 +17,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="user")
+    progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="user")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="user")
 
 
@@ -38,6 +39,7 @@ class Puzzle(Base):
 
     hints: Mapped[list[PuzzleHint]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
 
 
@@ -66,6 +68,21 @@ class PuzzleAttempt(Base):
 
     puzzle: Mapped[Puzzle] = relationship(back_populates="attempts")
     user: Mapped[User | None] = relationship(back_populates="attempts")
+
+
+class PuzzleProgress(Base):
+    __tablename__ = "puzzle_progress"
+    __table_args__ = (UniqueConstraint("puzzle_id", "user_id", name="uq_puzzle_progress_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    progress_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="progress")
+    user: Mapped[User] = relationship(back_populates="progress")
 
 
 class PuzzlePhoto(Base):

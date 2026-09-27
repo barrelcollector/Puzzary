@@ -11,11 +11,18 @@
 
 <section class="puzzle-layout">
   <div class="panel">
-    <p>{{ puzzle.prompt }}</p>
+    {% if puzzle.puzzle_type == "word_search" %}
+      <p>Find all listed words.</p>
+    {% else %}
+      <p>{{ puzzle.prompt }}</p>
+    {% endif %}
     {% if puzzle.puzzle_type == "word_search" %}
       <div
         class="word-grid interactive"
         data-words="{{ puzzle.play_payload.words | join(',') }}"
+        data-found-words="{{ progress_found_words | default([]) | join(',') }}"
+        data-placements='{{ puzzle.solution_payload.placements | tojson }}'
+        data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
         style="--grid-size: {{ puzzle.play_payload.grid | length }}"
       >
         {% for row in puzzle.play_payload.grid %}
@@ -109,5 +116,5 @@
     {% endif %}
   </div>
 </section>
-<script src="/static/word-search.js?v=4"></script>
+<script src="/static/word-search.js?v=5"></script>
 {% endblock %}

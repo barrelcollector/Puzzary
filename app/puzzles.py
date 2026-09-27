@@ -64,7 +64,7 @@ def generate_word_search(theme: str, difficulty: str) -> GeneratedPuzzle:
             if not grid[y][x]:
                 grid[y][x] = rng.choice(string.ascii_uppercase)
 
-    prompt = "Find all listed words. Submit the found words separated by commas."
+    prompt = "Find all listed words."
     print_payload = {
         "kind": "word_search",
         "grid": ["".join(row) for row in grid],

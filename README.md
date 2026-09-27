@@ -15,6 +15,7 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Word-search puzzle generator
 - Puzzle hints
 - Answer checking
+- Account-based puzzle progress
 - Interactive word-search highlighting
 - Photo submission upload endpoint
 - Printable puzzle payload API for Daily Stripe
@@ -61,6 +62,14 @@ Submit an answer:
 curl -X POST http://localhost:8790/api/puzzles/{puzzle_id}/attempts \
   -H "Content-Type: application/json" \
   --data '{"user_id":1,"answer":"MERIDIAN,PUZZLE,ZEBRA,PRINT,CLUE"}'
+```
+
+Save logged-in word-search progress:
+
+```bash
+curl -X POST http://localhost:8790/api/puzzles/{puzzle_id}/progress \
+  -H "Content-Type: application/json" \
+  --data '{"found_words":["MERIDIAN","PUZZLE"]}'
 ```
 
 ## Design Notes

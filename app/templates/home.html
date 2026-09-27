@@ -53,6 +53,9 @@
           <span>
             <strong>{{ puzzle.title }}</strong>
             <small>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</small>
+            {% if puzzle.id in progress_by_puzzle %}
+              <small>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} found</small>
+            {% endif %}
           </span>
           <span class="row-meta">
             <small>{{ puzzle.created_at }}</small>

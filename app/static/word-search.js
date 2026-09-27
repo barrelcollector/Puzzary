@@ -5,14 +5,22 @@
   const wordList = document.getElementById("word-list");
   const status = document.getElementById("word-search-status");
   const words = new Set((grid.dataset.words || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
-  const found = new Set();
+  const found = new Set((grid.dataset.foundWords || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
+  const progressUrl = grid.dataset.progressUrl;
   const cells = Array.from(grid.querySelectorAll("button[data-letter]"));
   const cellsByCoord = new Map(cells.map((cell) => [`${cell.dataset.x},${cell.dataset.y}`, cell]));
+  let placements = [];
   let dragging = false;
   let activePointerId = null;
   let startCell = null;
   let lastCell = null;
   let selected = [];
+
+  try {
+    placements = JSON.parse(grid.dataset.placements || "[]");
+  } catch (_error) {
+    placements = [];
+  }
 
   function syncFoundWords() {
     wordList.querySelectorAll("[data-word]").forEach((item) => {
@@ -23,6 +31,34 @@
         ? "All words found."
         : `${found.size} of ${words.size} words found.`;
     }
+  }
+
+  function saveProgress() {
+    if (!progressUrl) return;
+    window.fetch(progressUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ found_words: Array.from(found).sort() }),
+    }).catch(() => {
+      if (status) status.textContent = "Progress could not be saved.";
+    });
+  }
+
+  function cellsForPlacement(placement) {
+    if (!placement || !placement.start || !placement.direction || !placement.word) return [];
+    const [x, y] = placement.start;
+    const [dx, dy] = placement.direction;
+    const line = [];
+    for (let i = 0; i < placement.word.length; i += 1) {
+      const cell = cellsByCoord.get(`${x + dx * i},${y + dy * i}`);
+      if (cell) line.push(cell);
+    }
+    return line;
+  }
+
+  function markStoredWord(word) {
+    const placement = placements.find((item) => String(item.word).toUpperCase() === word);
+    cellsForPlacement(placement).forEach((cell) => cell.classList.add("found-cell"));
   }
 
   function clearSelected() {
@@ -89,6 +125,7 @@
       });
       selected = [];
       syncFoundWords();
+      saveProgress();
       return;
     }
 
@@ -148,5 +185,6 @@
     clearSelected();
   });
 
+  found.forEach(markStoredWord);
   syncFoundWords();
 })();

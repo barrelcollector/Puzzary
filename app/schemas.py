@@ -25,6 +25,18 @@ class PuzzleAttemptResponse(BaseModel):
     matched_count: int | None = None
 
 
+class PuzzleProgressUpdate(BaseModel):
+    found_words: list[str] = []
+
+
+class PuzzleProgressResponse(BaseModel):
+    puzzle_id: str
+    user_id: int
+    found_words: list[str] = []
+    expected_count: int
+    found_count: int
+
+
 class PuzzleSummary(BaseModel):
     id: str
     puzzle_type: str
