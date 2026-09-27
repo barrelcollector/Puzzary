@@ -13,7 +13,8 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Household profile login
 - Puzzle library view
 - Admin panel for archiving, deleting, and organizing puzzles
-- Admin-managed dictionaries, categories, and tags
+- Admin-managed content sources, categories, and tags
+- Word-bank content sources for word-game generation
 - Word-search puzzle generator
 - Puzzle hints
 - Answer checking

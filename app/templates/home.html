@@ -13,8 +13,8 @@
     <label>
       Dictionary
       <select name="theme">
-        {% for dictionary in dictionaries %}
-          <option value="{{ dictionary.slug }}">{{ dictionary.name }}</option>
+        {% for source in word_banks %}
+          <option value="{{ source.slug }}">{{ source.name }}</option>
         {% endfor %}
       </select>
     </label>

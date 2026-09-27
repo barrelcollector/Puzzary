@@ -1,144 +1,356 @@
 {% extends "base.html" %}
 {% block title %}Admin - Puzzary{% endblock %}
 {% block content %}
-<section class="puzzle-head">
-  <div>
-    <h1>Admin</h1>
-    <p class="muted">Manage puzzle inventory, dictionaries, categories, and tags.</p>
-  </div>
-  <a class="ghost-link" href="/library">Library</a>
-</section>
+<section class="admin-shell">
+  <nav class="admin-nav" aria-label="Admin">
+    <a class="{% if section == 'dashboard' %}active{% endif %}" href="/admin">Dashboard</a>
+    <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
+    <a class="{% if section == 'generate' %}active{% endif %}" href="/admin/generate">Generate</a>
+    <a class="{% if section == 'sources' %}active{% endif %}" href="/admin/sources">Content Sources</a>
+    <a class="{% if section == 'taxonomy' %}active{% endif %}" href="/admin/taxonomy">Taxonomy</a>
+    <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
+    <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
+  </nav>
 
-<section class="admin-section">
-  <h2>Puzzles</h2>
-  <div class="admin-list">
-    {% for puzzle in puzzles %}
-      <div class="panel admin-puzzle">
+  <div class="admin-main">
+    {% if section == "dashboard" %}
+      <section class="puzzle-head">
         <div>
-          <strong>{{ puzzle.title }}</strong>
-          <small>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }} / {{ puzzle.id }}</small>
-          {% if puzzle.archived_at %}
-            <span class="status-pill">Archived</span>
-          {% endif %}
+          <h1>Admin Dashboard</h1>
+          <p class="muted">Manage the puzzle lifecycle from source material to playable puzzles.</p>
         </div>
+      </section>
+      <div class="metric-grid">
+        <a class="metric-card" href="/admin/sources"><strong>{{ sources | length }}</strong><span>Content sources</span></a>
+        <a class="metric-card" href="/admin/puzzles"><strong>{{ live_puzzles | length }}</strong><span>Live puzzles</span></a>
+        <a class="metric-card" href="/admin/puzzles"><strong>{{ archived_puzzles | length }}</strong><span>Archived puzzles</span></a>
+        <a class="metric-card" href="/admin/taxonomy"><strong>{{ (categories | length) + (tags | length) }}</strong><span>Taxonomy labels</span></a>
+      </div>
+      <section class="panel">
+        <h2>Quick Actions</h2>
+        <div class="action-row">
+          <a class="button-link" href="/admin/generate">Generate Puzzle</a>
+          <a class="button-link" href="/admin/sources">Add Content Source</a>
+          <a class="ghost-link" href="/admin/publishing">Publishing Plan</a>
+        </div>
+      </section>
+      <section>
+        <h2>Recent Puzzles</h2>
+        <div class="list">
+          {% for puzzle in puzzles[:6] %}
+            <a class="row" href="/puzzles/{{ puzzle.id }}">
+              <span>
+                <strong>{{ puzzle.title }}</strong>
+                <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }}{% if puzzle.content_source %} / {{ puzzle.content_source.name }}{% endif %}</small>
+              </span>
+              {% if puzzle.archived_at %}<small>Archived</small>{% endif %}
+            </a>
+          {% else %}
+            <p class="muted">No puzzles yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
 
-        <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/metadata">
+    {% if section == "puzzles" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Puzzles</h1>
+          <p class="muted">Generated playable and printable puzzle instances.</p>
+        </div>
+        <a class="button-link" href="/admin/generate">Generate</a>
+      </section>
+      <div class="admin-list">
+        {% for puzzle in puzzles %}
+          <div class="panel admin-puzzle">
+            <div>
+              <strong>{{ puzzle.title }}</strong>
+              <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }} / {{ puzzle.id }}</small>
+              {% if puzzle.content_source %}<small>Source: {{ puzzle.content_source.name }}</small>{% endif %}
+              {% if puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
+            </div>
+            <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/metadata">
+              <label>
+                Category
+                <select name="category_id">
+                  <option value="0">None</option>
+                  {% for category in categories %}
+                    <option value="{{ category.id }}" {% if puzzle.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <fieldset>
+                <legend>Tags</legend>
+                <div class="check-list">
+                  {% for tag in tags %}
+                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in puzzle.tags %}checked{% endif %}>{{ tag.name }}</label>
+                  {% else %}
+                    <small>No tags yet.</small>
+                  {% endfor %}
+                </div>
+              </fieldset>
+              <button type="submit">Save</button>
+            </form>
+            <div class="action-row">
+              <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
+              {% if puzzle.archived_at %}
+                <form method="post" action="/admin/puzzles/{{ puzzle.id }}/unarchive"><button type="submit" class="ghost-button">Unarchive</button></form>
+              {% else %}
+                <form method="post" action="/admin/puzzles/{{ puzzle.id }}/archive"><button type="submit" class="ghost-button">Archive</button></form>
+              {% endif %}
+              <form method="post" action="/admin/puzzles/{{ puzzle.id }}/delete"><button type="submit" class="danger-button">Delete</button></form>
+            </div>
+          </div>
+        {% else %}
+          <p class="muted">No puzzles yet.</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if section == "generate" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Generate</h1>
+          <p class="muted">Create puzzles from reusable content sources.</p>
+        </div>
+      </section>
+      <form class="panel narrow-panel" method="post" action="/admin/generate">
+        <label>
+          Puzzle type
+          <select name="puzzle_type">
+            <option value="word_search">Word search</option>
+          </select>
+        </label>
+        <label>
+          Content source
+          <select name="source_id" required>
+            {% for source in word_banks %}
+              <option value="{{ source.id }}">{{ source.name }} / Word Bank</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Difficulty
+          <select name="difficulty">
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <label>
+          Category
+          <select name="category_id">
+            <option value="0">Use source category</option>
+            {% for category in categories %}
+              <option value="{{ category.id }}">{{ category.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <fieldset>
+          <legend>Tags</legend>
+          <div class="check-list">
+            {% for tag in tags %}
+              <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+            {% else %}
+              <small>No tags yet.</small>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <button type="submit">Generate Puzzle</button>
+      </form>
+    {% endif %}
+
+    {% if section == "sources" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Content Sources</h1>
+          <p class="muted">Reusable material for puzzle generators. Word Bank is the first source type.</p>
+        </div>
+      </section>
+      <section class="admin-grid two">
+        <form class="panel" method="post" action="/admin/sources">
+          <h2>Add Source</h2>
+          <label>Name <input name="name" required></label>
+          <label>Slug <input name="slug" placeholder="daily_stripe"></label>
+          <label>
+            Type
+            <select name="source_type"><option value="word_bank">Word Bank</option></select>
+          </label>
           <label>
             Category
             <select name="category_id">
               <option value="0">None</option>
-              {% for category in categories %}
-                <option value="{{ category.id }}" {% if puzzle.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
-              {% endfor %}
+              {% for category in categories %}<option value="{{ category.id }}">{{ category.name }}</option>{% endfor %}
             </select>
           </label>
-          <fieldset>
-            <legend>Tags</legend>
-            <div class="check-list">
-              {% for tag in tags %}
-                <label>
-                  <input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in puzzle.tags %}checked{% endif %}>
-                  {{ tag.name }}
-                </label>
-              {% endfor %}
-            </div>
-          </fieldset>
-          <button type="submit">Save Metadata</button>
+          <label>Description <textarea name="description" rows="2"></textarea></label>
+          <label>Words <textarea name="words" rows="6" placeholder="MERIDIAN&#10;PUZZLE&#10;ZEBRA"></textarea></label>
+          <button type="submit">Add Source</button>
         </form>
-
-        <div class="action-row">
-          <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
-          {% if puzzle.archived_at %}
-            <form method="post" action="/admin/puzzles/{{ puzzle.id }}/unarchive">
-              <button type="submit" class="ghost-button">Unarchive</button>
+        <div class="admin-list">
+          {% for source in sources %}
+            <form class="panel edit-card" method="post" action="/admin/sources/{{ source.id }}">
+              <h2>{{ source.name }}</h2>
+              <small>{{ source.source_type | replace("_", " ") | title }} / {{ source.slug }}</small>
+              {% if source.archived_at %}<span class="status-pill">Archived</span>{% endif %}
+              <label>Name <input name="name" value="{{ source.name }}" required></label>
+              <label>Slug <input name="slug" value="{{ source.slug }}" required></label>
+              <label>
+                Type
+                <select name="source_type"><option value="word_bank" {% if source.source_type == "word_bank" %}selected{% endif %}>Word Bank</option></select>
+              </label>
+              <label>
+                Category
+                <select name="category_id">
+                  <option value="0">None</option>
+                  {% for category in categories %}
+                    <option value="{{ category.id }}" {% if source.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <fieldset>
+                <legend>Tags</legend>
+                <div class="check-list">
+                  {% for tag in tags %}
+                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in source.tags %}checked{% endif %}>{{ tag.name }}</label>
+                  {% else %}
+                    <small>No tags yet.</small>
+                  {% endfor %}
+                </div>
+              </fieldset>
+              <label>Description <textarea name="description" rows="2">{{ source.description }}</textarea></label>
+              <label>Words <textarea name="words" rows="6">{{ source.payload.words | default([]) | join('\n') }}</textarea></label>
+              <div class="action-row">
+                <button type="submit">Save</button>
+                {% if source.archived_at %}
+                  <button type="submit" form="unarchive-source-{{ source.id }}" class="ghost-button">Unarchive</button>
+                {% else %}
+                  <button type="submit" form="archive-source-{{ source.id }}" class="ghost-button">Archive</button>
+                {% endif %}
+                <button type="submit" form="delete-source-{{ source.id }}" class="danger-button">Delete</button>
+              </div>
             </form>
-          {% else %}
-            <form method="post" action="/admin/puzzles/{{ puzzle.id }}/archive">
-              <button type="submit" class="ghost-button">Archive</button>
-            </form>
-          {% endif %}
-          <form method="post" action="/admin/puzzles/{{ puzzle.id }}/delete">
-            <button type="submit" class="danger-button">Delete</button>
-          </form>
+            <form id="archive-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/archive"></form>
+            <form id="unarchive-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/unarchive"></form>
+            <form id="delete-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/delete"></form>
+          {% endfor %}
         </div>
+      </section>
+    {% endif %}
+
+    {% if section == "taxonomy" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Taxonomy</h1>
+          <p class="muted">Categories are broad groups. Tags are flexible labels used across sources and puzzles.</p>
+        </div>
+      </section>
+      <section class="admin-grid two">
+        <div class="panel">
+          <h2>Categories</h2>
+          <form method="post" action="/admin/categories">
+            <label>Name <input name="name" required></label>
+            <label>Slug <input name="slug"></label>
+            <label>Description <textarea name="description" rows="2"></textarea></label>
+            <button type="submit">Add Category</button>
+          </form>
+          <div class="admin-list compact-admin">
+            {% for category in categories %}
+              <form class="edit-card" method="post" action="/admin/categories/{{ category.id }}">
+                <label>Name <input name="name" value="{{ category.name }}" required></label>
+                <label>Slug <input name="slug" value="{{ category.slug }}" required></label>
+                <label>Description <textarea name="description" rows="2">{{ category.description }}</textarea></label>
+                <div class="action-row">
+                  <button type="submit">Save</button>
+                  <button type="submit" form="delete-category-{{ category.id }}" class="danger-button">Delete</button>
+                </div>
+              </form>
+              <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Tags</h2>
+          <form method="post" action="/admin/tags">
+            <label>Name <input name="name" required></label>
+            <label>Slug <input name="slug"></label>
+            <button type="submit">Add Tag</button>
+          </form>
+          <div class="admin-list compact-admin">
+            {% for tag in tags %}
+              <form class="edit-card" method="post" action="/admin/tags/{{ tag.id }}">
+                <label>Name <input name="name" value="{{ tag.name }}" required></label>
+                <label>Slug <input name="slug" value="{{ tag.slug }}" required></label>
+                <div class="action-row">
+                  <button type="submit">Save</button>
+                  <button type="submit" form="delete-tag-{{ tag.id }}" class="danger-button">Delete</button>
+                </div>
+              </form>
+              <form id="delete-tag-{{ tag.id }}" method="post" action="/admin/tags/{{ tag.id }}/delete"></form>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    {% if section == "activity" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Activity</h1>
+          <p class="muted">Recent solving progress, attempts, and uploaded work.</p>
+        </div>
+      </section>
+      <section class="admin-grid">
+        <div class="panel">
+          <h2>Progress</h2>
+          <div class="list compact">
+            {% for progress in progress_rows %}
+              <div class="row"><span><strong>{{ progress.user.display_name }}</strong><small>{{ progress.puzzle.title }}</small></span><small>{{ progress.updated_at }}</small></div>
+            {% else %}
+              <p class="muted">No progress yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Attempts</h2>
+          <div class="list compact">
+            {% for attempt in attempts %}
+              <div class="row"><span><strong>{{ "Correct" if attempt.is_correct else "Not yet" }}</strong><small>{{ attempt.puzzle.title }}</small></span><small>{{ attempt.created_at }}</small></div>
+            {% else %}
+              <p class="muted">No attempts yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Photos</h2>
+          <div class="list compact">
+            {% for photo in photos %}
+              <div class="row"><span><strong>{{ photo.original_filename }}</strong><small>{{ photo.puzzle.title }}</small></span><small>{{ photo.created_at }}</small></div>
+            {% else %}
+              <p class="muted">No photos yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    {% endif %}
+
+    {% if section == "publishing" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Publishing</h1>
+          <p class="muted">Future home for Daily Stripe issue bundles and print-run assembly.</p>
+        </div>
+      </section>
+      <div class="panel narrow-panel">
+        <h2>Planned Flow</h2>
+        <ol>
+          <li>Select modules and puzzles for a Daily Stripe issue.</li>
+          <li>Order the print sections.</li>
+          <li>Send the issue bundle to the print pipeline.</li>
+        </ol>
+        <p class="muted">This is a placeholder until we connect Puzzary to the Daily Stripe print job format.</p>
       </div>
-    {% else %}
-      <p class="muted">No puzzles yet.</p>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="admin-grid">
-  <div class="panel">
-    <h2>Dictionaries</h2>
-    <form method="post" action="/admin/dictionaries">
-      <label>Name <input name="name" required></label>
-      <label>Slug <input name="slug" placeholder="daily_stripe"></label>
-      <label>Description <textarea name="description" rows="2"></textarea></label>
-      <label>Words <textarea name="words" rows="5" placeholder="MERIDIAN&#10;PUZZLE&#10;ZEBRA"></textarea></label>
-      <button type="submit">Add Dictionary</button>
-    </form>
-    <div class="admin-list compact-admin">
-      {% for dictionary in dictionaries %}
-        <form class="edit-card" method="post" action="/admin/dictionaries/{{ dictionary.id }}">
-          <label>Name <input name="name" value="{{ dictionary.name }}" required></label>
-          <label>Slug <input name="slug" value="{{ dictionary.slug }}" required></label>
-          <label>Description <textarea name="description" rows="2">{{ dictionary.description }}</textarea></label>
-          <label>Words <textarea name="words" rows="5">{{ dictionary.words | join('\n') }}</textarea></label>
-          <div class="action-row">
-            <button type="submit">Save</button>
-            <button type="submit" form="delete-dictionary-{{ dictionary.id }}" class="danger-button">Delete</button>
-          </div>
-        </form>
-        <form id="delete-dictionary-{{ dictionary.id }}" method="post" action="/admin/dictionaries/{{ dictionary.id }}/delete"></form>
-      {% endfor %}
-    </div>
-  </div>
-
-  <div class="panel">
-    <h2>Categories</h2>
-    <form method="post" action="/admin/categories">
-      <label>Name <input name="name" required></label>
-      <label>Slug <input name="slug"></label>
-      <label>Description <textarea name="description" rows="2"></textarea></label>
-      <button type="submit">Add Category</button>
-    </form>
-    <div class="admin-list compact-admin">
-      {% for category in categories %}
-        <form class="edit-card" method="post" action="/admin/categories/{{ category.id }}">
-          <label>Name <input name="name" value="{{ category.name }}" required></label>
-          <label>Slug <input name="slug" value="{{ category.slug }}" required></label>
-          <label>Description <textarea name="description" rows="2">{{ category.description }}</textarea></label>
-          <div class="action-row">
-            <button type="submit">Save</button>
-            <button type="submit" form="delete-category-{{ category.id }}" class="danger-button">Delete</button>
-          </div>
-        </form>
-        <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
-      {% endfor %}
-    </div>
-  </div>
-
-  <div class="panel">
-    <h2>Tags</h2>
-    <form method="post" action="/admin/tags">
-      <label>Name <input name="name" required></label>
-      <label>Slug <input name="slug"></label>
-      <button type="submit">Add Tag</button>
-    </form>
-    <div class="admin-list compact-admin">
-      {% for tag in tags %}
-        <form class="edit-card" method="post" action="/admin/tags/{{ tag.id }}">
-          <label>Name <input name="name" value="{{ tag.name }}" required></label>
-          <label>Slug <input name="slug" value="{{ tag.slug }}" required></label>
-          <div class="action-row">
-            <button type="submit">Save</button>
-            <button type="submit" form="delete-tag-{{ tag.id }}" class="danger-button">Delete</button>
-          </div>
-        </form>
-        <form id="delete-tag-{{ tag.id }}" method="post" action="/admin/tags/{{ tag.id }}/delete"></form>
-      {% endfor %}
-    </div>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

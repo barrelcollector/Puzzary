@@ -38,8 +38,13 @@ def ensure_schema() -> None:
         return
 
     puzzle_columns = {column["name"] for column in inspector.get_columns("puzzles")}
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
     with engine.begin() as connection:
         if "archived_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
         if "category_id" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN category_id INTEGER"))
+        if "content_source_id" not in puzzle_columns:
+            connection.execute(text("ALTER TABLE puzzles ADD COLUMN content_source_id INTEGER"))
+        if "is_admin" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))

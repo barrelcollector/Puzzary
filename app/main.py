@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.models import (
+    ContentSource,
     Puzzle,
     PuzzleAttempt,
     PuzzleCategory,
@@ -57,7 +58,8 @@ def startup() -> None:
     init_db()
     ensure_schema()
     with SessionLocal() as db:
-        seed_default_dictionaries(db)
+        ensure_admin_user(db)
+        seed_content_sources(db)
 
 
 def puzzle_url(puzzle_id: str) -> str:
@@ -104,32 +106,84 @@ def parse_words(value: str) -> list[str]:
     return words
 
 
-def seed_default_dictionaries(db: Session) -> None:
-    existing = set(db.scalars(select(PuzzleDictionary.slug)).all())
+def source_words(source: ContentSource | None) -> list[str]:
+    if source is None:
+        return []
+    words = source.payload.get("words", [])
+    if not isinstance(words, list):
+        return []
+    return [str(word).upper() for word in words if str(word).strip()]
+
+
+def ensure_admin_user(db: Session) -> None:
+    has_admin = db.scalar(select(User).where(User.is_admin == True))  # noqa: E712
+    if has_admin is not None:
+        return
+    first_user = db.scalar(select(User).order_by(User.created_at, User.id))
+    if first_user is not None:
+        first_user.is_admin = True
+        db.commit()
+
+
+def seed_content_sources(db: Session) -> None:
+    existing = set(db.scalars(select(ContentSource.slug)).all())
+    dictionaries = db.scalars(select(PuzzleDictionary).order_by(PuzzleDictionary.name)).all()
+    for dictionary in dictionaries:
+        if dictionary.slug in existing:
+            continue
+        db.add(
+            ContentSource(
+                name=dictionary.name,
+                slug=dictionary.slug,
+                source_type="word_bank",
+                description=dictionary.description,
+                payload={"words": dictionary.words},
+            )
+        )
+        existing.add(dictionary.slug)
+
     for slug, words in THEMES.items():
         if slug in existing:
             continue
         db.add(
-            PuzzleDictionary(
+            ContentSource(
                 name=slug.replace("_", " ").title(),
                 slug=slug,
+                source_type="word_bank",
                 description="Seeded from the original Puzzary word list.",
-                words=words,
+                payload={"words": words},
             )
         )
+        existing.add(slug)
     db.commit()
 
 
-def dictionary_options(db: Session) -> list[PuzzleDictionary]:
-    return db.scalars(select(PuzzleDictionary).order_by(PuzzleDictionary.name)).all()
+def word_bank_options(db: Session, include_archived: bool = False) -> list[ContentSource]:
+    statement = select(ContentSource).where(ContentSource.source_type == "word_bank")
+    if not include_archived:
+        statement = statement.where(ContentSource.archived_at.is_(None))
+    return db.scalars(statement.order_by(ContentSource.name)).all()
 
 
-def words_for_dictionary(db: Session, slug: str, difficulty: str) -> list[str] | None:
-    dictionary = db.scalar(select(PuzzleDictionary).where(PuzzleDictionary.slug == slug))
-    if dictionary is None:
+def source_for_slug(db: Session, slug: str) -> ContentSource | None:
+    return db.scalar(select(ContentSource).where(ContentSource.slug == slug, ContentSource.archived_at.is_(None)))
+
+
+def words_for_source(source: ContentSource | None, difficulty: str) -> list[str] | None:
+    words = source_words(source)
+    if not words:
         return None
     count = {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5)
-    return dictionary.words[:count]
+    return words[:count]
+
+
+def require_admin_user(request: Request, db: Session) -> User | RedirectResponse:
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
 def current_user(request: Request, db: Session) -> User | None:
@@ -224,7 +278,7 @@ def library(request: Request, db: Session = Depends(get_db)):
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(50)).all()
     puzzles = [puzzle for puzzle in puzzles if puzzle.archived_at is None]
     users = db.scalars(select(User).order_by(User.display_name)).all()
-    dictionaries = dictionary_options(db)
+    word_banks = word_bank_options(db)
     progress_rows = db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id)).all()
     progress_by_puzzle = {
         puzzle.id: {"found": 0, "total": len(puzzle.solution_payload.get("words", []))}
@@ -242,7 +296,7 @@ def library(request: Request, db: Session = Depends(get_db)):
             "users": users,
             "current_user": user,
             "progress_by_puzzle": progress_by_puzzle,
-            "dictionaries": dictionaries,
+            "word_banks": word_banks,
         },
     )
 
@@ -268,62 +322,112 @@ def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)
     return RedirectResponse(url="/library", status_code=303)
 
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
-    if isinstance(user, RedirectResponse):
-        return user
+def admin_context(request: Request, db: Session, user: User, section: str) -> dict:
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
-    dictionaries = db.scalars(select(PuzzleDictionary).order_by(PuzzleDictionary.name)).all()
+    sources = db.scalars(select(ContentSource).order_by(ContentSource.source_type, ContentSource.name)).all()
+    word_banks = [source for source in sources if source.source_type == "word_bank" and source.archived_at is None]
     categories = db.scalars(select(PuzzleCategory).order_by(PuzzleCategory.name)).all()
     tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.name)).all()
+    attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
+    progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
+    photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
+    return {
+        "request": request,
+        "current_user": user,
+        "section": section,
+        "puzzles": puzzles,
+        "live_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is None],
+        "archived_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is not None],
+        "sources": sources,
+        "word_banks": word_banks,
+        "categories": categories,
+        "tags": tags,
+        "attempts": attempts,
+        "progress_rows": progress_rows,
+        "photos": photos,
+    }
+
+
+def render_admin(request: Request, db: Session, section: str):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
     return templates.TemplateResponse(
         "admin.html",
-        {
-            "request": request,
-            "current_user": user,
-            "puzzles": puzzles,
-            "dictionaries": dictionaries,
-            "categories": categories,
-            "tags": tags,
-        },
+        admin_context(request, db, user, section),
     )
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "dashboard")
+
+
+@app.get("/admin/puzzles", response_class=HTMLResponse)
+def admin_puzzles_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "puzzles")
+
+
+@app.get("/admin/generate", response_class=HTMLResponse)
+def admin_generate_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "generate")
+
+
+@app.get("/admin/sources", response_class=HTMLResponse)
+def admin_sources_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "sources")
+
+
+@app.get("/admin/taxonomy", response_class=HTMLResponse)
+def admin_taxonomy_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "taxonomy")
+
+
+@app.get("/admin/activity", response_class=HTMLResponse)
+def admin_activity_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "activity")
+
+
+@app.get("/admin/publishing", response_class=HTMLResponse)
+def admin_publishing_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "publishing")
 
 
 @app.post("/admin/puzzles/{puzzle_id}/archive")
 def admin_archive_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is not None:
         puzzle.archived_at = datetime.now(timezone.utc)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/puzzles", status_code=303)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/unarchive")
 def admin_unarchive_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is not None:
         puzzle.archived_at = None
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/puzzles", status_code=303)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/delete")
 def admin_delete_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is not None:
+        puzzle.tags = []
         db.delete(puzzle)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/puzzles", status_code=303)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/metadata")
@@ -334,7 +438,7 @@ def admin_update_puzzle_metadata(
     tag_ids: list[int] = Form(default=[]),
     db: Session = Depends(get_db),
 ):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     puzzle = db.get(Puzzle, puzzle_id)
@@ -342,7 +446,127 @@ def admin_update_puzzle_metadata(
         puzzle.category_id = category_id or None
         puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/puzzles", status_code=303)
+
+
+@app.post("/admin/generate")
+def admin_generate_puzzle(
+    request: Request,
+    puzzle_type: str = Form("word_search"),
+    source_id: int = Form(...),
+    difficulty: str = Form("easy"),
+    category_id: int = Form(0),
+    tag_ids: list[int] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(ContentSource, source_id)
+    if source is None or source.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Content source not found")
+    puzzle = create_puzzle(PuzzleGenerateRequest(puzzle_type=puzzle_type, theme=source.slug, difficulty=difficulty), db)
+    saved_puzzle = db.get(Puzzle, puzzle.id)
+    if saved_puzzle is not None:
+        saved_puzzle.category_id = category_id or source.category_id
+        saved_puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else list(source.tags)
+        db.commit()
+    return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
+
+
+@app.post("/admin/sources")
+def admin_create_source(
+    request: Request,
+    name: str = Form(...),
+    slug: str = Form(""),
+    source_type: str = Form("word_bank"),
+    category_id: int = Form(0),
+    tag_ids: list[int] = Form(default=[]),
+    description: str = Form(""),
+    words: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = ContentSource(
+        name=name.strip(),
+        slug=unique_slug(db, ContentSource, slug or name),
+        source_type=source_type,
+        category_id=category_id or None,
+        description=description.strip(),
+        payload={"words": parse_words(words)} if source_type == "word_bank" else {},
+    )
+    source.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+    db.add(source)
+    db.commit()
+    return RedirectResponse(url="/admin/sources", status_code=303)
+
+
+@app.post("/admin/sources/{source_id}")
+def admin_update_source(
+    source_id: int,
+    request: Request,
+    name: str = Form(...),
+    slug: str = Form(""),
+    source_type: str = Form("word_bank"),
+    category_id: int = Form(0),
+    tag_ids: list[int] = Form(default=[]),
+    description: str = Form(""),
+    words: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(ContentSource, source_id)
+    if source is not None:
+        source.name = name.strip()
+        source.slug = unique_slug(db, ContentSource, slug or name, source.id)
+        source.source_type = source_type
+        source.category_id = category_id or None
+        source.description = description.strip()
+        source.payload = {"words": parse_words(words)} if source_type == "word_bank" else source.payload
+        source.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+        db.commit()
+    return RedirectResponse(url="/admin/sources", status_code=303)
+
+
+@app.post("/admin/sources/{source_id}/archive")
+def admin_archive_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(ContentSource, source_id)
+    if source is not None:
+        source.archived_at = datetime.now(timezone.utc)
+        db.commit()
+    return RedirectResponse(url="/admin/sources", status_code=303)
+
+
+@app.post("/admin/sources/{source_id}/unarchive")
+def admin_unarchive_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(ContentSource, source_id)
+    if source is not None:
+        source.archived_at = None
+        db.commit()
+    return RedirectResponse(url="/admin/sources", status_code=303)
+
+
+@app.post("/admin/sources/{source_id}/delete")
+def admin_delete_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(ContentSource, source_id)
+    if source is not None:
+        source.tags = []
+        db.delete(source)
+        db.commit()
+    return RedirectResponse(url="/admin/sources", status_code=303)
 
 
 @app.post("/admin/dictionaries")
@@ -354,7 +578,7 @@ def admin_create_dictionary(
     words: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     dictionary = PuzzleDictionary(
@@ -365,7 +589,7 @@ def admin_create_dictionary(
     )
     db.add(dictionary)
     db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/sources", status_code=303)
 
 
 @app.post("/admin/dictionaries/{dictionary_id}")
@@ -378,7 +602,7 @@ def admin_update_dictionary(
     words: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     dictionary = db.get(PuzzleDictionary, dictionary_id)
@@ -388,19 +612,19 @@ def admin_update_dictionary(
         dictionary.description = description.strip()
         dictionary.words = parse_words(words)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/sources", status_code=303)
 
 
 @app.post("/admin/dictionaries/{dictionary_id}/delete")
 def admin_delete_dictionary(dictionary_id: int, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     dictionary = db.get(PuzzleDictionary, dictionary_id)
     if dictionary is not None:
         db.delete(dictionary)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/sources", status_code=303)
 
 
 @app.post("/admin/categories")
@@ -416,7 +640,7 @@ def admin_create_category(
         return user
     db.add(PuzzleCategory(name=name.strip(), slug=unique_slug(db, PuzzleCategory, slug or name), description=description.strip()))
     db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/taxonomy", status_code=303)
 
 
 @app.post("/admin/categories/{category_id}")
@@ -428,7 +652,7 @@ def admin_update_category(
     description: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     category = db.get(PuzzleCategory, category_id)
@@ -437,31 +661,33 @@ def admin_update_category(
         category.slug = unique_slug(db, PuzzleCategory, slug or name, category.id)
         category.description = description.strip()
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/taxonomy", status_code=303)
 
 
 @app.post("/admin/categories/{category_id}/delete")
 def admin_delete_category(category_id: int, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     category = db.get(PuzzleCategory, category_id)
     if category is not None:
         for puzzle in category.puzzles:
             puzzle.category_id = None
+        for source in category.content_sources:
+            source.category_id = None
         db.delete(category)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/taxonomy", status_code=303)
 
 
 @app.post("/admin/tags")
 def admin_create_tag(request: Request, name: str = Form(...), slug: str = Form(""), db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     db.add(PuzzleTag(name=name.strip(), slug=unique_slug(db, PuzzleTag, slug or name)))
     db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/taxonomy", status_code=303)
 
 
 @app.post("/admin/tags/{tag_id}")
@@ -472,7 +698,7 @@ def admin_update_tag(
     slug: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     tag = db.get(PuzzleTag, tag_id)
@@ -480,19 +706,21 @@ def admin_update_tag(
         tag.name = name.strip()
         tag.slug = unique_slug(db, PuzzleTag, slug or name, tag.id)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/taxonomy", status_code=303)
 
 
 @app.post("/admin/tags/{tag_id}/delete")
 def admin_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     tag = db.get(PuzzleTag, tag_id)
     if tag is not None:
+        tag.puzzles = []
+        tag.content_sources = []
         db.delete(tag)
         db.commit()
-    return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/taxonomy", status_code=303)
 
 
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
@@ -571,13 +799,15 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     if payload.puzzle_type != "word_search":
         raise HTTPException(status_code=400, detail="Only word_search is implemented in the MVP")
 
-    generated = generate_word_search(payload.theme, payload.difficulty, words_for_dictionary(db, payload.theme, payload.difficulty))
+    content_source = source_for_slug(db, payload.theme)
+    generated = generate_word_search(payload.theme, payload.difficulty, words_for_source(content_source, payload.difficulty))
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
         title=generated.title,
         theme=payload.theme,
         difficulty=payload.difficulty,
+        content_source_id=content_source.id if content_source is not None else None,
         prompt=generated.prompt,
         print_payload=generated.print_payload,
         play_payload=generated.play_payload,

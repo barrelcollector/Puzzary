@@ -73,6 +73,20 @@ body {
   font-weight: 750;
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--accent);
+  color: white;
+  text-decoration: none;
+  font-weight: 750;
+}
+
 .tagline,
 .muted,
 small {
@@ -112,6 +126,10 @@ h2 {
   align-items: start;
 }
 
+.admin-grid.two {
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+}
+
 .puzzle-layout {
   grid-template-columns: minmax(0, 1fr) 340px;
 }
@@ -121,6 +139,10 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 18px;
+}
+
+.narrow-panel {
+  max-width: 560px;
 }
 
 label {
@@ -194,6 +216,69 @@ button {
 
 .admin-section {
   margin-bottom: 28px;
+}
+
+.admin-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.admin-nav {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.admin-nav a {
+  color: var(--ink);
+  text-decoration: none;
+  padding: 9px 10px;
+  border-radius: 6px;
+  font-weight: 750;
+}
+
+.admin-nav a.active,
+.admin-nav a:hover {
+  background: #e8f1ed;
+  color: var(--accent);
+}
+
+.admin-main {
+  min-width: 0;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.metric-card strong {
+  font-size: 28px;
+}
+
+.metric-card span {
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .admin-list {
@@ -364,8 +449,15 @@ summary {
   .puzzle-layout,
   .history,
   .admin-grid,
+  .admin-grid.two,
+  .admin-shell,
+  .metric-grid,
   .inline-form {
     grid-template-columns: 1fr;
+  }
+
+  .admin-nav {
+    position: static;
   }
 
   .topbar {
