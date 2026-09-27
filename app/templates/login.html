@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Log In - Puzzary{% endblock %}
+{% block content %}
+<section class="login-wrap">
+  <div class="panel login-panel">
+    <h1>Who is solving?</h1>
+    <p class="muted">Pick a household profile or create a new one.</p>
+
+    {% if users %}
+      <form method="post" action="/login">
+        <label>
+          Profile
+          <select name="user_id">
+            {% for user in users %}
+              <option value="{{ user.id }}">{{ user.display_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Continue</button>
+      </form>
+    {% endif %}
+
+    <form method="post" action="/login" class="new-profile">
+      <label>
+        New profile
+        <input name="display_name" autocomplete="off" placeholder="Name">
+      </label>
+      <button type="submit">Create Profile</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

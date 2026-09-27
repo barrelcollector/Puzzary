@@ -9,6 +9,7 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgresql+psycopg://puzzary:puzzary@db:5432/puzzary}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8790}"
       UPLOAD_DIR: "/data/uploads"
+      SESSION_SECRET: "${SESSION_SECRET:-change-me-local-session-secret}"
     volumes:
       - ./data:/data
     depends_on:

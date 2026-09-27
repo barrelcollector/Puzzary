@@ -13,15 +13,25 @@
   <div class="panel">
     <p>{{ puzzle.prompt }}</p>
     {% if puzzle.puzzle_type == "word_search" %}
-      <div class="word-grid" style="--grid-size: {{ puzzle.play_payload.grid | length }}">
+      <div
+        class="word-grid interactive"
+        data-words="{{ puzzle.play_payload.words | join(',') }}"
+        style="--grid-size: {{ puzzle.play_payload.grid | length }}"
+      >
         {% for row in puzzle.play_payload.grid %}
+          {% set y = loop.index0 %}
           {% for letter in row %}
-            <span>{{ letter }}</span>
+            <button type="button" data-x="{{ loop.index0 }}" data-y="{{ y }}" data-letter="{{ letter }}">{{ letter }}</button>
           {% endfor %}
         {% endfor %}
       </div>
       <h2>Words</h2>
-      <p class="word-list">{{ puzzle.play_payload.words | join(" / ") }}</p>
+      <div class="word-list" id="word-list">
+        {% for word in puzzle.play_payload.words %}
+          <span data-word="{{ word }}">{{ word }}</span>
+        {% endfor %}
+      </div>
+      <p class="muted">Drag across a word to mark it found. Found words are submitted automatically in the answer box.</p>
     {% endif %}
   </div>
 
@@ -29,17 +39,8 @@
     <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/attempts">
       <h2>Submit Answer</h2>
       <label>
-        User
-        <select name="user_id">
-          <option value="">Guest</option>
-          {% for user in users %}
-            <option value="{{ user.id }}">{{ user.display_name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>
-        Answer
-        <textarea name="answer" rows="4" placeholder="MERIDIAN, PUZZLE, ZEBRA" required></textarea>
+        Found words
+        <textarea id="answer-box" name="answer" rows="4" placeholder="MERIDIAN, PUZZLE, ZEBRA" required></textarea>
       </label>
       <button type="submit">Check</button>
     </form>
@@ -55,15 +56,6 @@
 
     <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/photos" enctype="multipart/form-data">
       <h2>Upload Work</h2>
-      <label>
-        User
-        <select name="user_id">
-          <option value="">Guest</option>
-          {% for user in users %}
-            <option value="{{ user.id }}">{{ user.display_name }}</option>
-          {% endfor %}
-        </select>
-      </label>
       <label>
         Notes
         <input name="notes" autocomplete="off">
@@ -113,4 +105,5 @@
     {% endif %}
   </div>
 </section>
+<script src="/static/word-search.js"></script>
 {% endblock %}

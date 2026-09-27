@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -20,9 +21,11 @@ from app.schemas import PuzzleAttemptCreate, PuzzleAttemptResponse, PuzzleGenera
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
+SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-local-session-secret")
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Puzzary", version="0.1.0")
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -51,25 +54,87 @@ def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
     )
 
 
+def current_user(request: Request, db: Session) -> User | None:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    return db.get(User, int(user_id))
+
+
+def require_web_user(request: Request, db: Session) -> User | RedirectResponse:
+    user = current_user(request, db)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    return user
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "app": "puzzary"}
 
 
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    users = db.scalars(select(User).order_by(User.display_name)).all()
+    return templates.TemplateResponse("login.html", {"request": request, "users": users})
+
+
+@app.post("/login")
+def login(
+    request: Request,
+    user_id: str = Form(""),
+    display_name: str = Form(""),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    user: User | None = None
+    if user_id:
+        user = db.get(User, int(user_id))
+    elif display_name.strip():
+        result = create_user(UserCreate(display_name=display_name.strip()), db)
+        user = db.get(User, int(result["id"]))
+
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)
+
+    request.session["user_id"] = user.id
+    return RedirectResponse(url="/library", status_code=303)
+
+
+@app.post("/logout")
+def logout(request: Request) -> RedirectResponse:
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(20)).all()
+    return library(request, db)
+
+
+@app.get("/library", response_class=HTMLResponse)
+def library(request: Request, db: Session = Depends(get_db)) -> HTMLResponse | RedirectResponse:
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(50)).all()
     users = db.scalars(select(User).order_by(User.display_name)).all()
-    return templates.TemplateResponse("home.html", {"request": request, "puzzles": puzzles, "users": users})
+    return templates.TemplateResponse(
+        "home.html",
+        {"request": request, "puzzles": puzzles, "users": users, "current_user": user},
+    )
 
 
 @app.post("/web/puzzles/generate")
 def web_generate_puzzle(
+    request: Request,
     puzzle_type: str = Form("word_search"),
     theme: str = Form("daily_stripe"),
     difficulty: str = Form("easy"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
     puzzle = create_puzzle(PuzzleGenerateRequest(puzzle_type=puzzle_type, theme=theme, difficulty=difficulty), db)
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -77,11 +142,14 @@ def web_generate_puzzle(
 @app.post("/web/users")
 def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)) -> RedirectResponse:
     create_user(UserCreate(display_name=display_name), db)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/library", status_code=303)
 
 
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
-def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> HTMLResponse | RedirectResponse:
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -94,30 +162,36 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     ).all()
     return templates.TemplateResponse(
         "puzzle.html",
-        {"request": request, "puzzle": puzzle, "users": users, "attempts": attempts, "photos": photos},
+        {"request": request, "puzzle": puzzle, "users": users, "attempts": attempts, "photos": photos, "current_user": user},
     )
 
 
 @app.post("/web/puzzles/{puzzle_id}/attempts")
 def web_attempt_puzzle(
     puzzle_id: str,
+    request: Request,
     answer: str = Form(...),
-    user_id: str = Form(""),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    submit_attempt(puzzle_id, PuzzleAttemptCreate(answer=answer, user_id=int(user_id) if user_id else None), db)
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    submit_attempt(puzzle_id, PuzzleAttemptCreate(answer=answer, user_id=user.id), db)
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
 
 @app.post("/web/puzzles/{puzzle_id}/photos")
 def web_upload_photo(
     puzzle_id: str,
-    user_id: str = Form(""),
+    request: Request,
     notes: str = Form(""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    save_photo(puzzle_id, file, notes, int(user_id) if user_id else None, db)
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    save_photo(puzzle_id, file, notes, user.id, db)
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
 

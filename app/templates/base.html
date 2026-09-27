@@ -8,8 +8,15 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/">Puzzary</a>
+    <a class="brand" href="/library">Puzzary</a>
     <span class="tagline">A puzzle library for Daily Stripe</span>
+    <span class="topbar-spacer"></span>
+    {% if current_user %}
+      <span class="user-pill">{{ current_user.display_name }}</span>
+      <form method="post" action="/logout" class="logout-form">
+        <button type="submit" class="ghost-button">Log out</button>
+      </form>
+    {% endif %}
   </header>
   <main class="page">
     {% block content %}{% endblock %}

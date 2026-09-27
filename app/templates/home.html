@@ -32,7 +32,7 @@
   </form>
 
   <form class="panel" method="post" action="/web/users">
-    <h1>Add User</h1>
+    <h1>Household Profiles</h1>
     <label>
       Display name
       <input name="display_name" autocomplete="off" required>
@@ -45,7 +45,7 @@
 </section>
 
 <section>
-  <h1>Recent Puzzles</h1>
+  <h1>Puzzle Library</h1>
   {% if puzzles %}
     <div class="list">
       {% for puzzle in puzzles %}
@@ -54,7 +54,10 @@
             <strong>{{ puzzle.title }}</strong>
             <small>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</small>
           </span>
-          <code>{{ puzzle.id }}</code>
+          <span class="row-meta">
+            <small>{{ puzzle.created_at }}</small>
+            <code>{{ puzzle.id }}</code>
+          </span>
         </a>
       {% endfor %}
     </div>

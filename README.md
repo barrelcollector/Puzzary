@@ -10,9 +10,12 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - PostgreSQL database
 - Web portal
 - Household user profiles
+- Household profile login
+- Puzzle library view
 - Word-search puzzle generator
 - Puzzle hints
 - Answer checking
+- Interactive word-search highlighting
 - Photo submission upload endpoint
 - Printable puzzle payload API for Daily Stripe
 
