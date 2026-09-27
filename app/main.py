@@ -178,7 +178,7 @@ def words_for_source(source: ContentSource | None, difficulty: str) -> list[str]
 
 
 def require_admin_user(request: Request, db: Session) -> User | RedirectResponse:
-    user = require_admin_user(request, db)
+    user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     if not user.is_admin:
