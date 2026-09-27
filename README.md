@@ -12,6 +12,8 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Household user profiles
 - Household profile login
 - Puzzle library view
+- Admin panel for archiving, deleting, and organizing puzzles
+- Admin-managed dictionaries, categories, and tags
 - Word-search puzzle generator
 - Puzzle hints
 - Answer checking
@@ -38,6 +40,12 @@ Open:
 
 ```text
 http://localhost:8790
+```
+
+Admin panel:
+
+```text
+http://localhost:8790/admin
 ```
 
 ## API

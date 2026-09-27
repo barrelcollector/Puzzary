@@ -52,11 +52,25 @@ body {
   border-color: var(--line);
 }
 
+.danger-button {
+  width: auto;
+  background: #9d2f2f;
+  border-color: #9d2f2f;
+  color: white;
+}
+
 .brand {
   color: var(--ink);
   text-decoration: none;
   font-size: 24px;
   font-weight: 800;
+}
+
+.nav-link,
+.ghost-link {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 750;
 }
 
 .tagline,
@@ -85,11 +99,17 @@ h2 {
 
 .toolbar,
 .puzzle-layout,
-.history {
+.history,
+.admin-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   margin-bottom: 28px;
+}
+
+.admin-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
 }
 
 .puzzle-layout {
@@ -155,6 +175,97 @@ button {
 .row-meta {
   justify-items: end;
   text-align: right;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.action-row form {
+  margin: 0;
+}
+
+.action-row button {
+  width: auto;
+}
+
+.admin-section {
+  margin-bottom: 28px;
+}
+
+.admin-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-puzzle {
+  display: grid;
+  gap: 14px;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 0;
+  padding: 10px;
+}
+
+legend {
+  padding: 0 5px;
+  font-weight: 750;
+}
+
+.check-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.check-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.check-list input {
+  width: auto;
+}
+
+.status-pill {
+  display: inline-block;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #efeadc;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.compact-admin {
+  margin-top: 14px;
+}
+
+.edit-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
 }
 
 .compact .row {
@@ -251,7 +362,9 @@ summary {
 @media (max-width: 820px) {
   .toolbar,
   .puzzle-layout,
-  .history {
+  .history,
+  .admin-grid,
+  .inline-form {
     grid-template-columns: 1fr;
   }
 

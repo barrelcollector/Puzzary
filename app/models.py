@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+puzzle_tag_links = Table(
+    "puzzle_tag_links",
+    Base.metadata,
+    Column("puzzle_id", ForeignKey("puzzles.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
 
 
 class User(Base):
@@ -29,14 +37,18 @@ class Puzzle(Base):
     title: Mapped[str] = mapped_column(String(160))
     theme: Mapped[str] = mapped_column(String(80), index=True)
     difficulty: Mapped[str] = mapped_column(String(40), index=True)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("puzzle_categories.id"), nullable=True, index=True)
     prompt: Mapped[str] = mapped_column(Text, default="")
     print_payload: Mapped[dict] = mapped_column(JSON)
     play_payload: Mapped[dict] = mapped_column(JSON)
     solution_payload: Mapped[dict] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(80), default="local")
     puzzle_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    category: Mapped[PuzzleCategory | None] = relationship(back_populates="puzzles")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=puzzle_tag_links, back_populates="puzzles")
     hints: Mapped[list[PuzzleHint]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
@@ -98,6 +110,40 @@ class PuzzlePhoto(Base):
 
     puzzle: Mapped[Puzzle] = relationship(back_populates="photos")
     user: Mapped[User | None] = relationship(back_populates="photos")
+
+
+class PuzzleDictionary(Base):
+    __tablename__ = "puzzle_dictionaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    words: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PuzzleCategory(Base):
+    __tablename__ = "puzzle_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzles: Mapped[list[Puzzle]] = relationship(back_populates="category")
+
+
+class PuzzleTag(Base):
+    __tablename__ = "puzzle_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzles: Mapped[list[Puzzle]] = relationship(secondary=puzzle_tag_links, back_populates="tags")
 
 
 class ContentItem(Base):

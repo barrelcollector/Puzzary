@@ -11,13 +11,11 @@
       </select>
     </label>
     <label>
-      Theme
+      Dictionary
       <select name="theme">
-        <option value="daily_stripe">Daily Stripe</option>
-        <option value="home">Home</option>
-        <option value="weather">Weather</option>
-        <option value="space">Space</option>
-        <option value="technology">Technology</option>
+        {% for dictionary in dictionaries %}
+          <option value="{{ dictionary.slug }}">{{ dictionary.name }}</option>
+        {% endfor %}
       </select>
     </label>
     <label>

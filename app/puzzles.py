@@ -30,8 +30,9 @@ def check_word_search_answer(answer: str, solution_payload: dict) -> tuple[bool,
     return expected <= supplied, len(expected), matched
 
 
-def generate_word_search(theme: str, difficulty: str) -> GeneratedPuzzle:
-    words = [word.upper() for word in words_for_theme(theme, difficulty)]
+def generate_word_search(theme: str, difficulty: str, words_override: list[str] | None = None) -> GeneratedPuzzle:
+    source_words = words_override if words_override is not None else words_for_theme(theme, difficulty)
+    words = [word.upper() for word in source_words]
     size = {"easy": 10, "medium": 12, "hard": 14}.get(difficulty, 10)
     seed = f"{theme}:{difficulty}:{','.join(words)}"
     rng = random.Random(seed)
