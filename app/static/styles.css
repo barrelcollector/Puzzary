@@ -516,12 +516,14 @@ legend {
   background: white;
   border: 0;
   box-shadow: inset 0 0 0 1px var(--ink);
+  margin: 0;
 }
 
 .crossword-spacer {
   display: block;
   aspect-ratio: 1;
   min-width: 0;
+  margin: 0;
 }
 
 .crossword-cell span {
