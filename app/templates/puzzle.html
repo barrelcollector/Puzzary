@@ -46,6 +46,7 @@
         data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
         data-answers='{{ progress_answers | tojson }}'
         data-solution='{{ puzzle.solution_payload.grid | tojson }}'
+        data-entries='{{ puzzle.solution_payload.entries | tojson }}'
       >
         <div
           class="crossword-grid"
@@ -198,5 +199,5 @@
   </div>
 </section>
 <script src="/static/word-search.js?v=5"></script>
-<script src="/static/crossword.js?v=1"></script>
+<script src="/static/crossword.js?v=2"></script>
 {% endblock %}
