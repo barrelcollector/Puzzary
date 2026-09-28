@@ -148,8 +148,41 @@ def enrich() -> None:
             if updated % 25 == 0:
                 db.commit()
             time.sleep(0.04)
+        removed = remove_generic_duplicates(db)
         db.commit()
-    print(f"Starter clue enrichment complete: {updated} updated, {skipped} skipped.")
+    print(f"Starter clue enrichment complete: {updated} updated, {skipped} skipped, {removed} generic duplicates removed.")
+
+
+def is_generic_definition(definition: DictionaryDefinition) -> bool:
+    properties = definition.properties or {}
+    clue = str(properties.get("clue", ""))
+    return (
+        " term starting with " in clue
+        or clue.endswith("letters).")
+        or str(definition.definition).startswith("A term connected with ")
+    )
+
+
+def remove_generic_duplicates(db) -> int:
+    removed = 0
+    definitions = db.scalars(select(DictionaryDefinition).where(DictionaryDefinition.source == "puzzary_starter_library")).all()
+    for definition in definitions:
+        if not is_generic_definition(definition):
+            continue
+        bank_name = (definition.properties or {}).get("starter_bank")
+        if not bank_name:
+            continue
+        has_better_definition = any(
+            other.id != definition.id
+            and other.source == "puzzary_starter_library"
+            and (other.properties or {}).get("starter_bank") == bank_name
+            and not is_generic_definition(other)
+            for other in definition.word.definitions
+        )
+        if has_better_definition:
+            db.delete(definition)
+            removed += 1
+    return removed
 
 
 if __name__ == "__main__":

@@ -260,6 +260,18 @@ def seed():
                 first_definition = None
                 for definition_position, definition_seed in enumerate(seeds, start=1):
                     definition = existing_definitions.get((definition_seed.part_of_speech, definition_seed.definition))
+                    if definition is None and normalized not in SPECIFIC_DEFINITIONS and normalized not in MULTIPLE_DEFINITIONS:
+                        definition = next(
+                            (
+                                item
+                                for item in word.definitions
+                                if item.source == "puzzary_starter_library"
+                                and (item.properties or {}).get("starter_bank") == bank_name
+                                and not str((item.properties or {}).get("clue", "")).endswith("letters).")
+                                and " term starting with " not in str((item.properties or {}).get("clue", ""))
+                            ),
+                            None,
+                        )
                     if definition is None:
                         definition = next(
                             (
