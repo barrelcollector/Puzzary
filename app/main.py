@@ -209,6 +209,15 @@ def tags_for_ids(db: Session, tag_ids: list[int]) -> list[PuzzleTag]:
     return db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all()
 
 
+def blocked_words_for_generation(db: Session, excluded_tag_ids: set[int]) -> list[str]:
+    blocked = []
+    for word in db.scalars(select(DictionaryWord)).all():
+        has_excluded_tag = excluded_tag_ids and any(tag.id in excluded_tag_ids for tag in word.tags)
+        if word.banned_at is not None or has_excluded_tag:
+            blocked.append(word.word)
+    return blocked
+
+
 def require_admin_user(request: Request, db: Session) -> User | RedirectResponse:
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
@@ -1020,6 +1029,11 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     source_data = puzzle_type.source_builder(word_bank, payload.difficulty, excluded_tag_ids)
     if word_bank is not None and source_data is None:
         raise HTTPException(status_code=400, detail="No usable words remain after archive, ban, and tag exclusions")
+    if payload.puzzle_type == "word_search":
+        source_data = {
+            "words": source_data,
+            "blocked_words": blocked_words_for_generation(db, excluded_tag_ids),
+        }
     generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data)
     generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
     generated.metadata["excluded_tag_slugs"] = [tag.slug for tag in excluded_tags]

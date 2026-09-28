@@ -8,6 +8,10 @@ from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, PuzzleType, normalize_answer, register_puzzle_type
 
 
+def normalize_word(value: str) -> str:
+    return "".join(ch for ch in str(value).upper() if ch.isalnum())
+
+
 def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
     if getattr(word, "archived_at", None) is not None or getattr(word, "banned_at", None) is not None:
         return False
@@ -55,9 +59,59 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return len(words), expected_count
 
 
-def generate(theme: str, difficulty: str, source_data: list[str] | None = None) -> GeneratedPuzzle:
-    source_words = source_data if source_data is not None else words_for_theme(theme, difficulty)
-    words = [word.upper() for word in source_words]
+def contains_blocked_word(grid: list[list[str]], blocked_words: set[str]) -> bool:
+    if not blocked_words:
+        return False
+    size = len(grid)
+    directions = [(1, 0), (0, 1), (1, 1), (-1, 1)]
+    shortest = min(len(word) for word in blocked_words)
+    for y in range(size):
+        for x in range(size):
+            for dx, dy in directions:
+                px, py = x, y
+                line = []
+                while 0 <= px < size and 0 <= py < size:
+                    line.append(grid[py][px])
+                    px += dx
+                    py += dy
+                if len(line) < shortest:
+                    continue
+                text = "".join(line)
+                reversed_text = text[::-1]
+                if any(word in text or word in reversed_text for word in blocked_words):
+                    return True
+    return False
+
+
+def fill_grid(base_grid: list[list[str]], rng: random.Random, blocked_words: set[str]) -> list[list[str]]:
+    for _ in range(250):
+        grid = [row[:] for row in base_grid]
+        for y, row in enumerate(grid):
+            for x, value in enumerate(row):
+                if not value:
+                    grid[y][x] = rng.choice(string.ascii_uppercase)
+        if not contains_blocked_word(grid, blocked_words):
+            return grid
+    raise ValueError("Unable to fill word search without forming a blocked word.")
+
+
+def generate(theme: str, difficulty: str, source_data: list[str] | dict | None = None) -> GeneratedPuzzle:
+    blocked_source = []
+    if isinstance(source_data, dict):
+        raw_words = source_data.get("words")
+        source_words = raw_words if raw_words is not None else words_for_theme(theme, difficulty)
+        blocked_source = source_data.get("blocked_words", [])
+    else:
+        source_words = source_data if source_data is not None else words_for_theme(theme, difficulty)
+    blocked_words = {normalize_word(word) for word in blocked_source if len(normalize_word(word)) >= 3}
+    words = [normalize_word(word) for word in source_words]
+    words = [
+        word
+        for word in words
+        if word and not any(blocked in word or blocked in word[::-1] for blocked in blocked_words)
+    ]
+    if not words:
+        raise ValueError("Word search generation needs at least one allowed word.")
     size = {"easy": 10, "medium": 12, "hard": 14}.get(difficulty, 10)
     seed = f"{theme}:{difficulty}:{','.join(words)}"
     rng = random.Random(seed)
@@ -85,10 +139,7 @@ def generate(theme: str, difficulty: str, source_data: list[str] | None = None) 
         if not placed:
             raise ValueError(f"Unable to place word: {word}")
 
-    for y in range(size):
-        for x in range(size):
-            if not grid[y][x]:
-                grid[y][x] = rng.choice(string.ascii_uppercase)
+    grid = fill_grid(grid, rng, blocked_words)
 
     prompt = "Find all listed words."
     print_payload = {
@@ -111,7 +162,11 @@ def generate(theme: str, difficulty: str, source_data: list[str] | None = None) 
             "Words may go across, down, or diagonally.",
             f"The words are: {', '.join(words)}.",
         ],
-        metadata={"generator": "local.word_search.v1", "grid_size": size},
+        metadata={
+            "generator": "local.word_search.v1",
+            "grid_size": size,
+            "blocked_word_count": len(blocked_words),
+        },
     )
 
 
