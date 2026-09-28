@@ -90,6 +90,14 @@ Puzzary is intentionally separate from Home Assistant and Daily Stripe:
 - Daily Stripe renders and prints issues.
 - Puzzary generates puzzle content, stores answers, checks attempts, and serves QR pages.
 
+## Puzzle Types
+
+Puzzle types are registered modules under `app/puzzle_types`.
+
+Each type owns its generator, word-bank adapter, answer checker, and progress logic. Browser UI lives in `app/templates/puzzle_types/{slug}.html`, with optional admin solution display in `app/templates/puzzle_solutions/{slug}.html`.
+
+To add a type, create a module that calls `register_puzzle_type(...)`, then import it from `load_builtin_puzzle_types()` in `app/puzzles.py`.
+
 ## AI Assistance Disclosure
 
 This project was initially scaffolded with AI assistance.

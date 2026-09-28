@@ -1,0 +1,5 @@
+<div class="solution-list">
+  {% for placement in puzzle.solution_payload.placements %}
+    <div><strong>{{ placement.word }}</strong><small>{{ placement.start | join(", ") }} / {{ placement.direction | join(", ") }}</small></div>
+  {% endfor %}
+</div>

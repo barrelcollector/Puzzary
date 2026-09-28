@@ -1,0 +1,51 @@
+<p>{{ puzzle.prompt }}</p>
+<div
+  class="crossword-play"
+  data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
+  data-answers='{{ progress_answers | tojson }}'
+  data-solution='{{ puzzle.solution_payload.grid | tojson }}'
+  data-entries='{{ puzzle.solution_payload.entries | tojson }}'
+>
+  <div
+    class="crossword-grid"
+    style="--grid-size: {{ puzzle.play_payload.grid[0] | length if puzzle.play_payload.grid else 1 }}"
+  >
+    {% for row in puzzle.play_payload.grid %}
+      {% set y = loop.index0 %}
+      {% for cell in row %}
+        {% set x = loop.index0 %}
+        {% if cell.letter %}
+          <label class="crossword-cell" data-x="{{ x }}" data-y="{{ y }}">
+            {% if cell.number %}<span>{{ cell.number }}</span>{% endif %}
+            <input aria-label="Cell {{ x + 1 }}, {{ y + 1 }}" maxlength="1" autocomplete="off" inputmode="text" data-key="{{ x }},{{ y }}" value="{{ progress_answers[x ~ ',' ~ y] | default('') }}">
+          </label>
+        {% else %}
+          <span class="crossword-cell black"></span>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <p class="muted" id="crossword-status">Fill the grid from the clues.</p>
+  <div class="action-row">
+    <button type="button" class="ghost-button" id="crossword-check">Check</button>
+    <button type="button" class="ghost-button" id="crossword-clear">Clear Grid</button>
+  </div>
+</div>
+<section class="clue-board">
+  <div>
+    <h2>Across</h2>
+    <ol class="clue-list">
+      {% for clue in puzzle.play_payload.clues if clue.direction == "across" %}
+        <li value="{{ clue.number }}"><span>{{ clue.clue }}</span><small>{{ clue.length }} letters</small></li>
+      {% endfor %}
+    </ol>
+  </div>
+  <div>
+    <h2>Down</h2>
+    <ol class="clue-list">
+      {% for clue in puzzle.play_payload.clues if clue.direction == "down" %}
+        <li value="{{ clue.number }}"><span>{{ clue.clue }}</span><small>{{ clue.length }} letters</small></li>
+      {% endfor %}
+    </ol>
+  </div>
+</section>

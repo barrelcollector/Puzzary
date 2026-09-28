@@ -11,91 +11,15 @@
 
 <section class="puzzle-layout">
   <div class="panel">
-    {% if puzzle.puzzle_type == "word_search" %}
-      <p>Find all listed words.</p>
-    {% else %}
+    {% set puzzle_template = "puzzle_types/" ~ puzzle.puzzle_type ~ ".html" %}
+    {% include puzzle_template ignore missing %}
+    {% if not playable_puzzle_type %}
       <p>{{ puzzle.prompt }}</p>
-    {% endif %}
-    {% if puzzle.puzzle_type == "word_search" %}
-      <div
-        class="word-grid interactive"
-        data-words="{{ puzzle.play_payload.words | join(',') }}"
-        data-found-words="{{ progress_found_words | default([]) | join(',') }}"
-        data-placements='{{ puzzle.solution_payload.placements | tojson }}'
-        data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
-        style="--grid-size: {{ puzzle.play_payload.grid | length }}"
-      >
-        {% for row in puzzle.play_payload.grid %}
-          {% set y = loop.index0 %}
-          {% for letter in row %}
-            <button type="button" data-x="{{ loop.index0 }}" data-y="{{ y }}" data-letter="{{ letter }}">{{ letter }}</button>
-          {% endfor %}
-        {% endfor %}
-      </div>
-      <h2>Words</h2>
-      <div class="word-list" id="word-list">
-        {% for word in puzzle.play_payload.words %}
-          <span data-word="{{ word }}">{{ word }}</span>
-        {% endfor %}
-      </div>
-      <p class="muted" id="word-search-status">Drag across a word to mark it found.</p>
-    {% endif %}
-    {% if puzzle.puzzle_type == "crossword" %}
-      <div
-        class="crossword-play"
-        data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
-        data-answers='{{ progress_answers | tojson }}'
-        data-solution='{{ puzzle.solution_payload.grid | tojson }}'
-        data-entries='{{ puzzle.solution_payload.entries | tojson }}'
-      >
-        <div
-          class="crossword-grid"
-          style="--grid-size: {{ puzzle.play_payload.grid[0] | length if puzzle.play_payload.grid else 1 }}"
-        >
-          {% for row in puzzle.play_payload.grid %}
-            {% set y = loop.index0 %}
-            {% for cell in row %}
-              {% set x = loop.index0 %}
-              {% if cell.letter %}
-                <label class="crossword-cell" data-x="{{ x }}" data-y="{{ y }}">
-                  {% if cell.number %}<span>{{ cell.number }}</span>{% endif %}
-                  <input aria-label="Cell {{ x + 1 }}, {{ y + 1 }}" maxlength="1" autocomplete="off" inputmode="text" data-key="{{ x }},{{ y }}" value="{{ progress_answers[x ~ ',' ~ y] | default('') }}">
-                </label>
-              {% else %}
-                <span class="crossword-cell black"></span>
-              {% endif %}
-            {% endfor %}
-          {% endfor %}
-        </div>
-        <p class="muted" id="crossword-status">Fill the grid from the clues.</p>
-        <div class="action-row">
-          <button type="button" class="ghost-button" id="crossword-check">Check</button>
-          <button type="button" class="ghost-button" id="crossword-clear">Clear Grid</button>
-        </div>
-      </div>
-      <section class="clue-board">
-        <div>
-          <h2>Across</h2>
-          <ol class="clue-list">
-            {% for clue in puzzle.play_payload.clues if clue.direction == "across" %}
-              <li value="{{ clue.number }}"><span>{{ clue.clue }}</span><small>{{ clue.length }} letters</small></li>
-            {% endfor %}
-          </ol>
-        </div>
-        <div>
-          <h2>Down</h2>
-          <ol class="clue-list">
-            {% for clue in puzzle.play_payload.clues if clue.direction == "down" %}
-              <li value="{{ clue.number }}"><span>{{ clue.clue }}</span><small>{{ clue.length }} letters</small></li>
-            {% endfor %}
-          </ol>
-        </div>
-      </section>
     {% endif %}
   </div>
 
   <aside class="side">
-    {% if puzzle.puzzle_type not in ["word_search", "crossword"] %}
+    {% if not playable_puzzle_type %}
       <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/attempts">
         <h2>Submit Answer</h2>
         <label>
@@ -113,7 +37,7 @@
           <li>{{ hint.text }}</li>
         {% endfor %}
       </ol>
-      {% if puzzle.puzzle_type in ["word_search", "crossword"] %}
+      {% if playable_puzzle_type %}
         <button type="button" class="ghost-button" id="reveal-solution">Reveal Solution</button>
       {% endif %}
     </details>
@@ -121,19 +45,9 @@
     {% if current_user.is_admin %}
       <section class="panel">
         <h2>Admin Solution</h2>
-        {% if puzzle.puzzle_type == "word_search" %}
-          <div class="solution-list">
-            {% for placement in puzzle.solution_payload.placements %}
-              <div><strong>{{ placement.word }}</strong><small>{{ placement.start | join(", ") }} / {{ placement.direction | join(", ") }}</small></div>
-            {% endfor %}
-          </div>
-        {% elif puzzle.puzzle_type == "crossword" %}
-          <div class="solution-list">
-            {% for entry in puzzle.solution_payload.entries %}
-              <div><strong>{{ entry.number }} {{ entry.direction | title }}: {{ entry.answer }}</strong><small>{{ entry.clue }}</small></div>
-            {% endfor %}
-          </div>
-        {% else %}
+        {% set solution_template = "puzzle_solutions/" ~ puzzle.puzzle_type ~ ".html" %}
+        {% include solution_template ignore missing %}
+        {% if not playable_puzzle_type %}
           <pre>{{ puzzle.solution_payload | tojson(indent=2) }}</pre>
         {% endif %}
       </section>
@@ -158,7 +72,7 @@
 </section>
 
 <section class="history">
-  {% if puzzle.puzzle_type != "word_search" %}
+  {% if not playable_puzzle_type %}
     <div class="panel">
       <h2>Attempts</h2>
       {% if attempts %}

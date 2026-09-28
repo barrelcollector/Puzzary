@@ -119,8 +119,9 @@
         <label>
           Puzzle type
           <select name="puzzle_type">
-            <option value="word_search">Word search</option>
-            <option value="crossword">Crossword</option>
+            {% for puzzle_type in puzzle_types %}
+              <option value="{{ puzzle_type.slug }}">{{ puzzle_type.label }}</option>
+            {% endfor %}
           </select>
         </label>
         <label>

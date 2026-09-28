@@ -1,0 +1,23 @@
+<p>Find all listed words.</p>
+<div
+  class="word-grid interactive"
+  data-words="{{ puzzle.play_payload.words | join(',') }}"
+  data-found-words="{{ progress_found_words | default([]) | join(',') }}"
+  data-placements='{{ puzzle.solution_payload.placements | tojson }}'
+  data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
+  style="--grid-size: {{ puzzle.play_payload.grid | length }}"
+>
+  {% for row in puzzle.play_payload.grid %}
+    {% set y = loop.index0 %}
+    {% for letter in row %}
+      <button type="button" data-x="{{ loop.index0 }}" data-y="{{ y }}" data-letter="{{ letter }}">{{ letter }}</button>
+    {% endfor %}
+  {% endfor %}
+</div>
+<h2>Words</h2>
+<div class="word-list" id="word-list">
+  {% for word in puzzle.play_payload.words %}
+    <span data-word="{{ word }}">{{ word }}</span>
+  {% endfor %}
+</div>
+<p class="muted" id="word-search-status">Drag across a word to mark it found.</p>
