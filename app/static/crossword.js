@@ -27,16 +27,21 @@
 
   const inputsByKey = new Map(inputs.map((input) => [input.dataset.key, input]));
   const entriesByCell = new Map();
+  const cellsByEntry = new Map();
+  const entryId = (entry) => `${entry.number}:${entry.direction}`;
   entries.forEach((entry) => {
     const dx = entry.direction === "across" ? 1 : 0;
     const dy = entry.direction === "down" ? 1 : 0;
     const answer = String(entry.answer || "");
+    const keys = [];
     for (let index = 0; index < answer.length; index += 1) {
       const key = `${Number(entry.x) + dx * index},${Number(entry.y) + dy * index}`;
+      keys.push(key);
       const list = entriesByCell.get(key) || [];
       list.push(entry);
       entriesByCell.set(key, list);
     }
+    cellsByEntry.set(entryId(entry), keys);
   });
 
   function currentAnswers() {
@@ -104,31 +109,45 @@
     if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
   }
 
-  function chooseEntry(input, allowToggle) {
+  function entryContainsInput(entry, input) {
+    return (cellsByEntry.get(entryId(entry)) || []).includes(input.dataset.key);
+  }
+
+  function chooseEntry(input, options = {}) {
+    const allowToggle = Boolean(options.allowToggle);
+    const preferredDirection = options.preferredDirection || "";
     const candidates = entriesByCell.get(input.dataset.key) || [];
     if (!candidates.length) {
       activeEntry = null;
       return null;
     }
-    if (activeEntry && candidates.some((entry) => entry.number === activeEntry.number && entry.direction === activeEntry.direction)) {
+    if (preferredDirection) {
+      const preferredEntry = candidates.find((entry) => entry.direction === preferredDirection);
+      if (preferredEntry) {
+        activeEntry = preferredEntry;
+        return activeEntry;
+      }
+    }
+    if (activeEntry && candidates.some((entry) => entryId(entry) === entryId(activeEntry))) {
       if (allowToggle && candidates.length > 1) {
         activeEntry = candidates.find((entry) => entry.direction !== activeEntry.direction) || activeEntry;
       }
       return activeEntry;
     }
-    activeEntry = candidates.find((entry) => entry.direction === "across") || candidates[0];
+    activeEntry = candidates.find((entry) => entry.direction === preferredDirection)
+      || (activeEntry ? candidates.find((entry) => entry.direction === activeEntry.direction) : null)
+      || candidates.find((entry) => entry.direction === "across")
+      || candidates[0];
     return activeEntry;
   }
 
   function nextInputInEntry(input, direction) {
-    const entry = chooseEntry(input, false);
+    const entry = activeEntry && entryContainsInput(activeEntry, input) ? activeEntry : chooseEntry(input);
     if (!entry) return null;
-    const [xText, yText] = input.dataset.key.split(",");
-    const x = Number(xText);
-    const y = Number(yText);
-    const dx = entry.direction === "across" ? 1 : 0;
-    const dy = entry.direction === "down" ? 1 : 0;
-    return inputsByKey.get(`${x + dx * direction},${y + dy * direction}`) || null;
+    const keys = cellsByEntry.get(entryId(entry)) || [];
+    const index = keys.indexOf(input.dataset.key);
+    if (index < 0) return null;
+    return inputsByKey.get(keys[index + direction]) || null;
   }
 
   function moveFrom(input, direction) {
@@ -136,25 +155,57 @@
     if (next) next.focus();
   }
 
+  function setCellValue(input, value) {
+    input.value = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
+    input.closest(".crossword-cell").classList.remove("correct", "incorrect");
+    queueSave();
+  }
+
   inputs.forEach((input) => {
     input.addEventListener("focus", () => {
-      chooseEntry(input, false);
+      chooseEntry(input);
+      input.select();
     });
 
     input.addEventListener("click", () => {
-      chooseEntry(input, true);
+      chooseEntry(input, { allowToggle: true });
+      input.select();
     });
 
     input.addEventListener("input", () => {
-      input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
-      input.closest(".crossword-cell").classList.remove("correct", "incorrect");
+      setCellValue(input, input.value);
       if (input.value) moveFrom(input, 1);
-      queueSave();
     });
 
     input.addEventListener("keydown", (event) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (/^[a-zA-Z0-9]$/.test(event.key)) {
+        event.preventDefault();
+        setCellValue(input, event.key);
+        moveFrom(input, 1);
+        return;
+      }
       if (event.key === "Backspace" && !input.value) {
         event.preventDefault();
+        moveFrom(input, -1);
+      } else if (event.key === "Backspace") {
+        event.preventDefault();
+        setCellValue(input, "");
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        chooseEntry(input, { preferredDirection: "across" });
+        moveFrom(input, 1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        chooseEntry(input, { preferredDirection: "across" });
+        moveFrom(input, -1);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        chooseEntry(input, { preferredDirection: "down" });
+        moveFrom(input, 1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        chooseEntry(input, { preferredDirection: "down" });
         moveFrom(input, -1);
       }
     });
