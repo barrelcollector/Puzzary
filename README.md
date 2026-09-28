@@ -14,7 +14,8 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Puzzle library view
 - Admin panel for archiving, deleting, and organizing puzzles
 - Admin-managed content sources, categories, and tags
-- Word-bank content sources for word-game generation
+- Canonical dictionary words with reusable properties
+- Word-bank content sources that reference canonical dictionary words
 - Word-search puzzle generator
 - Puzzle hints
 - Answer checking

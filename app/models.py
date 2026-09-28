@@ -149,7 +149,40 @@ class ContentSource(Base):
 
     category: Mapped[PuzzleCategory | None] = relationship(back_populates="content_sources")
     tags: Mapped[list[PuzzleTag]] = relationship(secondary=content_source_tag_links, back_populates="content_sources")
+    word_links: Mapped[list[ContentSourceWord]] = relationship(
+        back_populates="content_source",
+        cascade="all, delete-orphan",
+        order_by="ContentSourceWord.position",
+    )
     puzzles: Mapped[list[Puzzle]] = relationship(back_populates="content_source")
+
+
+class DictionaryWord(Base):
+    __tablename__ = "dictionary_words"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_text: Mapped[str] = mapped_column(String(80))
+    clue: Mapped[str] = mapped_column(Text, default="")
+    part_of_speech: Mapped[str] = mapped_column(String(40), default="")
+    properties: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    source_links: Mapped[list[ContentSourceWord]] = relationship(back_populates="word", cascade="all, delete-orphan")
+
+
+class ContentSourceWord(Base):
+    __tablename__ = "content_source_words"
+    __table_args__ = (UniqueConstraint("content_source_id", "word_id", name="uq_content_source_word"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    content_source_id: Mapped[int] = mapped_column(ForeignKey("content_sources.id"), index=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("dictionary_words.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    content_source: Mapped[ContentSource] = relationship(back_populates="word_links")
+    word: Mapped[DictionaryWord] = relationship(back_populates="source_links")
 
 
 class PuzzleCategory(Base):

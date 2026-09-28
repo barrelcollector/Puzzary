@@ -7,6 +7,7 @@
     <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
     <a class="{% if section == 'generate' %}active{% endif %}" href="/admin/generate">Generate</a>
     <a class="{% if section == 'sources' %}active{% endif %}" href="/admin/sources">Content Sources</a>
+    <a class="{% if section == 'dictionary' %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
     <a class="{% if section == 'taxonomy' %}active{% endif %}" href="/admin/taxonomy">Taxonomy</a>
     <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
     <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
@@ -22,9 +23,9 @@
       </section>
       <div class="metric-grid">
         <a class="metric-card" href="/admin/sources"><strong>{{ sources | length }}</strong><span>Content sources</span></a>
+        <a class="metric-card" href="/admin/dictionary"><strong>{{ dictionary_words | length }}</strong><span>Dictionary words</span></a>
         <a class="metric-card" href="/admin/puzzles"><strong>{{ live_puzzles | length }}</strong><span>Live puzzles</span></a>
         <a class="metric-card" href="/admin/puzzles"><strong>{{ archived_puzzles | length }}</strong><span>Archived puzzles</span></a>
-        <a class="metric-card" href="/admin/taxonomy"><strong>{{ (categories | length) + (tags | length) }}</strong><span>Taxonomy labels</span></a>
       </div>
       <section class="panel">
         <h2>Quick Actions</h2>
@@ -164,7 +165,7 @@
       <section class="puzzle-head">
         <div>
           <h1>Content Sources</h1>
-          <p class="muted">Reusable material for puzzle generators. Word Bank is the first source type.</p>
+          <p class="muted">Curated collections of canonical dictionary entries. Word Bank is the first source type.</p>
         </div>
       </section>
       <section class="admin-grid two">
@@ -185,6 +186,7 @@
           </label>
           <label>Description <textarea name="description" rows="2"></textarea></label>
           <label>Words <textarea name="words" rows="6" placeholder="MERIDIAN&#10;PUZZLE&#10;ZEBRA"></textarea></label>
+          <p class="muted">New words are added to the dictionary automatically. Existing words are reused.</p>
           <button type="submit">Add Source</button>
         </form>
         <div class="admin-list">
@@ -219,7 +221,8 @@
                 </div>
               </fieldset>
               <label>Description <textarea name="description" rows="2">{{ source.description }}</textarea></label>
-              <label>Words <textarea name="words" rows="6">{{ source.payload.words | default([]) | join('\n') }}</textarea></label>
+              <label>Words <textarea name="words" rows="6">{{ source_word_texts[source.id] | default([]) | join('\n') }}</textarea></label>
+              <p class="muted">{{ source_word_texts[source.id] | default([]) | length }} canonical words linked.</p>
               <div class="action-row">
                 <button type="submit">Save</button>
                 {% if source.archived_at %}
@@ -233,6 +236,41 @@
             <form id="archive-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/archive"></form>
             <form id="unarchive-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/unarchive"></form>
             <form id="delete-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/delete"></form>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if section == "dictionary" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Dictionary</h1>
+          <p class="muted">Canonical words. Each word exists once and can belong to many content sources.</p>
+        </div>
+      </section>
+      <section class="admin-grid two">
+        <form class="panel" method="post" action="/admin/dictionary">
+          <h2>Add Word</h2>
+          <label>Word <input name="word" autocomplete="off" required></label>
+          <label>Display text <input name="display_text" autocomplete="off"></label>
+          <label>Clue <textarea name="clue" rows="2"></textarea></label>
+          <label>Part of speech <input name="part_of_speech" autocomplete="off" placeholder="noun"></label>
+          <label>Properties / notes <textarea name="properties" rows="3"></textarea></label>
+          <button type="submit">Save Word</button>
+        </form>
+        <div class="admin-list">
+          {% for word in dictionary_words %}
+            <form class="panel edit-card" method="post" action="/admin/dictionary/{{ word.id }}">
+              <h2>{{ word.word }}</h2>
+              <small>{{ word.source_links | length }} source{% if word.source_links | length != 1 %}s{% endif %}</small>
+              <label>Display text <input name="display_text" value="{{ word.display_text }}" required></label>
+              <label>Clue <textarea name="clue" rows="2">{{ word.clue }}</textarea></label>
+              <label>Part of speech <input name="part_of_speech" value="{{ word.part_of_speech }}"></label>
+              <label>Properties / notes <textarea name="properties" rows="3">{{ word.properties.notes | default('') }}</textarea></label>
+              <button type="submit">Save Word</button>
+            </form>
+          {% else %}
+            <p class="muted">No words yet.</p>
           {% endfor %}
         </div>
       </section>
