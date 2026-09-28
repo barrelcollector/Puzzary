@@ -144,6 +144,10 @@ SPECIFIC_DEFINITIONS: dict[str, DefinitionSeed] = {
     "studio": DefinitionSeed("Noun", "A company or space where movies, shows, or recordings are made.", "Place or company that makes films."),
     "screen": DefinitionSeed("Noun", "The surface where a movie or image is shown.", "Where the movie appears."),
     "montage": DefinitionSeed("Noun", "A sequence of short shots edited together to show time, action, or mood.", "Rapid sequence of edited shots."),
+    "bandage": DefinitionSeed("Noun", "A strip or wrap used to cover and protect an injured area.", "Wound covering."),
+    "cafecito": DefinitionSeed("Noun", "A small, strong Cuban-style coffee, often sweetened.", "Small Cuban coffee."),
+    "quiz": DefinitionSeed("Noun", "A short test or set of questions.", "Short test."),
+    "wynwood": DefinitionSeed("Noun", "A Miami neighborhood known for murals, galleries, and street art.", "Miami arts district known for murals."),
 }
 
 
