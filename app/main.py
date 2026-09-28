@@ -897,6 +897,15 @@ def web_upload_photo(
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
 
+@app.post("/web/puzzles/{puzzle_id}/reset")
+def web_reset_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    reset_user_puzzle(puzzle_id, user.id, db)
+    return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
+
+
 @app.post("/api/users")
 def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> dict[str, int | str]:
     existing = db.scalar(select(User).where(User.display_name == payload.display_name))
@@ -983,6 +992,15 @@ def save_progress(
     return progress_response(puzzle, user, progress)
 
 
+@app.post("/api/puzzles/{puzzle_id}/reset", response_model=PuzzleProgressResponse)
+def reset_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleProgressResponse:
+    user = current_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Login required")
+    puzzle = reset_user_puzzle(puzzle_id, user.id, db)
+    return progress_response(puzzle, user, None)
+
+
 @app.post("/api/puzzles/{puzzle_id}/attempts", response_model=PuzzleAttemptResponse)
 def submit_attempt(
     puzzle_id: str,
@@ -1025,6 +1043,20 @@ def upload_photo(
     db: Session = Depends(get_db),
 ) -> dict[str, str | int]:
     return save_photo(puzzle_id, file, notes, user_id, db)
+
+
+def reset_user_puzzle(puzzle_id: str, user_id: int, db: Session) -> Puzzle:
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user_id))
+    if progress is not None:
+        db.delete(progress)
+    attempts = db.scalars(select(PuzzleAttempt).where(PuzzleAttempt.puzzle_id == puzzle_id, PuzzleAttempt.user_id == user_id)).all()
+    for attempt in attempts:
+        db.delete(attempt)
+    db.commit()
+    return puzzle
 
 
 def save_photo(

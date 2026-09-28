@@ -63,6 +63,12 @@
       </ol>
     </details>
 
+    <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/reset">
+      <h2>Reset Puzzle</h2>
+      <p class="muted">Clear your saved progress and answer attempts for this puzzle.</p>
+      <button type="submit" class="danger-button">Reset</button>
+    </form>
+
     <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/photos" enctype="multipart/form-data">
       <h2>Upload Work</h2>
       <label>
