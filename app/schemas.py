@@ -27,12 +27,14 @@ class PuzzleAttemptResponse(BaseModel):
 
 class PuzzleProgressUpdate(BaseModel):
     found_words: list[str] = []
+    answers: dict[str, str] = {}
 
 
 class PuzzleProgressResponse(BaseModel):
     puzzle_id: str
     user_id: int
     found_words: list[str] = []
+    answers: dict[str, str] = {}
     expected_count: int
     found_count: int
 

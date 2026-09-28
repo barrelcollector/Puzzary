@@ -31,7 +31,7 @@ from app.models import (
     WordBank,
     WordBankWord,
 )
-from app.puzzles import check_word_search_answer, generate_word_search
+from app.puzzles import check_crossword_answer, check_word_search_answer, generate_crossword, generate_word_search
 from app.schemas import (
     PuzzleAttemptCreate,
     PuzzleAttemptResponse,
@@ -211,6 +211,23 @@ def words_for_word_bank(bank: WordBank | None, difficulty: str) -> list[str] | N
     return words[:count]
 
 
+def entries_for_word_bank(bank: WordBank | None, difficulty: str) -> list[dict] | None:
+    if bank is None:
+        return None
+    count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
+    entries = []
+    for link in sorted(bank.word_links, key=lambda item: item.position):
+        entries.append(
+            {
+                "word": link.word.word,
+                "clue": link.word.clue or link.word.properties.get("notes") or f"{link.word.display_text.title()} entry.",
+            }
+        )
+        if len(entries) >= count:
+            break
+    return entries or None
+
+
 def require_admin_user(request: Request, db: Session) -> User | RedirectResponse:
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
@@ -250,12 +267,38 @@ def normalize_found_words(words: list[str], puzzle: Puzzle) -> list[str]:
 
 
 def progress_response(puzzle: Puzzle, user: User, progress: PuzzleProgress | None) -> PuzzleProgressResponse:
+    progress_payload = progress.progress_payload if progress is not None else {}
+    if puzzle.puzzle_type == "crossword":
+        answers = progress_payload.get("answers", {})
+        if not isinstance(answers, dict):
+            answers = {}
+        expected_count = sum(1 for row in puzzle.solution_payload.get("grid", []) for cell in row if cell)
+        found_count = 0
+        for key, value in answers.items():
+            try:
+                x_text, y_text = str(key).split(",", 1)
+                x = int(x_text)
+                y = int(y_text)
+            except ValueError:
+                continue
+            grid = puzzle.solution_payload.get("grid", [])
+            if 0 <= y < len(grid) and 0 <= x < len(grid[y]) and str(grid[y][x]).upper() == str(value).upper():
+                found_count += 1
+        return PuzzleProgressResponse(
+            puzzle_id=puzzle.id,
+            user_id=user.id,
+            found_words=[],
+            answers={str(key): str(value).upper()[:1] for key, value in answers.items() if str(value).strip()},
+            expected_count=expected_count,
+            found_count=found_count,
+        )
     expected_count = len(puzzle.solution_payload.get("words", []))
     found_words = found_words_for_progress(progress)
     return PuzzleProgressResponse(
         puzzle_id=puzzle.id,
         user_id=user.id,
         found_words=found_words,
+        answers={},
         expected_count=expected_count,
         found_count=len(found_words),
     )
@@ -315,13 +358,22 @@ def library(request: Request, db: Session = Depends(get_db)):
     word_banks = word_bank_options(db)
     progress_rows = db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id)).all()
     progress_by_puzzle = {
-        puzzle.id: {"found": 0, "total": len(puzzle.solution_payload.get("words", []))}
+        puzzle.id: {
+            "found": 0,
+            "total": len(puzzle.solution_payload.get("words", []))
+            if puzzle.puzzle_type == "word_search"
+            else sum(1 for row in puzzle.solution_payload.get("grid", []) for cell in row if cell),
+        }
         for puzzle in puzzles
-        if puzzle.puzzle_type == "word_search"
+        if puzzle.puzzle_type in {"word_search", "crossword"}
     }
     for progress in progress_rows:
         if progress.puzzle_id in progress_by_puzzle:
-            progress_by_puzzle[progress.puzzle_id]["found"] = len(found_words_for_progress(progress))
+            puzzle = next((item for item in puzzles if item.id == progress.puzzle_id), None)
+            if puzzle is not None and puzzle.puzzle_type == "crossword":
+                progress_by_puzzle[progress.puzzle_id]["found"] = progress_response(puzzle, user, progress).found_count
+            else:
+                progress_by_puzzle[progress.puzzle_id]["found"] = len(found_words_for_progress(progress))
     return templates.TemplateResponse(
         "home.html",
         {
@@ -854,6 +906,10 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
         select(PuzzlePhoto).where(PuzzlePhoto.puzzle_id == puzzle_id).order_by(desc(PuzzlePhoto.created_at)).limit(10)
     ).all()
     progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
+    progress_payload = progress.progress_payload if progress is not None else {}
+    progress_answers = progress_payload.get("answers", {})
+    if not isinstance(progress_answers, dict):
+        progress_answers = {}
     return templates.TemplateResponse(
         "puzzle.html",
         {
@@ -864,6 +920,8 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "photos": photos,
             "current_user": user,
             "progress_found_words": found_words_for_progress(progress),
+            "progress_payload": progress_payload,
+            "progress_answers": progress_answers,
         },
     )
 
@@ -920,11 +978,14 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> dict[str,
 
 @app.post("/api/puzzles/generate", response_model=PuzzleSummary)
 def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db)) -> PuzzleSummary:
-    if payload.puzzle_type != "word_search":
-        raise HTTPException(status_code=400, detail="Only word_search is implemented in the MVP")
+    if payload.puzzle_type not in {"word_search", "crossword"}:
+        raise HTTPException(status_code=400, detail="Unsupported puzzle type")
 
     word_bank = word_bank_for_slug(db, payload.theme)
-    generated = generate_word_search(payload.theme, payload.difficulty, words_for_word_bank(word_bank, payload.difficulty))
+    if payload.puzzle_type == "word_search":
+        generated = generate_word_search(payload.theme, payload.difficulty, words_for_word_bank(word_bank, payload.difficulty))
+    else:
+        generated = generate_crossword(payload.theme, payload.difficulty, entries_for_word_bank(word_bank, payload.difficulty))
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
@@ -981,12 +1042,21 @@ def save_progress(
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
 
-    found_words = normalize_found_words(payload.found_words, puzzle)
     progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
     if progress is None:
         progress = PuzzleProgress(puzzle_id=puzzle_id, user_id=user.id, progress_payload={})
         db.add(progress)
-    progress.progress_payload = {"found_words": found_words}
+    if puzzle.puzzle_type == "crossword":
+        progress.progress_payload = {
+            "answers": {
+                str(key): str(value).strip().upper()[:1]
+                for key, value in payload.answers.items()
+                if str(value).strip()
+            }
+        }
+    else:
+        found_words = normalize_found_words(payload.found_words, puzzle)
+        progress.progress_payload = {"found_words": found_words}
     db.commit()
     db.refresh(progress)
     return progress_response(puzzle, user, progress)
@@ -1013,6 +1083,8 @@ def submit_attempt(
 
     if puzzle.puzzle_type == "word_search":
         is_correct, expected_count, matched_count = check_word_search_answer(payload.answer, puzzle.solution_payload)
+    elif puzzle.puzzle_type == "crossword":
+        is_correct, expected_count, matched_count = check_crossword_answer(payload.answer, puzzle.solution_payload)
     else:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
 

@@ -8,6 +8,7 @@
       Type
       <select name="puzzle_type">
         <option value="word_search">Word search</option>
+        <option value="crossword">Crossword</option>
       </select>
     </label>
     <label>
@@ -52,7 +53,7 @@
             <strong>{{ puzzle.title }}</strong>
             <small>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</small>
             {% if puzzle.id in progress_by_puzzle %}
-              <small>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} found</small>
+              <small>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} complete</small>
             {% endif %}
           </span>
           <span class="row-meta">
