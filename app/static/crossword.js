@@ -6,6 +6,7 @@
   const status = document.getElementById("crossword-status");
   const checkButton = document.getElementById("crossword-check");
   const clearButton = document.getElementById("crossword-clear");
+  const revealButton = document.getElementById("reveal-solution");
   const progressUrl = root.dataset.progressUrl;
   let solution = [];
   let saveTimer = null;
@@ -72,6 +73,15 @@
     }
   }
 
+  function revealSolution() {
+    inputs.forEach((input) => {
+      input.value = expectedFor(input);
+      input.closest(".crossword-cell").classList.remove("incorrect");
+      input.closest(".crossword-cell").classList.add("correct");
+    });
+    if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
+  }
+
   function moveFrom(input, direction) {
     const index = inputs.indexOf(input);
     const next = inputs[index + direction];
@@ -107,5 +117,9 @@
       if (status) status.textContent = "Grid cleared.";
       saveProgress();
     });
+  }
+
+  if (revealButton) {
+    revealButton.addEventListener("click", revealSolution);
   }
 })();

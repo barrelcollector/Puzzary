@@ -4,6 +4,7 @@
 
   const wordList = document.getElementById("word-list");
   const status = document.getElementById("word-search-status");
+  const revealButton = document.getElementById("reveal-solution");
   const words = new Set((grid.dataset.words || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const found = new Set((grid.dataset.foundWords || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const progressUrl = grid.dataset.progressUrl;
@@ -59,6 +60,15 @@
   function markStoredWord(word) {
     const placement = placements.find((item) => String(item.word).toUpperCase() === word);
     cellsForPlacement(placement).forEach((cell) => cell.classList.add("found-cell"));
+  }
+
+  function revealSolution() {
+    words.forEach((word) => {
+      found.add(word);
+      markStoredWord(word);
+    });
+    syncFoundWords();
+    if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
   }
 
   function clearSelected() {
@@ -187,4 +197,8 @@
 
   found.forEach(markStoredWord);
   syncFoundWords();
+
+  if (revealButton) {
+    revealButton.addEventListener("click", revealSolution);
+  }
 })();

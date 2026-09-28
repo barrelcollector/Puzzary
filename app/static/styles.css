@@ -576,6 +576,27 @@ legend {
   color: var(--muted);
 }
 
+.solution-list {
+  display: grid;
+  gap: 10px;
+}
+
+.solution-list div {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.solution-list div:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.solution-list small {
+  color: var(--muted);
+}
+
 summary {
   cursor: pointer;
   font-weight: 800;

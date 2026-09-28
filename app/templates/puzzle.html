@@ -112,7 +112,31 @@
           <li>{{ hint.text }}</li>
         {% endfor %}
       </ol>
+      {% if puzzle.puzzle_type in ["word_search", "crossword"] %}
+        <button type="button" class="ghost-button" id="reveal-solution">Reveal Solution</button>
+      {% endif %}
     </details>
+
+    {% if current_user.is_admin %}
+      <section class="panel">
+        <h2>Admin Solution</h2>
+        {% if puzzle.puzzle_type == "word_search" %}
+          <div class="solution-list">
+            {% for placement in puzzle.solution_payload.placements %}
+              <div><strong>{{ placement.word }}</strong><small>{{ placement.start | join(", ") }} / {{ placement.direction | join(", ") }}</small></div>
+            {% endfor %}
+          </div>
+        {% elif puzzle.puzzle_type == "crossword" %}
+          <div class="solution-list">
+            {% for entry in puzzle.solution_payload.entries %}
+              <div><strong>{{ entry.number }} {{ entry.direction | title }}: {{ entry.answer }}</strong><small>{{ entry.clue }}</small></div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <pre>{{ puzzle.solution_payload | tojson(indent=2) }}</pre>
+        {% endif %}
+      </section>
+    {% endif %}
 
     <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/reset">
       <h2>Reset Puzzle</h2>
