@@ -32,6 +32,14 @@ dictionary_word_tag_links = Table(
 )
 
 
+dictionary_definition_tag_links = Table(
+    "dictionary_definition_tag_links",
+    Base.metadata,
+    Column("definition_id", ForeignKey("dictionary_definitions.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -179,6 +187,28 @@ class DictionaryWord(Base):
 
     tags: Mapped[list[PuzzleTag]] = relationship(secondary=dictionary_word_tag_links, back_populates="dictionary_words")
     bank_links: Mapped[list[WordBankWord]] = relationship(back_populates="word", cascade="all, delete-orphan")
+    definitions: Mapped[list[DictionaryDefinition]] = relationship(
+        back_populates="word",
+        cascade="all, delete-orphan",
+        order_by="DictionaryDefinition.position",
+    )
+
+
+class DictionaryDefinition(Base):
+    __tablename__ = "dictionary_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("dictionary_words.id"), index=True)
+    definition: Mapped[str] = mapped_column(Text)
+    part_of_speech: Mapped[str] = mapped_column(String(40), default="")
+    example: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(120), default="local")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    properties: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    word: Mapped[DictionaryWord] = relationship(back_populates="definitions")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=dictionary_definition_tag_links, back_populates="dictionary_definitions")
 
 
 class WordBankWord(Base):
@@ -219,6 +249,10 @@ class PuzzleTag(Base):
     puzzles: Mapped[list[Puzzle]] = relationship(secondary=puzzle_tag_links, back_populates="tags")
     word_banks: Mapped[list[WordBank]] = relationship(secondary=word_bank_tag_links, back_populates="tags")
     dictionary_words: Mapped[list[DictionaryWord]] = relationship(secondary=dictionary_word_tag_links, back_populates="tags")
+    dictionary_definitions: Mapped[list[DictionaryDefinition]] = relationship(
+        secondary=dictionary_definition_tag_links,
+        back_populates="tags",
+    )
 
 
 class ContentItem(Base):

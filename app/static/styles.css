@@ -421,6 +421,12 @@ legend {
   align-items: start;
 }
 
+.definition-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
 .word-entry h2 {
   margin-top: 22px;
 }

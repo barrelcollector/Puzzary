@@ -278,7 +278,7 @@
             <a class="word-row" href="/admin/dictionary/{{ word.id }}">
               <span>
                 <strong>{{ word.display_text or word.word }}</strong>
-                <small>{{ word.part_of_speech or "word" }} / {{ word.bank_links | length }} bank{% if word.bank_links | length != 1 %}s{% endif %}</small>
+                <small>{{ word.part_of_speech or "word" }} / {{ word.definitions | length }} definition{% if word.definitions | length != 1 %}s{% endif %} / {{ word.bank_links | length }} bank{% if word.bank_links | length != 1 %}s{% endif %}</small>
               </span>
               <span class="chip-list compact-chips">
                 {% if word.banned_at %}<small class="chip danger-chip">Banned</small>{% endif %}
@@ -324,6 +324,50 @@
             <h2>Notes</h2>
             <p>{{ selected_word.properties.notes }}</p>
           {% endif %}
+          <h2>Definitions</h2>
+          <div class="definition-list">
+            {% for definition in selected_word.definitions %}
+              <form class="edit-card" method="post" action="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}">
+                <label>Definition <textarea name="definition" rows="3" required>{{ definition.definition }}</textarea></label>
+                <label>Part of speech <input name="part_of_speech" value="{{ definition.part_of_speech }}"></label>
+                <label>Example <textarea name="example" rows="2">{{ definition.example }}</textarea></label>
+                <label>Order <input name="position" type="number" value="{{ definition.position }}"></label>
+                <fieldset>
+                  <legend>Definition tags</legend>
+                  <div class="check-list">
+                    {% for tag in tags %}
+                      <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in definition.tags %}checked{% endif %}>{{ tag.name }}</label>
+                    {% else %}
+                      <small>No tags yet.</small>
+                    {% endfor %}
+                  </div>
+                </fieldset>
+                <div class="action-row">
+                  <button type="submit">Save Definition</button>
+                  <button type="submit" formaction="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}/delete" formnovalidate class="danger-button">Delete</button>
+                </div>
+              </form>
+            {% else %}
+              <p class="muted">No definitions yet.</p>
+            {% endfor %}
+          </div>
+          <form class="edit-card" method="post" action="/admin/dictionary/{{ selected_word.id }}/definitions">
+            <h2>Add Definition</h2>
+            <label>Definition <textarea name="definition" rows="3" required></textarea></label>
+            <label>Part of speech <input name="part_of_speech" value="{{ selected_word.part_of_speech }}"></label>
+            <label>Example <textarea name="example" rows="2"></textarea></label>
+            <fieldset>
+              <legend>Definition tags</legend>
+              <div class="check-list">
+                {% for tag in tags %}
+                  <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+                {% else %}
+                  <small>No tags yet.</small>
+                {% endfor %}
+              </div>
+            </fieldset>
+            <button type="submit">Add Definition</button>
+          </form>
           <h2>Word Banks</h2>
           <div class="list compact">
             {% for link in selected_word.bank_links %}

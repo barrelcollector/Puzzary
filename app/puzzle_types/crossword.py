@@ -15,6 +15,26 @@ def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
     return True
 
 
+def definition_allowed(definition: Any, excluded_tag_ids: set[int] | None) -> bool:
+    text = str(getattr(definition, "definition", "")).strip()
+    if not text:
+        return False
+    if excluded_tag_ids and any(getattr(tag, "id", None) in excluded_tag_ids for tag in getattr(definition, "tags", [])):
+        return False
+    return True
+
+
+def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, int | None] | None:
+    definitions = sorted(getattr(word, "definitions", []), key=lambda item: item.position)
+    for definition in definitions:
+        if definition_allowed(definition, excluded_tag_ids):
+            return definition.definition, definition.id
+    clue = str(getattr(word, "clue", "") or "").strip()
+    if clue:
+        return clue, None
+    return f"{word.display_text.title()} entry.", None
+
+
 def build_source(word_bank: Any, difficulty: str, excluded_tag_ids: set[int] | None = None) -> list[dict] | None:
     if word_bank is None:
         return None
@@ -23,10 +43,15 @@ def build_source(word_bank: Any, difficulty: str, excluded_tag_ids: set[int] | N
     for link in sorted(word_bank.word_links, key=lambda item: item.position):
         if not word_allowed(link.word, excluded_tag_ids):
             continue
+        clue = clue_for_word(link.word, excluded_tag_ids)
+        if clue is None:
+            continue
+        clue_text, definition_id = clue
         entries.append(
             {
                 "word": link.word.word,
-                "clue": link.word.clue or link.word.properties.get("notes") or f"{link.word.display_text.title()} entry.",
+                "clue": clue_text,
+                "definition_id": definition_id,
             }
         )
         if len(entries) >= count:
@@ -87,7 +112,13 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None)
         if len(word) < 3 or word in seen:
             continue
         seen.add(word)
-        entries.append({"word": word, "clue": str(entry.get("clue") or f"{word.title()} entry.")})
+        entries.append(
+            {
+                "word": word,
+                "clue": str(entry.get("clue") or f"{word.title()} entry."),
+                "definition_id": entry.get("definition_id"),
+            }
+        )
         if len(entries) >= count:
             break
 
@@ -128,14 +159,30 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None)
                     return False
         return not placements or touches > 0
 
-    def place(word: str, x: int, y: int, direction: str, clue: str) -> None:
+    def place(word: str, x: int, y: int, direction: str, clue: str, definition_id: int | None) -> None:
         dx, dy = (1, 0) if direction == "across" else (0, 1)
         for index, letter in enumerate(word):
             grid[y + dy * index][x + dx * index] = letter
-        placements.append({"word": word, "x": x, "y": y, "direction": direction, "clue": clue})
+        placements.append(
+            {
+                "word": word,
+                "x": x,
+                "y": y,
+                "direction": direction,
+                "clue": clue,
+                "definition_id": definition_id,
+            }
+        )
 
     first = max(entries, key=lambda item: len(item["word"]))
-    place(first["word"], max(0, (size - len(first["word"])) // 2), size // 2, "across", first["clue"])
+    place(
+        first["word"],
+        max(0, (size - len(first["word"])) // 2),
+        size // 2,
+        "across",
+        first["clue"],
+        first.get("definition_id"),
+    )
 
     for entry in sorted([item for item in entries if item is not first], key=lambda item: len(item["word"]), reverse=True):
         word = entry["word"]
@@ -152,7 +199,7 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None)
         rng.shuffle(candidates)
         for x, y, direction in candidates:
             if can_place(word, x, y, direction):
-                place(word, x, y, direction, entry["clue"])
+                place(word, x, y, direction, entry["clue"], entry.get("definition_id"))
                 break
 
     if len(placements) < 3:
@@ -185,6 +232,7 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None)
             "length": len(item["word"]),
             "x": item["x"],
             "y": item["y"],
+            "definition_id": item.get("definition_id"),
         }
         for item in sorted(placements, key=lambda item: (item["direction"], item["number"]))
     ]

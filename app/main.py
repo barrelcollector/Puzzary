@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.models import (
+    DictionaryDefinition,
     DictionaryWord,
     Puzzle,
     PuzzleAttempt,
@@ -62,6 +63,7 @@ def startup() -> None:
     with SessionLocal() as db:
         ensure_admin_user(db)
         seed_word_banks(db)
+        seed_word_definitions(db)
 
 
 def puzzle_url(puzzle_id: str) -> str:
@@ -190,6 +192,35 @@ def seed_word_banks(db: Session) -> None:
         if not bank.word_links:
             sync_word_bank_words(db, bank, word_bank_words(bank))
     db.commit()
+
+
+def seed_word_definitions(db: Session) -> None:
+    changed = False
+    for word in db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all():
+        if word.clue.strip() and not word.definitions:
+            word.definitions.append(
+                DictionaryDefinition(
+                    definition=word.clue.strip(),
+                    part_of_speech=word.part_of_speech,
+                    position=0,
+                    source="legacy_clue",
+                )
+            )
+            changed = True
+    if changed:
+        db.commit()
+
+
+def ensure_definition_from_clue(word: DictionaryWord) -> None:
+    if word.clue.strip() and not word.definitions:
+        word.definitions.append(
+            DictionaryDefinition(
+                definition=word.clue.strip(),
+                part_of_speech=word.part_of_speech,
+                position=0,
+                source="word_clue",
+            )
+        )
 
 
 def word_bank_options(db: Session, include_archived: bool = False) -> list[WordBank]:
@@ -679,6 +710,7 @@ def admin_create_dictionary_word(
         entry.part_of_speech = part_of_speech.strip()
         entry.tags = tags_for_ids(db, tag_ids)
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
+        ensure_definition_from_clue(entry)
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{entry.id}" if entry is not None else "/admin/dictionary", status_code=303)
 
@@ -704,6 +736,7 @@ def admin_update_dictionary_word(
         entry.part_of_speech = part_of_speech.strip()
         entry.tags = tags_for_ids(db, tag_ids)
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
+        ensure_definition_from_clue(entry)
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
 
@@ -768,11 +801,86 @@ def admin_delete_dictionary_word(word_id: int, request: Request, db: Session = D
             payload_words = bank.payload.get("words", []) if isinstance(bank.payload, dict) else []
             if isinstance(payload_words, list):
                 bank.payload = {"words": [word for word in payload_words if normalize_word(str(word)) != entry.word]}
+        for definition in entry.definitions:
+            definition.tags = []
         entry.tags = []
         entry.bank_links.clear()
         db.delete(entry)
         db.commit()
     return RedirectResponse(url="/admin/dictionary", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/definitions")
+def admin_create_dictionary_definition(
+    word_id: int,
+    request: Request,
+    definition: str = Form(...),
+    part_of_speech: str = Form(""),
+    example: str = Form(""),
+    tag_ids: list[int] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    word = db.get(DictionaryWord, word_id)
+    if word is None:
+        raise HTTPException(status_code=404, detail="Word not found")
+    next_position = max((item.position for item in word.definitions), default=-1) + 1
+    entry = DictionaryDefinition(
+        definition=definition.strip(),
+        part_of_speech=part_of_speech.strip(),
+        example=example.strip(),
+        position=next_position,
+    )
+    entry.tags = tags_for_ids(db, tag_ids)
+    word.definitions.append(entry)
+    db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/definitions/{definition_id}")
+def admin_update_dictionary_definition(
+    word_id: int,
+    definition_id: int,
+    request: Request,
+    definition: str = Form(...),
+    part_of_speech: str = Form(""),
+    example: str = Form(""),
+    position: int = Form(0),
+    tag_ids: list[int] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryDefinition, definition_id)
+    if entry is not None and entry.word_id == word_id:
+        entry.definition = definition.strip()
+        entry.part_of_speech = part_of_speech.strip()
+        entry.example = example.strip()
+        entry.position = position
+        entry.tags = tags_for_ids(db, tag_ids)
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/definitions/{definition_id}/delete")
+def admin_delete_dictionary_definition(
+    word_id: int,
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryDefinition, definition_id)
+    if entry is not None and entry.word_id == word_id:
+        entry.tags = []
+        db.delete(entry)
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
 
 
 @app.post("/admin/dictionaries")
@@ -925,6 +1033,7 @@ def admin_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db
         tag.puzzles = []
         tag.word_banks = []
         tag.dictionary_words = []
+        tag.dictionary_definitions = []
         db.delete(tag)
         db.commit()
     return RedirectResponse(url="/admin/tags", status_code=303)
