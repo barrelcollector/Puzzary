@@ -7,7 +7,7 @@
     <a class="{% if section == 'generate' %}active{% endif %}" href="/admin/generate">Generate</a>
     <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
     <a class="{% if section in ['dictionary', 'word_detail'] %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
-    <a class="{% if section == 'word_banks' %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
+    <a class="{% if section in ['word_banks', 'word_bank_detail'] %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
     <a class="{% if section == 'tags' %}active{% endif %}" href="/admin/tags">Tags</a>
     <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
     <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
@@ -216,100 +216,138 @@
         </form>
         <div class="admin-list">
           {% for bank in all_word_banks %}
-            <form class="panel edit-card" method="post" action="/admin/word-banks/{{ bank.id }}">
+            <article class="panel edit-card">
               <h2>{{ bank.name }}</h2>
               <small>{{ bank.slug }} / {{ word_bank_mode(bank) }}</small>
               {% if bank.archived_at %}<span class="status-pill">Archived</span>{% endif %}
-              <label>Name <input name="name" value="{{ bank.name }}" required></label>
-              <label>Slug <input name="slug" value="{{ bank.slug }}" required></label>
-              <label>
-                Mode
-                <select name="mode">
-                  <option value="manual" {% if word_bank_mode(bank) == "manual" %}selected{% endif %}>Manual selection</option>
-                  <option value="automatic" {% if word_bank_mode(bank) == "automatic" %}selected{% endif %}>Automatic by tag</option>
-                </select>
-              </label>
-              <label>
-                Category
-                <select name="category_id">
-                  <option value="0">None</option>
-                  {% for category in categories %}
-                    <option value="{{ category.id }}" {% if bank.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <fieldset>
-                <legend>Tags</legend>
-                <div class="check-list">
-                  {% for tag in tags %}
-                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in bank.tags %}checked{% endif %}>{{ tag.label }}</label>
-                  {% else %}
-                    <small>No tags yet.</small>
-                  {% endfor %}
-                </div>
-              </fieldset>
-              <label>Description <textarea name="description" rows="2">{{ bank.description }}</textarea></label>
-              <input type="hidden" name="words" value="">
               {% if word_bank_mode(bank) == "automatic" %}
                 <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} matching word/definition entries.</p>
               {% else %}
                 <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} manually selected entries.</p>
               {% endif %}
               <div class="action-row">
-                <button type="submit">Save</button>
-                {% if bank.archived_at %}
-                  <button type="submit" form="unarchive-bank-{{ bank.id }}" class="ghost-button">Unarchive</button>
-                {% else %}
-                  <button type="submit" form="archive-bank-{{ bank.id }}" class="ghost-button">Archive</button>
-                {% endif %}
-                <button type="submit" form="delete-bank-{{ bank.id }}" class="danger-button">Delete</button>
+                <a class="button-link" href="/admin/word-banks/{{ bank.id }}">Open</a>
               </div>
-            </form>
-            {% if word_bank_mode(bank) == "manual" %}
-              <div class="panel edit-card">
-                <h2>Manual Entries</h2>
-                <div class="list compact">
-                  {% for entry in word_bank_entries[bank.id] | default([]) %}
-                    {% set word = entry.word %}
-                    {% set definition = entry.definition %}
-                    {% set link = namespace(id=0) %}
-                    {% for bank_link in bank.word_links %}
-                      {% if bank_link.word_id == word.id %}{% set link.id = bank_link.id %}{% endif %}
-                    {% endfor %}
-                    <div class="row">
-                      <span>
-                        <strong>{{ word.display_text or word.word }}</strong>
-                        <small>{% if definition %}{{ definition_clue(definition) or definition.definition }}{% else %}Any definition{% endif %}</small>
-                      </span>
-                      <form method="post" action="/admin/word-banks/{{ bank.id }}/words/{{ link.id }}/delete"><button type="submit" class="danger-button">Remove</button></form>
-                    </div>
-                  {% else %}
-                    <p class="muted">No manual entries yet.</p>
-                  {% endfor %}
-                </div>
-                <form method="post" action="/admin/word-banks/{{ bank.id }}/words">
-                  <label>
-                    Add word or definition
-                    <select name="word_definition" required>
-                      {% for word in dictionary_words %}
-                        {% if not word.archived_at and not word.banned_at %}
-                          <option value="{{ word.id }}:0">{{ word.display_text or word.word }} / any definition</option>
-                          {% for definition in word.definitions %}
-                            <option value="{{ word.id }}:{{ definition.id }}">{{ word.display_text or word.word }} / {{ definition_clue(definition) or definition.definition }}</option>
-                          {% endfor %}
-                        {% endif %}
-                      {% endfor %}
-                    </select>
-                  </label>
-                  <button type="submit">Add Entry</button>
-                </form>
-              </div>
-            {% endif %}
-            <form id="archive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/archive"></form>
-            <form id="unarchive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/unarchive"></form>
-            <form id="delete-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/delete"></form>
+            </article>
           {% endfor %}
         </div>
+      </section>
+    {% endif %}
+
+    {% if section == "word_bank_detail" and selected_word_bank %}
+      {% set bank = selected_word_bank %}
+      <section class="puzzle-head">
+        <div>
+          <a class="ghost-link" href="/admin/word-banks">Back to Word Banks</a>
+          <h1>{{ bank.name }}</h1>
+          <p class="muted">{{ bank.slug }} / {{ word_bank_mode(bank) }}</p>
+          {% if bank.archived_at %}<span class="status-pill">Archived</span>{% endif %}
+        </div>
+      </section>
+      <section class="admin-grid two">
+        <form class="panel" method="post" action="/admin/word-banks/{{ bank.id }}">
+          <h2>Settings</h2>
+          <label>Name <input name="name" value="{{ bank.name }}" required></label>
+          <label>Slug <input name="slug" value="{{ bank.slug }}" required></label>
+          <label>
+            Mode
+            <select name="mode">
+              <option value="manual" {% if word_bank_mode(bank) == "manual" %}selected{% endif %}>Manual selection</option>
+              <option value="automatic" {% if word_bank_mode(bank) == "automatic" %}selected{% endif %}>Automatic by tag</option>
+            </select>
+          </label>
+          <label>
+            Category
+            <select name="category_id">
+              <option value="0">None</option>
+              {% for category in categories %}
+                <option value="{{ category.id }}" {% if bank.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <fieldset>
+            <legend>Tags</legend>
+            <div class="check-list">
+              {% for tag in tags %}
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in bank.tags %}checked{% endif %}>{{ tag.label }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <label>Description <textarea name="description" rows="3">{{ bank.description }}</textarea></label>
+          <input type="hidden" name="words" value="">
+          <div class="action-row">
+            <button type="submit">Save</button>
+            {% if bank.archived_at %}
+              <button type="submit" form="unarchive-bank-{{ bank.id }}" class="ghost-button">Unarchive</button>
+            {% else %}
+              <button type="submit" form="archive-bank-{{ bank.id }}" class="ghost-button">Archive</button>
+            {% endif %}
+            <button type="submit" form="delete-bank-{{ bank.id }}" class="danger-button">Delete</button>
+          </div>
+        </form>
+
+        <article class="panel">
+          {% if word_bank_mode(bank) == "automatic" %}
+            <h2>Automatic Matches</h2>
+            <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} entries match this bank's tags.</p>
+            <div class="list compact">
+              {% for entry in word_bank_entries[bank.id] | default([]) %}
+                {% set word = entry.word %}
+                {% set definition = entry.definition %}
+                <a class="row" href="/admin/dictionary/{{ word.id }}">
+                  <span>
+                    <strong>{{ word.display_text or word.word }}</strong>
+                    <small>{% if definition %}{{ definition_clue(definition) or definition.definition }}{% else %}Word-level tag match{% endif %}</small>
+                  </span>
+                </a>
+              {% else %}
+                <p class="muted">No matches yet. Add tags to this bank, words, or definitions.</p>
+              {% endfor %}
+            </div>
+          {% else %}
+            <h2>Manual Entries</h2>
+            <div class="list compact">
+              {% for entry in word_bank_entries[bank.id] | default([]) %}
+                {% set word = entry.word %}
+                {% set definition = entry.definition %}
+                {% set link = namespace(id=0) %}
+                {% for bank_link in bank.word_links %}
+                  {% if bank_link.word_id == word.id %}{% set link.id = bank_link.id %}{% endif %}
+                {% endfor %}
+                <div class="row">
+                  <span>
+                    <strong>{{ word.display_text or word.word }}</strong>
+                    <small>{% if definition %}{{ definition_clue(definition) or definition.definition }}{% else %}Any definition{% endif %}</small>
+                  </span>
+                  <form method="post" action="/admin/word-banks/{{ bank.id }}/words/{{ link.id }}/delete"><button type="submit" class="danger-button">Remove</button></form>
+                </div>
+              {% else %}
+                <p class="muted">No manual entries yet.</p>
+              {% endfor %}
+            </div>
+            <form method="post" action="/admin/word-banks/{{ bank.id }}/words">
+              <label>
+                Add word or definition
+                <select name="word_definition" required>
+                  {% for word in dictionary_words %}
+                    {% if not word.archived_at and not word.banned_at %}
+                      <option value="{{ word.id }}:0">{{ word.display_text or word.word }} / any definition</option>
+                      {% for definition in word.definitions %}
+                        <option value="{{ word.id }}:{{ definition.id }}">{{ word.display_text or word.word }} / {{ definition_clue(definition) or definition.definition }}</option>
+                      {% endfor %}
+                    {% endif %}
+                  {% endfor %}
+                </select>
+              </label>
+              <button type="submit">Add Entry</button>
+            </form>
+          {% endif %}
+        </article>
+        <form id="archive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/archive"></form>
+        <form id="unarchive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/unarchive"></form>
+        <form id="delete-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/delete"></form>
       </section>
     {% endif %}
 

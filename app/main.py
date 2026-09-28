@@ -555,7 +555,14 @@ def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)
     return RedirectResponse(url="/library", status_code=303)
 
 
-def admin_context(request: Request, db: Session, user: User, section: str, selected_word: DictionaryWord | None = None) -> dict:
+def admin_context(
+    request: Request,
+    db: Session,
+    user: User,
+    section: str,
+    selected_word: DictionaryWord | None = None,
+    selected_word_bank: WordBank | None = None,
+) -> dict:
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
     all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
     word_banks = [bank for bank in all_word_banks if bank.archived_at is None]
@@ -583,17 +590,24 @@ def admin_context(request: Request, db: Session, user: User, section: str, selec
         "photos": photos,
         "dictionary_words": dictionary_words,
         "selected_word": selected_word,
+        "selected_word_bank": selected_word_bank,
         "puzzle_types": list_puzzle_types(),
     }
 
 
-def render_admin(request: Request, db: Session, section: str, selected_word: DictionaryWord | None = None):
+def render_admin(
+    request: Request,
+    db: Session,
+    section: str,
+    selected_word: DictionaryWord | None = None,
+    selected_word_bank: WordBank | None = None,
+):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
         "admin.html",
-        admin_context(request, db, user, section, selected_word),
+        admin_context(request, db, user, section, selected_word, selected_word_bank),
     )
 
 
@@ -615,6 +629,20 @@ def admin_generate_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/word-banks", response_class=HTMLResponse)
 def admin_word_banks_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "word_banks")
+
+
+@app.get("/admin/word-banks/{bank_id}", response_class=HTMLResponse)
+def admin_word_bank_detail_page(bank_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    bank = db.get(WordBank, bank_id)
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    return templates.TemplateResponse(
+        "admin.html",
+        admin_context(request, db, user, "word_bank_detail", selected_word_bank=bank),
+    )
 
 
 @app.get("/admin/dictionary", response_class=HTMLResponse)
@@ -773,7 +801,8 @@ def admin_create_word_bank(
     db.flush()
     sync_word_bank_words(db, bank, parse_words(words))
     db.commit()
-    return RedirectResponse(url="/admin/word-banks", status_code=303)
+    db.refresh(bank)
+    return RedirectResponse(url=f"/admin/word-banks/{bank.id}", status_code=303)
 
 
 @app.post("/admin/word-banks/{bank_id}")
@@ -805,7 +834,7 @@ def admin_update_word_bank(
         if selected_mode == "manual" and parsed_words:
             sync_word_bank_words(db, bank, parsed_words)
         db.commit()
-    return RedirectResponse(url="/admin/word-banks", status_code=303)
+    return RedirectResponse(url=f"/admin/word-banks/{bank_id}", status_code=303)
 
 
 @app.post("/admin/word-banks/{bank_id}/words")
@@ -835,7 +864,7 @@ def admin_add_word_bank_word(
         bank.payload = payload
         add_word_bank_link(db, bank, word, definition)
         db.commit()
-    return RedirectResponse(url="/admin/word-banks", status_code=303)
+    return RedirectResponse(url=f"/admin/word-banks/{bank_id}", status_code=303)
 
 
 @app.post("/admin/word-banks/{bank_id}/words/{link_id}/delete")
@@ -852,7 +881,7 @@ def admin_delete_word_bank_word(
     if link is not None and link.word_bank_id == bank_id:
         db.delete(link)
         db.commit()
-    return RedirectResponse(url="/admin/word-banks", status_code=303)
+    return RedirectResponse(url=f"/admin/word-banks/{bank_id}", status_code=303)
 
 
 @app.post("/admin/word-banks/{bank_id}/archive")
@@ -864,7 +893,7 @@ def admin_archive_word_bank(bank_id: int, request: Request, db: Session = Depend
     if bank is not None:
         bank.archived_at = datetime.now(timezone.utc)
         db.commit()
-    return RedirectResponse(url="/admin/word-banks", status_code=303)
+    return RedirectResponse(url=f"/admin/word-banks/{bank_id}", status_code=303)
 
 
 @app.post("/admin/word-banks/{bank_id}/unarchive")
@@ -876,7 +905,7 @@ def admin_unarchive_word_bank(bank_id: int, request: Request, db: Session = Depe
     if bank is not None:
         bank.archived_at = None
         db.commit()
-    return RedirectResponse(url="/admin/word-banks", status_code=303)
+    return RedirectResponse(url=f"/admin/word-banks/{bank_id}", status_code=303)
 
 
 @app.post("/admin/word-banks/{bank_id}/delete")
