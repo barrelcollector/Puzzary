@@ -217,8 +217,9 @@ def definition_clues(definition: DictionaryDefinition | None) -> list[str]:
         return []
     clues = tag_values(definition.tags, "Clue")
     definition_text = definition.definition.strip()
-    if definition_text and definition_text not in clues:
-        clues.append(definition_text)
+    definition_clue_text = f"Definition: {definition_text}" if definition_text else ""
+    if definition_clue_text and definition_clue_text not in clues:
+        clues.append(definition_clue_text)
     return clues
 
 

@@ -66,8 +66,9 @@ def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, li
         if definition_allowed(definition, excluded_tag_ids):
             clues = typed_tag_values(getattr(definition, "tags", []), "Clue")
             definition_text = str(getattr(definition, "definition", "")).strip()
-            if definition_text and definition_text not in clues:
-                clues.append(definition_text)
+            definition_clue_text = f"Definition: {definition_text}" if definition_text else ""
+            if definition_clue_text and definition_clue_text not in clues:
+                clues.append(definition_clue_text)
             if clues:
                 primary, clue_steps = progressive_clues(clues, str(getattr(word, "display_text", "") or getattr(word, "word", "")))
                 return primary, clue_steps, definition.id
