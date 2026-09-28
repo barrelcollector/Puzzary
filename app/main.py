@@ -104,6 +104,7 @@ def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
         url=puzzle_url(puzzle.id),
         print_payload=puzzle.print_payload,
         play_payload=puzzle.play_payload,
+        metadata=puzzle.puzzle_metadata or {},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
     )
 
@@ -179,6 +180,12 @@ def normalize_word(value: str) -> str:
 
 def normalize_dictionary_word(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", value).lower()
+
+
+def normalize_seed(value: str | None) -> str:
+    if value and value.strip():
+        return value.strip()
+    return uuid.uuid4().hex[:12]
 
 
 def word_bank_words(bank: WordBank | None) -> list[str]:
@@ -861,6 +868,7 @@ def admin_generate_puzzle(
     puzzle_type: str = Form("word_search"),
     bank_id: int = Form(...),
     difficulty: str = Form("easy"),
+    seed: str = Form(""),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
@@ -878,6 +886,7 @@ def admin_generate_puzzle(
             theme=bank.slug,
             difficulty=difficulty,
             excluded_tag_ids=excluded_tag_ids,
+            seed=seed or None,
         ),
         db,
     )
@@ -1713,9 +1722,11 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
             "words": source_data,
             "blocked_words": blocked_words_for_generation(db, excluded_tag_ids),
         }
-    generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data)
+    generation_seed = normalize_seed(payload.seed)
+    generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data, generation_seed)
     generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
     generated.metadata["excluded_tag_slugs"] = [tag.slug for tag in excluded_tags]
+    generated.metadata["seed"] = generation_seed
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,

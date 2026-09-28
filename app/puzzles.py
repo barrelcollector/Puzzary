@@ -20,7 +20,7 @@ class GeneratedPuzzle:
 class PuzzleType:
     slug: str
     label: str
-    generator: Callable[[str, str, Any], GeneratedPuzzle]
+    generator: Callable[[str, str, Any, str | None], GeneratedPuzzle]
     source_builder: Callable[[Any, str, set[int] | None], Any]
     answer_checker: Callable[[str, dict], tuple[bool, int, int]]
     progress_normalizer: Callable[[Any, dict], dict]

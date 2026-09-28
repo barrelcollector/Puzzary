@@ -95,7 +95,7 @@ def fill_grid(base_grid: list[list[str]], rng: random.Random, blocked_words: set
     raise ValueError("Unable to fill word search without forming a blocked word.")
 
 
-def generate(theme: str, difficulty: str, source_data: list[str] | dict | None = None) -> GeneratedPuzzle:
+def generate(theme: str, difficulty: str, source_data: list[str] | dict | None = None, seed: str | None = None) -> GeneratedPuzzle:
     blocked_source = []
     if isinstance(source_data, dict):
         raw_words = source_data.get("words")
@@ -113,8 +113,8 @@ def generate(theme: str, difficulty: str, source_data: list[str] | dict | None =
     if not words:
         raise ValueError("Word search generation needs at least one allowed word.")
     size = {"easy": 10, "medium": 12, "hard": 14}.get(difficulty, 10)
-    seed = f"{theme}:{difficulty}:{','.join(words)}"
-    rng = random.Random(seed)
+    generation_seed = seed or f"{theme}:{difficulty}:{','.join(words)}"
+    rng = random.Random(generation_seed)
     grid = [["" for _ in range(size)] for _ in range(size)]
     placements: list[dict] = []
     directions = [(1, 0), (0, 1), (1, 1), (-1, 1)]
@@ -166,6 +166,7 @@ def generate(theme: str, difficulty: str, source_data: list[str] | dict | None =
             "generator": "local.word_search.v1",
             "grid_size": size,
             "blocked_word_count": len(blocked_words),
+            "seed": generation_seed,
         },
     )
 

@@ -12,6 +12,7 @@ class PuzzleGenerateRequest(BaseModel):
     theme: str = "daily_stripe"
     difficulty: str = "easy"
     excluded_tag_ids: list[int] = Field(default_factory=list)
+    seed: str | None = None
 
 
 class PuzzleAttemptCreate(BaseModel):
@@ -49,6 +50,7 @@ class PuzzleSummary(BaseModel):
     url: str
     print_payload: dict
     play_payload: dict
+    metadata: dict = Field(default_factory=dict)
     hints: list[str] = []
 
 

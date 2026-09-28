@@ -123,7 +123,7 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return found_count, expected_count
 
 
-def generate(theme: str, difficulty: str, source_data: list[dict] | None = None) -> GeneratedPuzzle:
+def generate(theme: str, difficulty: str, source_data: list[dict] | None = None, seed: str | None = None) -> GeneratedPuzzle:
     raw_entries = source_data if source_data is not None else [
         {"word": word, "clue": f"Word from {theme.replace('_', ' ')}."}
         for word in words_for_theme(theme, difficulty)
@@ -155,8 +155,8 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None)
     if len(entries) < 3:
         raise ValueError("Crossword generation needs at least three words of 3+ characters.")
 
-    seed = f"crossword:{theme}:{difficulty}:{','.join(item['word'] for item in entries)}"
-    rng = random.Random(seed)
+    generation_seed = seed or f"crossword:{theme}:{difficulty}:{','.join(item['word'] for item in entries)}"
+    rng = random.Random(generation_seed)
     grid: list[list[str | None]] = [[None for _ in range(size)] for _ in range(size)]
     placements: list[dict] = []
 
@@ -316,7 +316,7 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None)
             "Use intersecting letters to narrow down uncertain answers.",
             f"The longest answer has {max(len(item['answer']) for item in clue_entries)} letters.",
         ],
-        metadata={"generator": "local.crossword.v1", "grid_size": len(play_cells)},
+        metadata={"generator": "local.crossword.v1", "grid_size": len(play_cells), "seed": generation_seed},
     )
 
 
