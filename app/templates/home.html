@@ -11,10 +11,10 @@
       </select>
     </label>
     <label>
-      Dictionary
+      Word bank
       <select name="theme">
-        {% for source in word_banks %}
-          <option value="{{ source.slug }}">{{ source.name }}</option>
+        {% for bank in word_banks %}
+          <option value="{{ bank.slug }}">{{ bank.name }}</option>
         {% endfor %}
       </select>
     </label>

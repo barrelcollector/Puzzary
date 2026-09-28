@@ -4,11 +4,11 @@
 <section class="admin-shell">
   <nav class="admin-nav" aria-label="Admin">
     <a class="{% if section == 'dashboard' %}active{% endif %}" href="/admin">Dashboard</a>
-    <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
     <a class="{% if section == 'generate' %}active{% endif %}" href="/admin/generate">Generate</a>
-    <a class="{% if section == 'sources' %}active{% endif %}" href="/admin/sources">Content Sources</a>
-    <a class="{% if section == 'dictionary' %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
-    <a class="{% if section == 'taxonomy' %}active{% endif %}" href="/admin/taxonomy">Taxonomy</a>
+    <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
+    <a class="{% if section in ['dictionary', 'word_detail'] %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
+    <a class="{% if section == 'word_banks' %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
+    <a class="{% if section == 'tags' %}active{% endif %}" href="/admin/tags">Tags</a>
     <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
     <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
   </nav>
@@ -18,11 +18,11 @@
       <section class="puzzle-head">
         <div>
           <h1>Admin Dashboard</h1>
-          <p class="muted">Manage the puzzle lifecycle from source material to playable puzzles.</p>
+        <p class="muted">Manage words, banks, generated puzzles, and solving activity.</p>
         </div>
       </section>
       <div class="metric-grid">
-        <a class="metric-card" href="/admin/sources"><strong>{{ sources | length }}</strong><span>Content sources</span></a>
+        <a class="metric-card" href="/admin/word-banks"><strong>{{ all_word_banks | length }}</strong><span>Word banks</span></a>
         <a class="metric-card" href="/admin/dictionary"><strong>{{ dictionary_words | length }}</strong><span>Dictionary words</span></a>
         <a class="metric-card" href="/admin/puzzles"><strong>{{ live_puzzles | length }}</strong><span>Live puzzles</span></a>
         <a class="metric-card" href="/admin/puzzles"><strong>{{ archived_puzzles | length }}</strong><span>Archived puzzles</span></a>
@@ -31,7 +31,7 @@
         <h2>Quick Actions</h2>
         <div class="action-row">
           <a class="button-link" href="/admin/generate">Generate Puzzle</a>
-          <a class="button-link" href="/admin/sources">Add Content Source</a>
+          <a class="button-link" href="/admin/word-banks">Add Word Bank</a>
           <a class="ghost-link" href="/admin/publishing">Publishing Plan</a>
         </div>
       </section>
@@ -42,7 +42,7 @@
             <a class="row" href="/puzzles/{{ puzzle.id }}">
               <span>
                 <strong>{{ puzzle.title }}</strong>
-                <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }}{% if puzzle.content_source %} / {{ puzzle.content_source.name }}{% endif %}</small>
+                <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }}{% if puzzle.word_bank %} / {{ puzzle.word_bank.name }}{% endif %}</small>
               </span>
               {% if puzzle.archived_at %}<small>Archived</small>{% endif %}
             </a>
@@ -67,7 +67,7 @@
             <div>
               <strong>{{ puzzle.title }}</strong>
               <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }} / {{ puzzle.id }}</small>
-              {% if puzzle.content_source %}<small>Source: {{ puzzle.content_source.name }}</small>{% endif %}
+              {% if puzzle.word_bank %}<small>Word bank: {{ puzzle.word_bank.name }}</small>{% endif %}
               {% if puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
             </div>
             <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/metadata">
@@ -112,7 +112,7 @@
       <section class="puzzle-head">
         <div>
           <h1>Generate</h1>
-          <p class="muted">Create puzzles from reusable content sources.</p>
+          <p class="muted">Create puzzles from reusable word banks.</p>
         </div>
       </section>
       <form class="panel narrow-panel" method="post" action="/admin/generate">
@@ -123,10 +123,10 @@
           </select>
         </label>
         <label>
-          Content source
-          <select name="source_id" required>
-            {% for source in word_banks %}
-              <option value="{{ source.id }}">{{ source.name }} / Word Bank</option>
+          Word bank
+          <select name="bank_id" required>
+            {% for bank in word_banks %}
+              <option value="{{ bank.id }}">{{ bank.name }}</option>
             {% endfor %}
           </select>
         </label>
@@ -161,22 +161,18 @@
       </form>
     {% endif %}
 
-    {% if section == "sources" %}
+    {% if section == "word_banks" %}
       <section class="puzzle-head">
         <div>
-          <h1>Content Sources</h1>
-          <p class="muted">Curated collections of canonical dictionary entries. Word Bank is the first source type.</p>
+          <h1>Word Banks</h1>
+          <p class="muted">Curated lists that point back to the one true dictionary entry for each word.</p>
         </div>
       </section>
       <section class="admin-grid two">
-        <form class="panel" method="post" action="/admin/sources">
-          <h2>Add Source</h2>
+        <form class="panel" method="post" action="/admin/word-banks">
+          <h2>Add Word Bank</h2>
           <label>Name <input name="name" required></label>
           <label>Slug <input name="slug" placeholder="daily_stripe"></label>
-          <label>
-            Type
-            <select name="source_type"><option value="word_bank">Word Bank</option></select>
-          </label>
           <label>
             Category
             <select name="category_id">
@@ -187,26 +183,22 @@
           <label>Description <textarea name="description" rows="2"></textarea></label>
           <label>Words <textarea name="words" rows="6" placeholder="MERIDIAN&#10;PUZZLE&#10;ZEBRA"></textarea></label>
           <p class="muted">New words are added to the dictionary automatically. Existing words are reused.</p>
-          <button type="submit">Add Source</button>
+          <button type="submit">Add Word Bank</button>
         </form>
         <div class="admin-list">
-          {% for source in sources %}
-            <form class="panel edit-card" method="post" action="/admin/sources/{{ source.id }}">
-              <h2>{{ source.name }}</h2>
-              <small>{{ source.source_type | replace("_", " ") | title }} / {{ source.slug }}</small>
-              {% if source.archived_at %}<span class="status-pill">Archived</span>{% endif %}
-              <label>Name <input name="name" value="{{ source.name }}" required></label>
-              <label>Slug <input name="slug" value="{{ source.slug }}" required></label>
-              <label>
-                Type
-                <select name="source_type"><option value="word_bank" {% if source.source_type == "word_bank" %}selected{% endif %}>Word Bank</option></select>
-              </label>
+          {% for bank in all_word_banks %}
+            <form class="panel edit-card" method="post" action="/admin/word-banks/{{ bank.id }}">
+              <h2>{{ bank.name }}</h2>
+              <small>{{ bank.slug }}</small>
+              {% if bank.archived_at %}<span class="status-pill">Archived</span>{% endif %}
+              <label>Name <input name="name" value="{{ bank.name }}" required></label>
+              <label>Slug <input name="slug" value="{{ bank.slug }}" required></label>
               <label>
                 Category
                 <select name="category_id">
                   <option value="0">None</option>
                   {% for category in categories %}
-                    <option value="{{ category.id }}" {% if source.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+                    <option value="{{ category.id }}" {% if bank.category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
                   {% endfor %}
                 </select>
               </label>
@@ -214,28 +206,28 @@
                 <legend>Tags</legend>
                 <div class="check-list">
                   {% for tag in tags %}
-                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in source.tags %}checked{% endif %}>{{ tag.name }}</label>
+                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in bank.tags %}checked{% endif %}>{{ tag.name }}</label>
                   {% else %}
                     <small>No tags yet.</small>
                   {% endfor %}
                 </div>
               </fieldset>
-              <label>Description <textarea name="description" rows="2">{{ source.description }}</textarea></label>
-              <label>Words <textarea name="words" rows="6">{{ source_word_texts[source.id] | default([]) | join('\n') }}</textarea></label>
-              <p class="muted">{{ source_word_texts[source.id] | default([]) | length }} canonical words linked.</p>
+              <label>Description <textarea name="description" rows="2">{{ bank.description }}</textarea></label>
+              <label>Words <textarea name="words" rows="6">{{ word_bank_texts[bank.id] | default([]) | join('\n') }}</textarea></label>
+              <p class="muted">{{ word_bank_texts[bank.id] | default([]) | length }} dictionary words linked.</p>
               <div class="action-row">
                 <button type="submit">Save</button>
-                {% if source.archived_at %}
-                  <button type="submit" form="unarchive-source-{{ source.id }}" class="ghost-button">Unarchive</button>
+                {% if bank.archived_at %}
+                  <button type="submit" form="unarchive-bank-{{ bank.id }}" class="ghost-button">Unarchive</button>
                 {% else %}
-                  <button type="submit" form="archive-source-{{ source.id }}" class="ghost-button">Archive</button>
+                  <button type="submit" form="archive-bank-{{ bank.id }}" class="ghost-button">Archive</button>
                 {% endif %}
-                <button type="submit" form="delete-source-{{ source.id }}" class="danger-button">Delete</button>
+                <button type="submit" form="delete-bank-{{ bank.id }}" class="danger-button">Delete</button>
               </div>
             </form>
-            <form id="archive-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/archive"></form>
-            <form id="unarchive-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/unarchive"></form>
-            <form id="delete-source-{{ source.id }}" method="post" action="/admin/sources/{{ source.id }}/delete"></form>
+            <form id="archive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/archive"></form>
+            <form id="unarchive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/unarchive"></form>
+            <form id="delete-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/delete"></form>
           {% endfor %}
         </div>
       </section>
@@ -245,7 +237,7 @@
       <section class="puzzle-head">
         <div>
           <h1>Dictionary</h1>
-          <p class="muted">Canonical words. Each word exists once and can belong to many content sources.</p>
+          <p class="muted">Canonical words. Each word exists once, can have tags, and can appear in many word banks.</p>
         </div>
       </section>
       <section class="admin-grid two">
@@ -255,20 +247,32 @@
           <label>Display text <input name="display_text" autocomplete="off"></label>
           <label>Clue <textarea name="clue" rows="2"></textarea></label>
           <label>Part of speech <input name="part_of_speech" autocomplete="off" placeholder="noun"></label>
+          <fieldset>
+            <legend>Tags</legend>
+            <div class="check-list">
+              {% for tag in tags %}
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+          </fieldset>
           <label>Properties / notes <textarea name="properties" rows="3"></textarea></label>
           <button type="submit">Save Word</button>
         </form>
         <div class="admin-list">
           {% for word in dictionary_words %}
-            <form class="panel edit-card" method="post" action="/admin/dictionary/{{ word.id }}">
-              <h2>{{ word.word }}</h2>
-              <small>{{ word.source_links | length }} source{% if word.source_links | length != 1 %}s{% endif %}</small>
-              <label>Display text <input name="display_text" value="{{ word.display_text }}" required></label>
-              <label>Clue <textarea name="clue" rows="2">{{ word.clue }}</textarea></label>
-              <label>Part of speech <input name="part_of_speech" value="{{ word.part_of_speech }}"></label>
-              <label>Properties / notes <textarea name="properties" rows="3">{{ word.properties.notes | default('') }}</textarea></label>
-              <button type="submit">Save Word</button>
-            </form>
+            <a class="word-row" href="/admin/dictionary/{{ word.id }}">
+              <span>
+                <strong>{{ word.display_text or word.word }}</strong>
+                <small>{{ word.part_of_speech or "word" }} / {{ word.bank_links | length }} bank{% if word.bank_links | length != 1 %}s{% endif %}</small>
+              </span>
+              <span class="chip-list compact-chips">
+                {% for tag in word.tags[:3] %}
+                  <small class="chip">{{ tag.name }}</small>
+                {% endfor %}
+              </span>
+            </a>
           {% else %}
             <p class="muted">No words yet.</p>
           {% endfor %}
@@ -276,37 +280,71 @@
       </section>
     {% endif %}
 
-    {% if section == "taxonomy" %}
+    {% if section == "word_detail" and selected_word %}
       <section class="puzzle-head">
         <div>
-          <h1>Taxonomy</h1>
-          <p class="muted">Categories are broad groups. Tags are flexible labels used across sources and puzzles.</p>
+          <a class="ghost-link" href="/admin/dictionary">Back to Dictionary</a>
+          <h1 class="dictionary-title">{{ selected_word.display_text or selected_word.word }}</h1>
+          <p class="muted">{{ selected_word.word }}{% if selected_word.part_of_speech %} / {{ selected_word.part_of_speech }}{% endif %}</p>
+        </div>
+      </section>
+      <section class="word-entry-grid">
+        <article class="panel word-entry">
+          <div class="chip-list">
+            {% for tag in selected_word.tags %}
+              <span class="chip">{{ tag.name }}</span>
+            {% else %}
+              <span class="muted">No tags yet.</span>
+            {% endfor %}
+          </div>
+          {% if selected_word.clue %}
+            <h2>Clue</h2>
+            <p>{{ selected_word.clue }}</p>
+          {% endif %}
+          {% if selected_word.properties.notes %}
+            <h2>Notes</h2>
+            <p>{{ selected_word.properties.notes }}</p>
+          {% endif %}
+          <h2>Word Banks</h2>
+          <div class="list compact">
+            {% for link in selected_word.bank_links %}
+              <a class="row" href="/admin/word-banks">
+                <span><strong>{{ link.word_bank.name }}</strong><small>Position {{ link.position + 1 }}</small></span>
+              </a>
+            {% else %}
+              <p class="muted">This word is not in a word bank yet.</p>
+            {% endfor %}
+          </div>
+        </article>
+        <form class="panel" method="post" action="/admin/dictionary/{{ selected_word.id }}">
+          <h2>Edit Word</h2>
+          <label>Display text <input name="display_text" value="{{ selected_word.display_text }}" required></label>
+          <label>Clue <textarea name="clue" rows="3">{{ selected_word.clue }}</textarea></label>
+          <label>Part of speech <input name="part_of_speech" value="{{ selected_word.part_of_speech }}"></label>
+          <fieldset>
+            <legend>Tags</legend>
+            <div class="check-list">
+              {% for tag in tags %}
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in selected_word.tags %}checked{% endif %}>{{ tag.name }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <label>Properties / notes <textarea name="properties" rows="5">{{ selected_word.properties.notes | default('') }}</textarea></label>
+          <button type="submit">Save Word</button>
+        </form>
+      </section>
+    {% endif %}
+
+    {% if section == "tags" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Tags</h1>
+          <p class="muted">Reusable labels for words, word banks, and puzzles.</p>
         </div>
       </section>
       <section class="admin-grid two">
-        <div class="panel">
-          <h2>Categories</h2>
-          <form method="post" action="/admin/categories">
-            <label>Name <input name="name" required></label>
-            <label>Slug <input name="slug"></label>
-            <label>Description <textarea name="description" rows="2"></textarea></label>
-            <button type="submit">Add Category</button>
-          </form>
-          <div class="admin-list compact-admin">
-            {% for category in categories %}
-              <form class="edit-card" method="post" action="/admin/categories/{{ category.id }}">
-                <label>Name <input name="name" value="{{ category.name }}" required></label>
-                <label>Slug <input name="slug" value="{{ category.slug }}" required></label>
-                <label>Description <textarea name="description" rows="2">{{ category.description }}</textarea></label>
-                <div class="action-row">
-                  <button type="submit">Save</button>
-                  <button type="submit" form="delete-category-{{ category.id }}" class="danger-button">Delete</button>
-                </div>
-              </form>
-              <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
-            {% endfor %}
-          </div>
-        </div>
         <div class="panel">
           <h2>Tags</h2>
           <form method="post" action="/admin/tags">
@@ -328,6 +366,30 @@
             {% endfor %}
           </div>
         </div>
+        <details class="panel">
+          <summary>Optional categories</summary>
+          <p class="muted">Categories are still available as one broad grouping for puzzles and word banks.</p>
+          <form method="post" action="/admin/categories">
+            <label>Name <input name="name" required></label>
+            <label>Slug <input name="slug"></label>
+            <label>Description <textarea name="description" rows="2"></textarea></label>
+            <button type="submit">Add Category</button>
+          </form>
+          <div class="admin-list compact-admin">
+            {% for category in categories %}
+              <form class="edit-card" method="post" action="/admin/categories/{{ category.id }}">
+                <label>Name <input name="name" value="{{ category.name }}" required></label>
+                <label>Slug <input name="slug" value="{{ category.slug }}" required></label>
+                <label>Description <textarea name="description" rows="2">{{ category.description }}</textarea></label>
+                <div class="action-row">
+                  <button type="submit">Save</button>
+                  <button type="submit" form="delete-category-{{ category.id }}" class="danger-button">Delete</button>
+                </div>
+              </form>
+              <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
+            {% endfor %}
+          </div>
+        </details>
       </section>
     {% endif %}
 

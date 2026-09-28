@@ -16,10 +16,18 @@ puzzle_tag_links = Table(
 )
 
 
-content_source_tag_links = Table(
-    "content_source_tag_links",
+word_bank_tag_links = Table(
+    "word_bank_tag_links",
     Base.metadata,
-    Column("content_source_id", ForeignKey("content_sources.id"), primary_key=True),
+    Column("word_bank_id", ForeignKey("word_banks.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
+
+
+dictionary_word_tag_links = Table(
+    "dictionary_word_tag_links",
+    Base.metadata,
+    Column("word_id", ForeignKey("dictionary_words.id"), primary_key=True),
     Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
 )
 
@@ -47,7 +55,7 @@ class Puzzle(Base):
     theme: Mapped[str] = mapped_column(String(80), index=True)
     difficulty: Mapped[str] = mapped_column(String(40), index=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("puzzle_categories.id"), nullable=True, index=True)
-    content_source_id: Mapped[int | None] = mapped_column(ForeignKey("content_sources.id"), nullable=True, index=True)
+    word_bank_id: Mapped[int | None] = mapped_column(ForeignKey("word_banks.id"), nullable=True, index=True)
     prompt: Mapped[str] = mapped_column(Text, default="")
     print_payload: Mapped[dict] = mapped_column(JSON)
     play_payload: Mapped[dict] = mapped_column(JSON)
@@ -58,7 +66,7 @@ class Puzzle(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     category: Mapped[PuzzleCategory | None] = relationship(back_populates="puzzles")
-    content_source: Mapped[ContentSource | None] = relationship(back_populates="puzzles")
+    word_bank: Mapped[WordBank | None] = relationship(back_populates="puzzles")
     tags: Mapped[list[PuzzleTag]] = relationship(secondary=puzzle_tag_links, back_populates="puzzles")
     hints: Mapped[list[PuzzleHint]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
@@ -134,27 +142,26 @@ class PuzzleDictionary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class ContentSource(Base):
-    __tablename__ = "content_sources"
+class WordBank(Base):
+    __tablename__ = "word_banks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
-    source_type: Mapped[str] = mapped_column(String(60), index=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("puzzle_categories.id"), nullable=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    category: Mapped[PuzzleCategory | None] = relationship(back_populates="content_sources")
-    tags: Mapped[list[PuzzleTag]] = relationship(secondary=content_source_tag_links, back_populates="content_sources")
-    word_links: Mapped[list[ContentSourceWord]] = relationship(
-        back_populates="content_source",
+    category: Mapped[PuzzleCategory | None] = relationship(back_populates="word_banks")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=word_bank_tag_links, back_populates="word_banks")
+    word_links: Mapped[list[WordBankWord]] = relationship(
+        back_populates="word_bank",
         cascade="all, delete-orphan",
-        order_by="ContentSourceWord.position",
+        order_by="WordBankWord.position",
     )
-    puzzles: Mapped[list[Puzzle]] = relationship(back_populates="content_source")
+    puzzles: Mapped[list[Puzzle]] = relationship(back_populates="word_bank")
 
 
 class DictionaryWord(Base):
@@ -168,21 +175,22 @@ class DictionaryWord(Base):
     properties: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    source_links: Mapped[list[ContentSourceWord]] = relationship(back_populates="word", cascade="all, delete-orphan")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=dictionary_word_tag_links, back_populates="dictionary_words")
+    bank_links: Mapped[list[WordBankWord]] = relationship(back_populates="word", cascade="all, delete-orphan")
 
 
-class ContentSourceWord(Base):
-    __tablename__ = "content_source_words"
-    __table_args__ = (UniqueConstraint("content_source_id", "word_id", name="uq_content_source_word"),)
+class WordBankWord(Base):
+    __tablename__ = "word_bank_words"
+    __table_args__ = (UniqueConstraint("word_bank_id", "word_id", name="uq_word_bank_word"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    content_source_id: Mapped[int] = mapped_column(ForeignKey("content_sources.id"), index=True)
+    word_bank_id: Mapped[int] = mapped_column(ForeignKey("word_banks.id"), index=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("dictionary_words.id"), index=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    content_source: Mapped[ContentSource] = relationship(back_populates="word_links")
-    word: Mapped[DictionaryWord] = relationship(back_populates="source_links")
+    word_bank: Mapped[WordBank] = relationship(back_populates="word_links")
+    word: Mapped[DictionaryWord] = relationship(back_populates="bank_links")
 
 
 class PuzzleCategory(Base):
@@ -195,7 +203,7 @@ class PuzzleCategory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     puzzles: Mapped[list[Puzzle]] = relationship(back_populates="category")
-    content_sources: Mapped[list[ContentSource]] = relationship(back_populates="category")
+    word_banks: Mapped[list[WordBank]] = relationship(back_populates="category")
 
 
 class PuzzleTag(Base):
@@ -207,7 +215,8 @@ class PuzzleTag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     puzzles: Mapped[list[Puzzle]] = relationship(secondary=puzzle_tag_links, back_populates="tags")
-    content_sources: Mapped[list[ContentSource]] = relationship(secondary=content_source_tag_links, back_populates="tags")
+    word_banks: Mapped[list[WordBank]] = relationship(secondary=word_bank_tag_links, back_populates="tags")
+    dictionary_words: Mapped[list[DictionaryWord]] = relationship(secondary=dictionary_word_tag_links, back_populates="tags")
 
 
 class ContentItem(Base):

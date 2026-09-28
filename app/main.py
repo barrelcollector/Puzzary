@@ -18,8 +18,6 @@ from sqlalchemy.orm import Session
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.models import (
-    ContentSource,
-    ContentSourceWord,
     DictionaryWord,
     Puzzle,
     PuzzleAttempt,
@@ -30,6 +28,8 @@ from app.models import (
     PuzzleProgress,
     PuzzleTag,
     User,
+    WordBank,
+    WordBankWord,
 )
 from app.puzzles import check_word_search_answer, generate_word_search
 from app.schemas import (
@@ -57,11 +57,11 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 @app.on_event("startup")
 def startup() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    init_db()
     ensure_schema()
+    init_db()
     with SessionLocal() as db:
         ensure_admin_user(db)
-        seed_content_sources(db)
+        seed_word_banks(db)
 
 
 def puzzle_url(puzzle_id: str) -> str:
@@ -112,13 +112,13 @@ def normalize_word(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", value).upper()
 
 
-def source_words(source: ContentSource | None) -> list[str]:
-    if source is None:
+def word_bank_words(bank: WordBank | None) -> list[str]:
+    if bank is None:
         return []
-    linked_words = [link.word.word for link in sorted(source.word_links, key=lambda item: item.position)]
+    linked_words = [link.word.word for link in sorted(bank.word_links, key=lambda item: item.position)]
     if linked_words:
         return linked_words
-    words = source.payload.get("words", [])
+    words = bank.payload.get("words", [])
     if not isinstance(words, list):
         return []
     return [str(word).upper() for word in words if str(word).strip()]
@@ -137,13 +137,13 @@ def get_or_create_word(db: Session, value: str) -> DictionaryWord | None:
     return entry
 
 
-def sync_source_words(db: Session, source: ContentSource, words: list[str]) -> None:
-    source.word_links.clear()
+def sync_word_bank_words(db: Session, bank: WordBank, words: list[str]) -> None:
+    bank.word_links.clear()
     db.flush()
     for position, word_value in enumerate(words):
         entry = get_or_create_word(db, word_value)
         if entry is not None:
-            source.word_links.append(ContentSourceWord(word=entry, position=position))
+            bank.word_links.append(WordBankWord(word=entry, position=position))
 
 
 def ensure_admin_user(db: Session) -> None:
@@ -156,57 +156,55 @@ def ensure_admin_user(db: Session) -> None:
         db.commit()
 
 
-def seed_content_sources(db: Session) -> None:
-    existing = set(db.scalars(select(ContentSource.slug)).all())
+def seed_word_banks(db: Session) -> None:
+    existing = set(db.scalars(select(WordBank.slug)).all())
     dictionaries = db.scalars(select(PuzzleDictionary).order_by(PuzzleDictionary.name)).all()
     for dictionary in dictionaries:
         if dictionary.slug in existing:
             continue
         db.add(
-            source := ContentSource(
+            bank := WordBank(
                 name=dictionary.name,
                 slug=dictionary.slug,
-                source_type="word_bank",
                 description=dictionary.description,
                 payload={"words": dictionary.words},
             )
         )
-        sync_source_words(db, source, dictionary.words)
+        sync_word_bank_words(db, bank, dictionary.words)
         existing.add(dictionary.slug)
 
     for slug, words in THEMES.items():
         if slug in existing:
             continue
         db.add(
-            source := ContentSource(
+            bank := WordBank(
                 name=slug.replace("_", " ").title(),
                 slug=slug,
-                source_type="word_bank",
                 description="Seeded from the original Puzzary word list.",
                 payload={"words": words},
             )
         )
-        sync_source_words(db, source, words)
+        sync_word_bank_words(db, bank, words)
         existing.add(slug)
-    for source in db.scalars(select(ContentSource).where(ContentSource.source_type == "word_bank")).all():
-        if not source.word_links:
-            sync_source_words(db, source, source_words(source))
+    for bank in db.scalars(select(WordBank)).all():
+        if not bank.word_links:
+            sync_word_bank_words(db, bank, word_bank_words(bank))
     db.commit()
 
 
-def word_bank_options(db: Session, include_archived: bool = False) -> list[ContentSource]:
-    statement = select(ContentSource).where(ContentSource.source_type == "word_bank")
+def word_bank_options(db: Session, include_archived: bool = False) -> list[WordBank]:
+    statement = select(WordBank)
     if not include_archived:
-        statement = statement.where(ContentSource.archived_at.is_(None))
-    return db.scalars(statement.order_by(ContentSource.name)).all()
+        statement = statement.where(WordBank.archived_at.is_(None))
+    return db.scalars(statement.order_by(WordBank.name)).all()
 
 
-def source_for_slug(db: Session, slug: str) -> ContentSource | None:
-    return db.scalar(select(ContentSource).where(ContentSource.slug == slug, ContentSource.archived_at.is_(None)))
+def word_bank_for_slug(db: Session, slug: str) -> WordBank | None:
+    return db.scalar(select(WordBank).where(WordBank.slug == slug, WordBank.archived_at.is_(None)))
 
 
-def words_for_source(source: ContentSource | None, difficulty: str) -> list[str] | None:
-    words = source_words(source)
+def words_for_word_bank(bank: WordBank | None, difficulty: str) -> list[str] | None:
+    words = word_bank_words(bank)
     if not words:
         return None
     count = {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5)
@@ -358,10 +356,10 @@ def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)
     return RedirectResponse(url="/library", status_code=303)
 
 
-def admin_context(request: Request, db: Session, user: User, section: str) -> dict:
+def admin_context(request: Request, db: Session, user: User, section: str, selected_word: DictionaryWord | None = None) -> dict:
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
-    sources = db.scalars(select(ContentSource).order_by(ContentSource.source_type, ContentSource.name)).all()
-    word_banks = [source for source in sources if source.source_type == "word_bank" and source.archived_at is None]
+    all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
+    word_banks = [bank for bank in all_word_banks if bank.archived_at is None]
     categories = db.scalars(select(PuzzleCategory).order_by(PuzzleCategory.name)).all()
     tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.name)).all()
     attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
@@ -375,25 +373,26 @@ def admin_context(request: Request, db: Session, user: User, section: str) -> di
         "puzzles": puzzles,
         "live_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is None],
         "archived_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is not None],
-        "sources": sources,
+        "all_word_banks": all_word_banks,
         "word_banks": word_banks,
-        "source_word_texts": {source.id: source_words(source) for source in sources},
+        "word_bank_texts": {bank.id: word_bank_words(bank) for bank in all_word_banks},
         "categories": categories,
         "tags": tags,
         "attempts": attempts,
         "progress_rows": progress_rows,
         "photos": photos,
         "dictionary_words": dictionary_words,
+        "selected_word": selected_word,
     }
 
 
-def render_admin(request: Request, db: Session, section: str):
+def render_admin(request: Request, db: Session, section: str, selected_word: DictionaryWord | None = None):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
         "admin.html",
-        admin_context(request, db, user, section),
+        admin_context(request, db, user, section, selected_word),
     )
 
 
@@ -412,9 +411,9 @@ def admin_generate_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "generate")
 
 
-@app.get("/admin/sources", response_class=HTMLResponse)
-def admin_sources_page(request: Request, db: Session = Depends(get_db)):
-    return render_admin(request, db, "sources")
+@app.get("/admin/word-banks", response_class=HTMLResponse)
+def admin_word_banks_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "word_banks")
 
 
 @app.get("/admin/dictionary", response_class=HTMLResponse)
@@ -422,9 +421,28 @@ def admin_dictionary_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "dictionary")
 
 
+@app.get("/admin/dictionary/{word_id}", response_class=HTMLResponse)
+def admin_dictionary_word_page(word_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    word = db.get(DictionaryWord, word_id)
+    if word is None:
+        raise HTTPException(status_code=404, detail="Word not found")
+    return templates.TemplateResponse(
+        "admin.html",
+        admin_context(request, db, user, "word_detail", word),
+    )
+
+
 @app.get("/admin/taxonomy", response_class=HTMLResponse)
 def admin_taxonomy_page(request: Request, db: Session = Depends(get_db)):
-    return render_admin(request, db, "taxonomy")
+    return RedirectResponse(url="/admin/tags", status_code=303)
+
+
+@app.get("/admin/tags", response_class=HTMLResponse)
+def admin_tags_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "tags")
 
 
 @app.get("/admin/activity", response_class=HTMLResponse)
@@ -497,7 +515,7 @@ def admin_update_puzzle_metadata(
 def admin_generate_puzzle(
     request: Request,
     puzzle_type: str = Form("word_search"),
-    source_id: int = Form(...),
+    bank_id: int = Form(...),
     difficulty: str = Form("easy"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
@@ -506,24 +524,23 @@ def admin_generate_puzzle(
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    source = db.get(ContentSource, source_id)
-    if source is None or source.archived_at is not None:
-        raise HTTPException(status_code=404, detail="Content source not found")
-    puzzle = create_puzzle(PuzzleGenerateRequest(puzzle_type=puzzle_type, theme=source.slug, difficulty=difficulty), db)
+    bank = db.get(WordBank, bank_id)
+    if bank is None or bank.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    puzzle = create_puzzle(PuzzleGenerateRequest(puzzle_type=puzzle_type, theme=bank.slug, difficulty=difficulty), db)
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle is not None:
-        saved_puzzle.category_id = category_id or source.category_id
-        saved_puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else list(source.tags)
+        saved_puzzle.category_id = category_id or bank.category_id
+        saved_puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else list(bank.tags)
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
 
-@app.post("/admin/sources")
-def admin_create_source(
+@app.post("/admin/word-banks")
+def admin_create_word_bank(
     request: Request,
     name: str = Form(...),
     slug: str = Form(""),
-    source_type: str = Form("word_bank"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     description: str = Form(""),
@@ -533,29 +550,27 @@ def admin_create_source(
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    source = ContentSource(
+    bank = WordBank(
         name=name.strip(),
-        slug=unique_slug(db, ContentSource, slug or name),
-        source_type=source_type,
+        slug=unique_slug(db, WordBank, slug or name),
         category_id=category_id or None,
         description=description.strip(),
-        payload={"words": parse_words(words)} if source_type == "word_bank" else {},
+        payload={"words": parse_words(words)},
     )
-    source.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
-    db.add(source)
+    bank.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+    db.add(bank)
     db.flush()
-    sync_source_words(db, source, parse_words(words))
+    sync_word_bank_words(db, bank, parse_words(words))
     db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
-@app.post("/admin/sources/{source_id}")
-def admin_update_source(
-    source_id: int,
+@app.post("/admin/word-banks/{bank_id}")
+def admin_update_word_bank(
+    bank_id: int,
     request: Request,
     name: str = Form(...),
     slug: str = Form(""),
-    source_type: str = Form("word_bank"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     description: str = Form(""),
@@ -565,59 +580,57 @@ def admin_update_source(
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    source = db.get(ContentSource, source_id)
-    if source is not None:
-        source.name = name.strip()
-        source.slug = unique_slug(db, ContentSource, slug or name, source.id)
-        source.source_type = source_type
-        source.category_id = category_id or None
-        source.description = description.strip()
+    bank = db.get(WordBank, bank_id)
+    if bank is not None:
+        bank.name = name.strip()
+        bank.slug = unique_slug(db, WordBank, slug or name, bank.id)
+        bank.category_id = category_id or None
+        bank.description = description.strip()
         parsed_words = parse_words(words)
-        source.payload = {"words": parsed_words} if source_type == "word_bank" else source.payload
-        source.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
-        if source_type == "word_bank":
-            sync_source_words(db, source, parsed_words)
+        bank.payload = {"words": parsed_words}
+        bank.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+        sync_word_bank_words(db, bank, parsed_words)
         db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
-@app.post("/admin/sources/{source_id}/archive")
-def admin_archive_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/admin/word-banks/{bank_id}/archive")
+def admin_archive_word_bank(bank_id: int, request: Request, db: Session = Depends(get_db)):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    source = db.get(ContentSource, source_id)
-    if source is not None:
-        source.archived_at = datetime.now(timezone.utc)
+    bank = db.get(WordBank, bank_id)
+    if bank is not None:
+        bank.archived_at = datetime.now(timezone.utc)
         db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
-@app.post("/admin/sources/{source_id}/unarchive")
-def admin_unarchive_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/admin/word-banks/{bank_id}/unarchive")
+def admin_unarchive_word_bank(bank_id: int, request: Request, db: Session = Depends(get_db)):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    source = db.get(ContentSource, source_id)
-    if source is not None:
-        source.archived_at = None
+    bank = db.get(WordBank, bank_id)
+    if bank is not None:
+        bank.archived_at = None
         db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
-@app.post("/admin/sources/{source_id}/delete")
-def admin_delete_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/admin/word-banks/{bank_id}/delete")
+def admin_delete_word_bank(bank_id: int, request: Request, db: Session = Depends(get_db)):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    source = db.get(ContentSource, source_id)
-    if source is not None:
-        for puzzle in source.puzzles:
-            puzzle.content_source_id = None
-        source.tags = []
-        db.delete(source)
+    bank = db.get(WordBank, bank_id)
+    if bank is not None:
+        for puzzle in bank.puzzles:
+            puzzle.word_bank_id = None
+        bank.tags = []
+        db.delete(bank)
         db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
 @app.post("/admin/dictionary")
@@ -627,6 +640,7 @@ def admin_create_dictionary_word(
     display_text: str = Form(""),
     clue: str = Form(""),
     part_of_speech: str = Form(""),
+    tag_ids: list[int] = Form(default=[]),
     properties: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -638,9 +652,10 @@ def admin_create_dictionary_word(
         entry.display_text = display_text.strip() or normalize_word(word)
         entry.clue = clue.strip()
         entry.part_of_speech = part_of_speech.strip()
+        entry.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
         db.commit()
-    return RedirectResponse(url="/admin/dictionary", status_code=303)
+    return RedirectResponse(url=f"/admin/dictionary/{entry.id}" if entry is not None else "/admin/dictionary", status_code=303)
 
 
 @app.post("/admin/dictionary/{word_id}")
@@ -650,6 +665,7 @@ def admin_update_dictionary_word(
     display_text: str = Form(""),
     clue: str = Form(""),
     part_of_speech: str = Form(""),
+    tag_ids: list[int] = Form(default=[]),
     properties: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -661,9 +677,10 @@ def admin_update_dictionary_word(
         entry.display_text = display_text.strip() or entry.word
         entry.clue = clue.strip()
         entry.part_of_speech = part_of_speech.strip()
+        entry.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
         db.commit()
-    return RedirectResponse(url="/admin/dictionary", status_code=303)
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
 
 
 @app.post("/admin/dictionaries")
@@ -686,7 +703,7 @@ def admin_create_dictionary(
     )
     db.add(dictionary)
     db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
 @app.post("/admin/dictionaries/{dictionary_id}")
@@ -709,7 +726,7 @@ def admin_update_dictionary(
         dictionary.description = description.strip()
         dictionary.words = parse_words(words)
         db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
 @app.post("/admin/dictionaries/{dictionary_id}/delete")
@@ -721,7 +738,7 @@ def admin_delete_dictionary(dictionary_id: int, request: Request, db: Session = 
     if dictionary is not None:
         db.delete(dictionary)
         db.commit()
-    return RedirectResponse(url="/admin/sources", status_code=303)
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
 
 
 @app.post("/admin/categories")
@@ -737,7 +754,7 @@ def admin_create_category(
         return user
     db.add(PuzzleCategory(name=name.strip(), slug=unique_slug(db, PuzzleCategory, slug or name), description=description.strip()))
     db.commit()
-    return RedirectResponse(url="/admin/taxonomy", status_code=303)
+    return RedirectResponse(url="/admin/tags", status_code=303)
 
 
 @app.post("/admin/categories/{category_id}")
@@ -758,7 +775,7 @@ def admin_update_category(
         category.slug = unique_slug(db, PuzzleCategory, slug or name, category.id)
         category.description = description.strip()
         db.commit()
-    return RedirectResponse(url="/admin/taxonomy", status_code=303)
+    return RedirectResponse(url="/admin/tags", status_code=303)
 
 
 @app.post("/admin/categories/{category_id}/delete")
@@ -770,11 +787,11 @@ def admin_delete_category(category_id: int, request: Request, db: Session = Depe
     if category is not None:
         for puzzle in category.puzzles:
             puzzle.category_id = None
-        for source in category.content_sources:
-            source.category_id = None
+        for bank in category.word_banks:
+            bank.category_id = None
         db.delete(category)
         db.commit()
-    return RedirectResponse(url="/admin/taxonomy", status_code=303)
+    return RedirectResponse(url="/admin/tags", status_code=303)
 
 
 @app.post("/admin/tags")
@@ -784,7 +801,7 @@ def admin_create_tag(request: Request, name: str = Form(...), slug: str = Form("
         return user
     db.add(PuzzleTag(name=name.strip(), slug=unique_slug(db, PuzzleTag, slug or name)))
     db.commit()
-    return RedirectResponse(url="/admin/taxonomy", status_code=303)
+    return RedirectResponse(url="/admin/tags", status_code=303)
 
 
 @app.post("/admin/tags/{tag_id}")
@@ -803,7 +820,7 @@ def admin_update_tag(
         tag.name = name.strip()
         tag.slug = unique_slug(db, PuzzleTag, slug or name, tag.id)
         db.commit()
-    return RedirectResponse(url="/admin/taxonomy", status_code=303)
+    return RedirectResponse(url="/admin/tags", status_code=303)
 
 
 @app.post("/admin/tags/{tag_id}/delete")
@@ -814,10 +831,11 @@ def admin_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db
     tag = db.get(PuzzleTag, tag_id)
     if tag is not None:
         tag.puzzles = []
-        tag.content_sources = []
+        tag.word_banks = []
+        tag.dictionary_words = []
         db.delete(tag)
         db.commit()
-    return RedirectResponse(url="/admin/taxonomy", status_code=303)
+    return RedirectResponse(url="/admin/tags", status_code=303)
 
 
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
@@ -896,15 +914,15 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     if payload.puzzle_type != "word_search":
         raise HTTPException(status_code=400, detail="Only word_search is implemented in the MVP")
 
-    content_source = source_for_slug(db, payload.theme)
-    generated = generate_word_search(payload.theme, payload.difficulty, words_for_source(content_source, payload.difficulty))
+    word_bank = word_bank_for_slug(db, payload.theme)
+    generated = generate_word_search(payload.theme, payload.difficulty, words_for_word_bank(word_bank, payload.difficulty))
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
         title=generated.title,
         theme=payload.theme,
         difficulty=payload.difficulty,
-        content_source_id=content_source.id if content_source is not None else None,
+        word_bank_id=word_bank.id if word_bank is not None else None,
         prompt=generated.prompt,
         print_payload=generated.print_payload,
         play_payload=generated.play_payload,
