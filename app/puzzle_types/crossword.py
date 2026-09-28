@@ -24,11 +24,19 @@ def definition_allowed(definition: Any, excluded_tag_ids: set[int] | None) -> bo
     return True
 
 
+def typed_tag_value(tags: list[Any], tag_type: str) -> str:
+    for tag in tags:
+        if getattr(tag, "tag_type", "") == tag_type:
+            return str(getattr(tag, "name", "")).strip()
+    return ""
+
+
 def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, int | None] | None:
     definitions = sorted(getattr(word, "definitions", []), key=lambda item: item.position)
     for definition in definitions:
         if definition_allowed(definition, excluded_tag_ids):
-            return definition.definition, definition.id
+            clue = typed_tag_value(getattr(definition, "tags", []), "Clue")
+            return clue or definition.definition, definition.id
     clue = str(getattr(word, "clue", "") or "").strip()
     if clue:
         return clue, None

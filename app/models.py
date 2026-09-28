@@ -243,6 +243,7 @@ class PuzzleTag(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
+    tag_type: Mapped[str] = mapped_column(String(80), default="General", index=True)
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -253,6 +254,12 @@ class PuzzleTag(Base):
         secondary=dictionary_definition_tag_links,
         back_populates="tags",
     )
+
+    @property
+    def label(self) -> str:
+        if not self.tag_type or self.tag_type == "General":
+            return self.name
+        return f"{self.tag_type}: {self.name}"
 
 
 class ContentItem(Base):

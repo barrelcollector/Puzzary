@@ -84,7 +84,7 @@
                 <legend>Tags</legend>
                 <div class="check-list">
                   {% for tag in tags %}
-                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in puzzle.tags %}checked{% endif %}>{{ tag.name }}</label>
+                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in puzzle.tags %}checked{% endif %}>{{ tag.label }}</label>
                   {% else %}
                     <small>No tags yet.</small>
                   {% endfor %}
@@ -153,7 +153,7 @@
           <legend>Tags</legend>
           <div class="check-list">
             {% for tag in tags %}
-              <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+              <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
             {% else %}
               <small>No tags yet.</small>
             {% endfor %}
@@ -163,7 +163,7 @@
           <legend>Exclude words with tags</legend>
           <div class="check-list">
             {% for tag in tags %}
-              <label><input type="checkbox" name="excluded_tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+              <label><input type="checkbox" name="excluded_tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
             {% else %}
               <small>No tags yet.</small>
             {% endfor %}
@@ -219,7 +219,7 @@
                 <legend>Tags</legend>
                 <div class="check-list">
                   {% for tag in tags %}
-                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in bank.tags %}checked{% endif %}>{{ tag.name }}</label>
+                    <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in bank.tags %}checked{% endif %}>{{ tag.label }}</label>
                   {% else %}
                     <small>No tags yet.</small>
                   {% endfor %}
@@ -264,7 +264,7 @@
             <legend>Tags</legend>
             <div class="check-list">
               {% for tag in tags %}
-                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
               {% else %}
                 <small>No tags yet.</small>
               {% endfor %}
@@ -284,7 +284,7 @@
                 {% if word.banned_at %}<small class="chip danger-chip">Banned</small>{% endif %}
                 {% if word.archived_at %}<small class="chip muted-chip">Archived</small>{% endif %}
                 {% for tag in word.tags[:3] %}
-                  <small class="chip">{{ tag.name }}</small>
+                  <small class="chip">{{ tag.label }}</small>
                 {% endfor %}
               </span>
             </a>
@@ -311,7 +311,7 @@
         <article class="panel word-entry">
           <div class="chip-list">
             {% for tag in selected_word.tags %}
-              <span class="chip">{{ tag.name }}</span>
+              <span class="chip">{{ tag.label }}</span>
             {% else %}
               <span class="muted">No tags yet.</span>
             {% endfor %}
@@ -329,14 +329,15 @@
             {% for definition in selected_word.definitions %}
               <form class="edit-card" method="post" action="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}">
                 <label>Definition <textarea name="definition" rows="3" required>{{ definition.definition }}</textarea></label>
-                <label>Part of speech <input name="part_of_speech" value="{{ definition.part_of_speech }}"></label>
+                <label>Part of Speech tag <input name="part_of_speech_tag" value="{{ tag_value(definition.tags, 'Part of Speech') or definition.part_of_speech }}" placeholder="Noun"></label>
+                <label>Clue tag <textarea name="clue_tag" rows="2" placeholder="these can be found in the sky and on the internet">{{ tag_value(definition.tags, 'Clue') }}</textarea></label>
                 <label>Example <textarea name="example" rows="2">{{ definition.example }}</textarea></label>
                 <label>Order <input name="position" type="number" value="{{ definition.position }}"></label>
                 <fieldset>
                   <legend>Definition tags</legend>
                   <div class="check-list">
                     {% for tag in tags %}
-                      <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in definition.tags %}checked{% endif %}>{{ tag.name }}</label>
+                      <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in definition.tags %}checked{% endif %}>{{ tag.label }}</label>
                     {% else %}
                       <small>No tags yet.</small>
                     {% endfor %}
@@ -354,13 +355,14 @@
           <form class="edit-card" method="post" action="/admin/dictionary/{{ selected_word.id }}/definitions">
             <h2>Add Definition</h2>
             <label>Definition <textarea name="definition" rows="3" required></textarea></label>
-            <label>Part of speech <input name="part_of_speech" value="{{ selected_word.part_of_speech }}"></label>
+            <label>Part of Speech tag <input name="part_of_speech_tag" value="{{ selected_word.part_of_speech }}" placeholder="Noun"></label>
+            <label>Clue tag <textarea name="clue_tag" rows="2" placeholder="these can be found in the sky and on the internet"></textarea></label>
             <label>Example <textarea name="example" rows="2"></textarea></label>
             <fieldset>
               <legend>Definition tags</legend>
               <div class="check-list">
                 {% for tag in tags %}
-                  <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+                  <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
                 {% else %}
                   <small>No tags yet.</small>
                 {% endfor %}
@@ -388,7 +390,7 @@
             <legend>Tags</legend>
             <div class="check-list">
               {% for tag in tags %}
-                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in selected_word.tags %}checked{% endif %}>{{ tag.name }}</label>
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in selected_word.tags %}checked{% endif %}>{{ tag.label }}</label>
               {% else %}
                 <small>No tags yet.</small>
               {% endfor %}
@@ -429,14 +431,16 @@
         <div class="panel">
           <h2>Tags</h2>
           <form method="post" action="/admin/tags">
-            <label>Name <input name="name" required></label>
+            <label>Type <input name="tag_type" value="General" required></label>
+            <label>Value <input name="name" required></label>
             <label>Slug <input name="slug"></label>
             <button type="submit">Add Tag</button>
           </form>
           <div class="admin-list compact-admin">
             {% for tag in tags %}
               <form class="edit-card" method="post" action="/admin/tags/{{ tag.id }}">
-                <label>Name <input name="name" value="{{ tag.name }}" required></label>
+                <label>Type <input name="tag_type" value="{{ tag.tag_type or 'General' }}" required></label>
+                <label>Value <input name="name" value="{{ tag.name }}" required></label>
                 <label>Slug <input name="slug" value="{{ tag.slug }}" required></label>
                 <div class="action-row">
                   <button type="submit">Save</button>

@@ -55,6 +55,16 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
+def tag_value(tags: list[PuzzleTag], tag_type: str) -> str:
+    for tag in tags:
+        if tag.tag_type == tag_type:
+            return tag.name
+    return ""
+
+
+templates.env.globals["tag_value"] = tag_value
+
+
 @app.on_event("startup")
 def startup() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -198,29 +208,29 @@ def seed_word_definitions(db: Session) -> None:
     changed = False
     for word in db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all():
         if word.clue.strip() and not word.definitions:
-            word.definitions.append(
-                DictionaryDefinition(
-                    definition=word.clue.strip(),
-                    part_of_speech=word.part_of_speech,
-                    position=0,
-                    source="legacy_clue",
-                )
+            definition = DictionaryDefinition(
+                definition=word.clue.strip(),
+                part_of_speech=word.part_of_speech,
+                position=0,
+                source="legacy_clue",
             )
+            definition.tags = definition_tags_from_form(db, [], word.part_of_speech, word.clue)
+            word.definitions.append(definition)
             changed = True
     if changed:
         db.commit()
 
 
-def ensure_definition_from_clue(word: DictionaryWord) -> None:
+def ensure_definition_from_clue(db: Session, word: DictionaryWord) -> None:
     if word.clue.strip() and not word.definitions:
-        word.definitions.append(
-            DictionaryDefinition(
-                definition=word.clue.strip(),
-                part_of_speech=word.part_of_speech,
-                position=0,
-                source="word_clue",
-            )
+        definition = DictionaryDefinition(
+            definition=word.clue.strip(),
+            part_of_speech=word.part_of_speech,
+            position=0,
+            source="word_clue",
         )
+        definition.tags = definition_tags_from_form(db, [], word.part_of_speech, word.clue)
+        word.definitions.append(definition)
 
 
 def word_bank_options(db: Session, include_archived: bool = False) -> list[WordBank]:
@@ -238,6 +248,56 @@ def tags_for_ids(db: Session, tag_ids: list[int]) -> list[PuzzleTag]:
     if not tag_ids:
         return []
     return db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all()
+
+
+def normalize_tag_type(value: str) -> str:
+    return value.strip() or "General"
+
+
+def typed_tag_slug(tag_type: str, name: str) -> str:
+    normalized_type = normalize_tag_type(tag_type)
+    if normalized_type == "General":
+        return slugify(name)
+    return slugify(f"{normalized_type} {name}")
+
+
+def get_or_create_tag(db: Session, tag_type: str, name: str) -> PuzzleTag | None:
+    tag_name = name.strip()
+    if not tag_name:
+        return None
+    normalized_type = normalize_tag_type(tag_type)
+    existing = db.scalar(
+        select(PuzzleTag).where(
+            PuzzleTag.tag_type == normalized_type,
+            PuzzleTag.name == tag_name,
+        )
+    )
+    if existing is not None:
+        return existing
+    tag = PuzzleTag(
+        name=tag_name,
+        tag_type=normalized_type,
+        slug=unique_slug(db, PuzzleTag, typed_tag_slug(normalized_type, tag_name)),
+    )
+    db.add(tag)
+    db.flush()
+    return tag
+
+
+def definition_tags_from_form(
+    db: Session,
+    tag_ids: list[int],
+    part_of_speech_tag: str = "",
+    clue_tag: str = "",
+) -> list[PuzzleTag]:
+    tags = tags_for_ids(db, tag_ids)
+    existing_ids = {tag.id for tag in tags}
+    for tag_type, value in (("Part of Speech", part_of_speech_tag), ("Clue", clue_tag)):
+        tag = get_or_create_tag(db, tag_type, value)
+        if tag is not None and tag.id not in existing_ids:
+            tags.append(tag)
+            existing_ids.add(tag.id)
+    return tags
 
 
 def blocked_words_for_generation(db: Session, excluded_tag_ids: set[int]) -> list[str]:
@@ -407,7 +467,7 @@ def admin_context(request: Request, db: Session, user: User, section: str, selec
     all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
     word_banks = [bank for bank in all_word_banks if bank.archived_at is None]
     categories = db.scalars(select(PuzzleCategory).order_by(PuzzleCategory.name)).all()
-    tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.name)).all()
+    tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
     attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
@@ -710,7 +770,7 @@ def admin_create_dictionary_word(
         entry.part_of_speech = part_of_speech.strip()
         entry.tags = tags_for_ids(db, tag_ids)
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
-        ensure_definition_from_clue(entry)
+        ensure_definition_from_clue(db, entry)
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{entry.id}" if entry is not None else "/admin/dictionary", status_code=303)
 
@@ -736,7 +796,7 @@ def admin_update_dictionary_word(
         entry.part_of_speech = part_of_speech.strip()
         entry.tags = tags_for_ids(db, tag_ids)
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
-        ensure_definition_from_clue(entry)
+        ensure_definition_from_clue(db, entry)
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
 
@@ -816,6 +876,8 @@ def admin_create_dictionary_definition(
     request: Request,
     definition: str = Form(...),
     part_of_speech: str = Form(""),
+    part_of_speech_tag: str = Form(""),
+    clue_tag: str = Form(""),
     example: str = Form(""),
     tag_ids: list[int] = Form(default=[]),
     db: Session = Depends(get_db),
@@ -829,11 +891,11 @@ def admin_create_dictionary_definition(
     next_position = max((item.position for item in word.definitions), default=-1) + 1
     entry = DictionaryDefinition(
         definition=definition.strip(),
-        part_of_speech=part_of_speech.strip(),
+        part_of_speech=(part_of_speech_tag or part_of_speech).strip(),
         example=example.strip(),
         position=next_position,
     )
-    entry.tags = tags_for_ids(db, tag_ids)
+    entry.tags = definition_tags_from_form(db, tag_ids, part_of_speech_tag or part_of_speech, clue_tag)
     word.definitions.append(entry)
     db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
@@ -846,6 +908,8 @@ def admin_update_dictionary_definition(
     request: Request,
     definition: str = Form(...),
     part_of_speech: str = Form(""),
+    part_of_speech_tag: str = Form(""),
+    clue_tag: str = Form(""),
     example: str = Form(""),
     position: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
@@ -857,10 +921,10 @@ def admin_update_dictionary_definition(
     entry = db.get(DictionaryDefinition, definition_id)
     if entry is not None and entry.word_id == word_id:
         entry.definition = definition.strip()
-        entry.part_of_speech = part_of_speech.strip()
+        entry.part_of_speech = (part_of_speech_tag or part_of_speech).strip()
         entry.example = example.strip()
         entry.position = position
-        entry.tags = tags_for_ids(db, tag_ids)
+        entry.tags = definition_tags_from_form(db, tag_ids, part_of_speech_tag or part_of_speech, clue_tag)
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
 
@@ -995,11 +1059,24 @@ def admin_delete_category(category_id: int, request: Request, db: Session = Depe
 
 
 @app.post("/admin/tags")
-def admin_create_tag(request: Request, name: str = Form(...), slug: str = Form(""), db: Session = Depends(get_db)):
+def admin_create_tag(
+    request: Request,
+    name: str = Form(...),
+    tag_type: str = Form("General"),
+    slug: str = Form(""),
+    db: Session = Depends(get_db),
+):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    db.add(PuzzleTag(name=name.strip(), slug=unique_slug(db, PuzzleTag, slug or name)))
+    normalized_type = normalize_tag_type(tag_type)
+    db.add(
+        PuzzleTag(
+            name=name.strip(),
+            tag_type=normalized_type,
+            slug=unique_slug(db, PuzzleTag, slug or typed_tag_slug(normalized_type, name)),
+        )
+    )
     db.commit()
     return RedirectResponse(url="/admin/tags", status_code=303)
 
@@ -1009,6 +1086,7 @@ def admin_update_tag(
     tag_id: int,
     request: Request,
     name: str = Form(...),
+    tag_type: str = Form("General"),
     slug: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -1017,8 +1095,10 @@ def admin_update_tag(
         return user
     tag = db.get(PuzzleTag, tag_id)
     if tag is not None:
+        normalized_type = normalize_tag_type(tag_type)
         tag.name = name.strip()
-        tag.slug = unique_slug(db, PuzzleTag, slug or name, tag.id)
+        tag.tag_type = normalized_type
+        tag.slug = unique_slug(db, PuzzleTag, slug or typed_tag_slug(normalized_type, name), tag.id)
         db.commit()
     return RedirectResponse(url="/admin/tags", status_code=303)
 
