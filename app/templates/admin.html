@@ -187,6 +187,13 @@
           <label>Name <input name="name" required></label>
           <label>Slug <input name="slug" placeholder="daily_stripe"></label>
           <label>
+            Mode
+            <select name="mode">
+              <option value="manual">Manual selection</option>
+              <option value="automatic">Automatic by tag</option>
+            </select>
+          </label>
+          <label>
             Category
             <select name="category_id">
               <option value="0">None</option>
@@ -194,18 +201,34 @@
             </select>
           </label>
           <label>Description <textarea name="description" rows="2"></textarea></label>
-          <label>Words <textarea name="words" rows="6" placeholder="MERIDIAN&#10;PUZZLE&#10;ZEBRA"></textarea></label>
-          <p class="muted">New words are added to the dictionary automatically. Existing words are reused.</p>
+          <fieldset>
+            <legend>Tags</legend>
+            <div class="check-list">
+              {% for tag in tags %}
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <p class="muted">Manual banks use selected dictionary words. Automatic banks pull words or definitions matching the bank tags.</p>
           <button type="submit">Add Word Bank</button>
         </form>
         <div class="admin-list">
           {% for bank in all_word_banks %}
             <form class="panel edit-card" method="post" action="/admin/word-banks/{{ bank.id }}">
               <h2>{{ bank.name }}</h2>
-              <small>{{ bank.slug }}</small>
+              <small>{{ bank.slug }} / {{ word_bank_mode(bank) }}</small>
               {% if bank.archived_at %}<span class="status-pill">Archived</span>{% endif %}
               <label>Name <input name="name" value="{{ bank.name }}" required></label>
               <label>Slug <input name="slug" value="{{ bank.slug }}" required></label>
+              <label>
+                Mode
+                <select name="mode">
+                  <option value="manual" {% if word_bank_mode(bank) == "manual" %}selected{% endif %}>Manual selection</option>
+                  <option value="automatic" {% if word_bank_mode(bank) == "automatic" %}selected{% endif %}>Automatic by tag</option>
+                </select>
+              </label>
               <label>
                 Category
                 <select name="category_id">
@@ -226,8 +249,12 @@
                 </div>
               </fieldset>
               <label>Description <textarea name="description" rows="2">{{ bank.description }}</textarea></label>
-              <label>Words <textarea name="words" rows="6">{{ word_bank_texts[bank.id] | default([]) | join('\n') }}</textarea></label>
-              <p class="muted">{{ word_bank_texts[bank.id] | default([]) | length }} dictionary words linked.</p>
+              <input type="hidden" name="words" value="">
+              {% if word_bank_mode(bank) == "automatic" %}
+                <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} matching word/definition entries.</p>
+              {% else %}
+                <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} manually selected entries.</p>
+              {% endif %}
               <div class="action-row">
                 <button type="submit">Save</button>
                 {% if bank.archived_at %}
@@ -238,6 +265,46 @@
                 <button type="submit" form="delete-bank-{{ bank.id }}" class="danger-button">Delete</button>
               </div>
             </form>
+            {% if word_bank_mode(bank) == "manual" %}
+              <div class="panel edit-card">
+                <h2>Manual Entries</h2>
+                <div class="list compact">
+                  {% for entry in word_bank_entries[bank.id] | default([]) %}
+                    {% set word = entry.word %}
+                    {% set definition = entry.definition %}
+                    {% set link = namespace(id=0) %}
+                    {% for bank_link in bank.word_links %}
+                      {% if bank_link.word_id == word.id %}{% set link.id = bank_link.id %}{% endif %}
+                    {% endfor %}
+                    <div class="row">
+                      <span>
+                        <strong>{{ word.display_text or word.word }}</strong>
+                        <small>{% if definition %}{{ definition_clue(definition) or definition.definition }}{% else %}Any definition{% endif %}</small>
+                      </span>
+                      <form method="post" action="/admin/word-banks/{{ bank.id }}/words/{{ link.id }}/delete"><button type="submit" class="danger-button">Remove</button></form>
+                    </div>
+                  {% else %}
+                    <p class="muted">No manual entries yet.</p>
+                  {% endfor %}
+                </div>
+                <form method="post" action="/admin/word-banks/{{ bank.id }}/words">
+                  <label>
+                    Add word or definition
+                    <select name="word_definition" required>
+                      {% for word in dictionary_words %}
+                        {% if not word.archived_at and not word.banned_at %}
+                          <option value="{{ word.id }}:0">{{ word.display_text or word.word }} / any definition</option>
+                          {% for definition in word.definitions %}
+                            <option value="{{ word.id }}:{{ definition.id }}">{{ word.display_text or word.word }} / {{ definition_clue(definition) or definition.definition }}</option>
+                          {% endfor %}
+                        {% endif %}
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <button type="submit">Add Entry</button>
+                </form>
+              </div>
+            {% endif %}
             <form id="archive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/archive"></form>
             <form id="unarchive-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/unarchive"></form>
             <form id="delete-bank-{{ bank.id }}" method="post" action="/admin/word-banks/{{ bank.id }}/delete"></form>

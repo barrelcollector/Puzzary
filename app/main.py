@@ -136,6 +136,92 @@ def word_bank_words(bank: WordBank | None) -> list[str]:
     return [str(word).upper() for word in words if str(word).strip()]
 
 
+def word_bank_mode(bank: WordBank | None) -> str:
+    if bank is None or not isinstance(bank.payload, dict):
+        return "manual"
+    return str(bank.payload.get("mode") or "manual")
+
+
+def definition_clue(definition: DictionaryDefinition | None) -> str:
+    if definition is None:
+        return ""
+    return tag_value(definition.tags, "Clue") or definition.definition
+
+
+templates.env.globals["word_bank_mode"] = word_bank_mode
+templates.env.globals["definition_clue"] = definition_clue
+
+
+def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[int] | None = None) -> list[dict]:
+    if bank is None:
+        return []
+    excluded_tag_ids = excluded_tag_ids or set()
+    entries: list[dict] = []
+    if word_bank_mode(bank) == "automatic":
+        tag_ids = {tag.id for tag in bank.tags}
+        if not tag_ids:
+            return []
+        words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+        for word in words:
+            if word.archived_at is not None or word.banned_at is not None:
+                continue
+            word_tag_ids = {tag.id for tag in word.tags}
+            definitions = sorted(word.definitions, key=lambda item: item.position)
+            matched_definitions = [
+                definition
+                for definition in definitions
+                if tag_ids & ({tag.id for tag in definition.tags} | word_tag_ids)
+            ]
+            if not matched_definitions and tag_ids & word_tag_ids:
+                matched_definitions = [None]
+            for definition in matched_definitions:
+                if definition is not None and excluded_tag_ids & {tag.id for tag in definition.tags}:
+                    continue
+                if excluded_tag_ids & word_tag_ids:
+                    continue
+                entries.append({"word": word, "definition": definition})
+        return entries
+
+    for link in sorted(bank.word_links, key=lambda item: item.position):
+        word = link.word
+        if word.archived_at is not None or word.banned_at is not None:
+            continue
+        if excluded_tag_ids & {tag.id for tag in word.tags}:
+            continue
+        definition = link.definition
+        if definition is not None and excluded_tag_ids & {tag.id for tag in definition.tags}:
+            continue
+        entries.append({"word": word, "definition": definition})
+    return entries
+
+
+def source_data_for_puzzle(
+    db: Session,
+    puzzle_type_slug: str,
+    bank: WordBank | None,
+    difficulty: str,
+    excluded_tag_ids: set[int],
+):
+    if bank is None:
+        return None
+    count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
+    entries = word_bank_entries(db, bank, excluded_tag_ids)
+    if puzzle_type_slug == "crossword":
+        source = []
+        for entry in entries:
+            word = entry["word"]
+            definition = entry.get("definition")
+            clue = definition_clue(definition)
+            if not clue:
+                clue = word.clue or word.properties.get("notes") or f"{word.display_text.title()} entry."
+            source.append({"word": word.word, "clue": clue, "definition_id": definition.id if definition else None})
+            if len(source) >= count:
+                break
+        return source or None
+    source = [entry["word"].word for entry in entries]
+    return source[:count] or None
+
+
 def get_or_create_word(db: Session, value: str) -> DictionaryWord | None:
     word = normalize_word(value)
     if not word:
@@ -156,6 +242,13 @@ def sync_word_bank_words(db: Session, bank: WordBank, words: list[str]) -> None:
         entry = get_or_create_word(db, word_value)
         if entry is not None:
             bank.word_links.append(WordBankWord(word=entry, position=position))
+
+
+def add_word_bank_link(db: Session, bank: WordBank, word: DictionaryWord, definition: DictionaryDefinition | None = None) -> None:
+    if any(link.word_id == word.id for link in bank.word_links):
+        return
+    next_position = max((link.position for link in bank.word_links), default=-1) + 1
+    bank.word_links.append(WordBankWord(word=word, definition=definition, position=next_position))
 
 
 def ensure_admin_user(db: Session) -> None:
@@ -482,6 +575,7 @@ def admin_context(request: Request, db: Session, user: User, section: str, selec
         "all_word_banks": all_word_banks,
         "word_banks": word_banks,
         "word_bank_texts": {bank.id: word_bank_words(bank) for bank in all_word_banks},
+        "word_bank_entries": {bank.id: word_bank_entries(db, bank) for bank in all_word_banks},
         "categories": categories,
         "tags": tags,
         "attempts": attempts,
@@ -657,6 +751,7 @@ def admin_create_word_bank(
     request: Request,
     name: str = Form(...),
     slug: str = Form(""),
+    mode: str = Form("manual"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     description: str = Form(""),
@@ -671,7 +766,7 @@ def admin_create_word_bank(
         slug=unique_slug(db, WordBank, slug or name),
         category_id=category_id or None,
         description=description.strip(),
-        payload={"words": parse_words(words)},
+        payload={"mode": mode if mode == "automatic" else "manual", "words": parse_words(words)},
     )
     bank.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
     db.add(bank)
@@ -687,6 +782,7 @@ def admin_update_word_bank(
     request: Request,
     name: str = Form(...),
     slug: str = Form(""),
+    mode: str = Form("manual"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     description: str = Form(""),
@@ -703,9 +799,58 @@ def admin_update_word_bank(
         bank.category_id = category_id or None
         bank.description = description.strip()
         parsed_words = parse_words(words)
-        bank.payload = {"words": parsed_words}
+        selected_mode = mode if mode == "automatic" else "manual"
+        bank.payload = {"mode": selected_mode, "words": parsed_words}
         bank.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
-        sync_word_bank_words(db, bank, parsed_words)
+        if selected_mode == "manual" and parsed_words:
+            sync_word_bank_words(db, bank, parsed_words)
+        db.commit()
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
+
+
+@app.post("/admin/word-banks/{bank_id}/words")
+def admin_add_word_bank_word(
+    bank_id: int,
+    request: Request,
+    word_definition: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        word_text, definition_text = word_definition.split(":", 1)
+        word_id = int(word_text)
+        definition_id = int(definition_text or 0)
+    except ValueError:
+        return RedirectResponse(url="/admin/word-banks", status_code=303)
+    bank = db.get(WordBank, bank_id)
+    word = db.get(DictionaryWord, word_id)
+    definition = db.get(DictionaryDefinition, definition_id) if definition_id else None
+    if bank is not None and word is not None:
+        if definition is not None and definition.word_id != word.id:
+            definition = None
+        payload = bank.payload if isinstance(bank.payload, dict) else {}
+        payload["mode"] = "manual"
+        bank.payload = payload
+        add_word_bank_link(db, bank, word, definition)
+        db.commit()
+    return RedirectResponse(url="/admin/word-banks", status_code=303)
+
+
+@app.post("/admin/word-banks/{bank_id}/words/{link_id}/delete")
+def admin_delete_word_bank_word(
+    bank_id: int,
+    link_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    link = db.get(WordBankWord, link_id)
+    if link is not None and link.word_bank_id == bank_id:
+        db.delete(link)
         db.commit()
     return RedirectResponse(url="/admin/word-banks", status_code=303)
 
@@ -1215,7 +1360,7 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     word_bank = word_bank_for_slug(db, payload.theme)
     excluded_tag_ids = set(payload.excluded_tag_ids)
     excluded_tags = tags_for_ids(db, payload.excluded_tag_ids)
-    source_data = puzzle_type.source_builder(word_bank, payload.difficulty, excluded_tag_ids)
+    source_data = source_data_for_puzzle(db, payload.puzzle_type, word_bank, payload.difficulty, excluded_tag_ids)
     if word_bank is not None and source_data is None:
         raise HTTPException(status_code=400, detail="No usable words remain after archive, ban, and tag exclusions")
     if payload.puzzle_type == "word_search":

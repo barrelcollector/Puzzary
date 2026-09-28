@@ -81,6 +81,9 @@ def ensure_schema() -> None:
             word_bank_word_columns = {column["name"] for column in inspector.get_columns("word_bank_words")}
             if "content_source_id" in word_bank_word_columns and "word_bank_id" not in word_bank_word_columns:
                 connection.execute(text("ALTER TABLE word_bank_words RENAME COLUMN content_source_id TO word_bank_id"))
+            if "definition_id" not in word_bank_word_columns:
+                connection.execute(text("ALTER TABLE word_bank_words ADD COLUMN definition_id INTEGER"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_word_bank_words_definition_id ON word_bank_words (definition_id)"))
 
         if "word_bank_tag_links" in table_names:
             word_bank_tag_columns = {column["name"] for column in inspector.get_columns("word_bank_tag_links")}

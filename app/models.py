@@ -218,11 +218,13 @@ class WordBankWord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     word_bank_id: Mapped[int] = mapped_column(ForeignKey("word_banks.id"), index=True)
     word_id: Mapped[int] = mapped_column(ForeignKey("dictionary_words.id"), index=True)
+    definition_id: Mapped[int | None] = mapped_column(ForeignKey("dictionary_definitions.id"), nullable=True, index=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     word_bank: Mapped[WordBank] = relationship(back_populates="word_links")
     word: Mapped[DictionaryWord] = relationship(back_populates="bank_links")
+    definition: Mapped[DictionaryDefinition | None] = relationship()
 
 
 class PuzzleCategory(Base):
