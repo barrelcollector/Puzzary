@@ -34,6 +34,10 @@ from app.models import (
 )
 from app.puzzles import get_puzzle_type, list_puzzle_types
 from app.schemas import (
+    DictionaryDefinitionPatch,
+    DictionaryDefinitionWrite,
+    DictionaryWordPatch,
+    DictionaryWordWrite,
     PuzzleAttemptCreate,
     PuzzleAttemptResponse,
     PuzzleGenerateRequest,
@@ -62,7 +66,17 @@ def tag_value(tags: list[PuzzleTag], tag_type: str) -> str:
     return ""
 
 
+def tag_values(tags: list[PuzzleTag], tag_type: str) -> list[str]:
+    return [tag.name for tag in tags if tag.tag_type == tag_type]
+
+
+def tag_lines(tags: list[PuzzleTag], tag_type: str) -> str:
+    return "\n".join(tag_values(tags, tag_type))
+
+
 templates.env.globals["tag_value"] = tag_value
+templates.env.globals["tag_values"] = tag_values
+templates.env.globals["tag_lines"] = tag_lines
 
 
 @app.on_event("startup")
@@ -92,6 +106,45 @@ def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
         play_payload=puzzle.play_payload,
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
     )
+
+
+def serialize_tag(tag: PuzzleTag) -> dict:
+    return {
+        "id": tag.id,
+        "type": tag.tag_type,
+        "name": tag.name,
+        "slug": tag.slug,
+        "label": tag.label,
+    }
+
+
+def serialize_definition(definition: DictionaryDefinition) -> dict:
+    return {
+        "id": definition.id,
+        "definition": definition.definition,
+        "part_of_speech": definition.part_of_speech,
+        "clues": tag_values(definition.tags, "Clue"),
+        "example": definition.example,
+        "source": definition.source,
+        "position": definition.position,
+        "properties": definition.properties or {},
+        "tags": [serialize_tag(tag) for tag in definition.tags],
+    }
+
+
+def serialize_dictionary_word(word: DictionaryWord) -> dict:
+    return {
+        "id": word.id,
+        "word": word.word,
+        "display_text": word.display_text,
+        "clue": word.clue,
+        "part_of_speech": word.part_of_speech,
+        "properties": word.properties or {},
+        "archived": word.archived_at is not None,
+        "banned": word.banned_at is not None,
+        "tags": [serialize_tag(tag) for tag in word.tags],
+        "definitions": [serialize_definition(definition) for definition in word.definitions],
+    }
 
 
 def slugify(value: str) -> str:
@@ -124,6 +177,10 @@ def normalize_word(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", value).upper()
 
 
+def normalize_dictionary_word(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "", value).lower()
+
+
 def word_bank_words(bank: WordBank | None) -> list[str]:
     if bank is None:
         return []
@@ -146,6 +203,16 @@ def definition_clue(definition: DictionaryDefinition | None) -> str:
     if definition is None:
         return ""
     return tag_value(definition.tags, "Clue") or definition.definition
+
+
+def definition_clues(definition: DictionaryDefinition | None) -> list[str]:
+    if definition is None:
+        return []
+    clues = tag_values(definition.tags, "Clue")
+    definition_text = definition.definition.strip()
+    if definition_text and definition_text not in clues:
+        clues.append(definition_text)
+    return clues
 
 
 templates.env.globals["word_bank_mode"] = word_bank_mode
@@ -211,10 +278,19 @@ def source_data_for_puzzle(
         for entry in entries:
             word = entry["word"]
             definition = entry.get("definition")
-            clue = definition_clue(definition)
+            clues = definition_clues(definition)
+            clue = clues[0] if clues else ""
             if not clue:
                 clue = word.clue or word.properties.get("notes") or f"{word.display_text.title()} entry."
-            source.append({"word": word.word, "clue": clue, "definition_id": definition.id if definition else None})
+                clues = [clue]
+            source.append(
+                {
+                    "word": word.word,
+                    "clue": clue,
+                    "clues": clues,
+                    "definition_id": definition.id if definition else None,
+                }
+            )
             if len(source) >= count:
                 break
         return source or None
@@ -385,8 +461,13 @@ def definition_tags_from_form(
 ) -> list[PuzzleTag]:
     tags = tags_for_ids(db, tag_ids)
     existing_ids = {tag.id for tag in tags}
-    for tag_type, value in (("Part of Speech", part_of_speech_tag), ("Clue", clue_tag)):
+    for tag_type, value in (("Part of Speech", part_of_speech_tag),):
         tag = get_or_create_tag(db, tag_type, value)
+        if tag is not None and tag.id not in existing_ids:
+            tags.append(tag)
+            existing_ids.add(tag.id)
+    for value in [line.strip() for line in clue_tag.splitlines() if line.strip()]:
+        tag = get_or_create_tag(db, "Clue", value)
         if tag is not None and tag.id not in existing_ids:
             tags.append(tag)
             existing_ids.add(tag.id)
@@ -406,6 +487,15 @@ def require_admin_user(request: Request, db: Session) -> User | RedirectResponse
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def require_admin_api(request: Request, db: Session) -> User:
+    user = current_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Login required")
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
@@ -1402,6 +1492,208 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> dict[str,
     db.commit()
     db.refresh(user)
     return {"id": user.id, "display_name": user.display_name}
+
+
+def apply_definition_payload(
+    db: Session,
+    definition: DictionaryDefinition,
+    payload: DictionaryDefinitionWrite | DictionaryDefinitionPatch,
+) -> None:
+    if payload.definition is not None:
+        definition.definition = payload.definition.strip()
+    if payload.part_of_speech is not None:
+        definition.part_of_speech = payload.part_of_speech.strip()
+    if payload.example is not None:
+        definition.example = payload.example.strip()
+    if payload.position is not None:
+        definition.position = payload.position
+    if payload.properties is not None:
+        definition.properties = payload.properties
+    if payload.tag_ids is not None or payload.clues is not None or payload.part_of_speech is not None:
+        tag_ids = payload.tag_ids if payload.tag_ids is not None else [tag.id for tag in definition.tags if tag.tag_type != "Clue"]
+        clues = payload.clues if payload.clues is not None else tag_values(definition.tags, "Clue")
+        part_of_speech = payload.part_of_speech if payload.part_of_speech is not None else definition.part_of_speech
+        definition.tags = definition_tags_from_form(db, tag_ids, part_of_speech, "\n".join(clues))
+
+
+@app.get("/api/dictionary")
+def api_list_dictionary(
+    request: Request,
+    search: str = "",
+    include_archived: bool = False,
+    include_banned: bool = True,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    query = select(DictionaryWord).order_by(DictionaryWord.word)
+    words = db.scalars(query).all()
+    if search:
+        search_text = search.strip().lower()
+        words = [word for word in words if search_text in word.word.lower() or search_text in word.display_text.lower()]
+    if not include_archived:
+        words = [word for word in words if word.archived_at is None]
+    if not include_banned:
+        words = [word for word in words if word.banned_at is None]
+    total = len(words)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [serialize_dictionary_word(word) for word in words[offset : offset + limit]],
+    }
+
+
+@app.post("/api/dictionary")
+def api_create_dictionary_word(payload: DictionaryWordWrite, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    word_key = normalize_dictionary_word(payload.word)
+    if not word_key:
+        raise HTTPException(status_code=400, detail="Word must contain at least one letter or number")
+    existing = db.scalar(select(DictionaryWord).where(DictionaryWord.word == word_key))
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Dictionary word already exists")
+    word = DictionaryWord(
+        word=word_key,
+        display_text=payload.display_text.strip() or payload.word.strip(),
+        clue=payload.clue.strip(),
+        part_of_speech=payload.part_of_speech.strip(),
+        properties=payload.properties,
+    )
+    word.tags = tags_for_ids(db, payload.tag_ids)
+    db.add(word)
+    db.flush()
+    for index, definition_payload in enumerate(payload.definitions, start=1):
+        definition = DictionaryDefinition(
+            word=word,
+            definition=definition_payload.definition.strip(),
+            part_of_speech=definition_payload.part_of_speech.strip(),
+            example=definition_payload.example.strip(),
+            source="api",
+            position=definition_payload.position or index,
+            properties=definition_payload.properties,
+        )
+        db.add(definition)
+        db.flush()
+        apply_definition_payload(db, definition, definition_payload)
+    db.commit()
+    db.refresh(word)
+    return serialize_dictionary_word(word)
+
+
+@app.get("/api/dictionary/{word_id}")
+def api_get_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    word = db.get(DictionaryWord, word_id)
+    if word is None:
+        raise HTTPException(status_code=404, detail="Dictionary word not found")
+    return serialize_dictionary_word(word)
+
+
+@app.patch("/api/dictionary/{word_id}")
+def api_update_dictionary_word(
+    word_id: int,
+    payload: DictionaryWordPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    word = db.get(DictionaryWord, word_id)
+    if word is None:
+        raise HTTPException(status_code=404, detail="Dictionary word not found")
+    if payload.display_text is not None:
+        word.display_text = payload.display_text.strip() or word.display_text
+    if payload.clue is not None:
+        word.clue = payload.clue.strip()
+    if payload.part_of_speech is not None:
+        word.part_of_speech = payload.part_of_speech.strip()
+    if payload.properties is not None:
+        word.properties = payload.properties
+    if payload.tag_ids is not None:
+        word.tags = tags_for_ids(db, payload.tag_ids)
+    if payload.archived is not None:
+        word.archived_at = datetime.now(timezone.utc) if payload.archived else None
+    if payload.banned is not None:
+        word.banned_at = datetime.now(timezone.utc) if payload.banned else None
+    db.commit()
+    db.refresh(word)
+    return serialize_dictionary_word(word)
+
+
+@app.delete("/api/dictionary/{word_id}")
+def api_delete_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    word = db.get(DictionaryWord, word_id)
+    if word is None:
+        raise HTTPException(status_code=404, detail="Dictionary word not found")
+    db.delete(word)
+    db.commit()
+    return {"deleted": True, "id": word_id}
+
+
+@app.post("/api/dictionary/{word_id}/definitions")
+def api_create_dictionary_definition(
+    word_id: int,
+    payload: DictionaryDefinitionWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    word = db.get(DictionaryWord, word_id)
+    if word is None:
+        raise HTTPException(status_code=404, detail="Dictionary word not found")
+    definition = DictionaryDefinition(
+        word=word,
+        definition=payload.definition.strip(),
+        part_of_speech=payload.part_of_speech.strip(),
+        example=payload.example.strip(),
+        source="api",
+        position=payload.position,
+        properties=payload.properties,
+    )
+    db.add(definition)
+    db.flush()
+    apply_definition_payload(db, definition, payload)
+    db.commit()
+    db.refresh(definition)
+    return serialize_definition(definition)
+
+
+@app.patch("/api/dictionary/{word_id}/definitions/{definition_id}")
+def api_update_dictionary_definition(
+    word_id: int,
+    definition_id: int,
+    payload: DictionaryDefinitionPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    definition = db.get(DictionaryDefinition, definition_id)
+    if definition is None or definition.word_id != word_id:
+        raise HTTPException(status_code=404, detail="Dictionary definition not found")
+    apply_definition_payload(db, definition, payload)
+    db.commit()
+    db.refresh(definition)
+    return serialize_definition(definition)
+
+
+@app.delete("/api/dictionary/{word_id}/definitions/{definition_id}")
+def api_delete_dictionary_definition(
+    word_id: int,
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    definition = db.get(DictionaryDefinition, definition_id)
+    if definition is None or definition.word_id != word_id:
+        raise HTTPException(status_code=404, detail="Dictionary definition not found")
+    db.delete(definition)
+    db.commit()
+    return {"deleted": True, "id": definition_id}
 
 
 @app.post("/api/puzzles/generate", response_model=PuzzleSummary)

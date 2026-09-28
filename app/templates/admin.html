@@ -435,7 +435,7 @@
               <form class="edit-card" method="post" action="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}">
                 <label>Definition <textarea name="definition" rows="3" required>{{ definition.definition }}</textarea></label>
                 <label>Part of Speech tag <input name="part_of_speech_tag" value="{{ tag_value(definition.tags, 'Part of Speech') or definition.part_of_speech }}" placeholder="Noun"></label>
-                <label>Clue tag <textarea name="clue_tag" rows="2" placeholder="these can be found in the sky and on the internet">{{ tag_value(definition.tags, 'Clue') }}</textarea></label>
+                <label>Clues <textarea name="clue_tag" rows="3" placeholder="One clue per line">{{ tag_lines(definition.tags, 'Clue') }}</textarea></label>
                 <label>Example <textarea name="example" rows="2">{{ definition.example }}</textarea></label>
                 <label>Order <input name="position" type="number" value="{{ definition.position }}"></label>
                 <fieldset>
@@ -461,7 +461,7 @@
             <h2>Add Definition</h2>
             <label>Definition <textarea name="definition" rows="3" required></textarea></label>
             <label>Part of Speech tag <input name="part_of_speech_tag" value="{{ selected_word.part_of_speech }}" placeholder="Noun"></label>
-            <label>Clue tag <textarea name="clue_tag" rows="2" placeholder="these can be found in the sky and on the internet"></textarea></label>
+            <label>Clues <textarea name="clue_tag" rows="3" placeholder="One clue per line"></textarea></label>
             <label>Example <textarea name="example" rows="2"></textarea></label>
             <fieldset>
               <legend>Definition tags</legend>

@@ -702,6 +702,28 @@ legend {
   color: var(--muted);
 }
 
+.clue-list .reveal-entry {
+  width: auto;
+  margin-top: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+.clue-more {
+  margin: 5px 0;
+}
+
+.clue-more summary {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.clue-more ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
 .solution-list {
   display: grid;
   gap: 10px;

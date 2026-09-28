@@ -7,6 +7,7 @@
   const checkButton = document.getElementById("crossword-check");
   const clearButton = document.getElementById("crossword-clear");
   const revealButton = document.getElementById("reveal-solution");
+  const revealEntryButtons = Array.from(document.querySelectorAll(".reveal-entry"));
   const progressUrl = root.dataset.progressUrl;
   let solution = [];
   let entries = [];
@@ -107,6 +108,20 @@
       input.closest(".crossword-cell").classList.add("correct");
     });
     if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
+    saveProgress();
+  }
+
+  function revealEntry(entry) {
+    const keys = cellsByEntry.get(entryId(entry)) || [];
+    keys.forEach((key, index) => {
+      const input = inputsByKey.get(key);
+      if (!input) return;
+      input.value = String(entry.answer || "")[index] || expectedFor(input);
+      input.closest(".crossword-cell").classList.remove("incorrect");
+      input.closest(".crossword-cell").classList.add("correct");
+    });
+    if (status) status.textContent = `${entry.number} ${entry.direction} revealed.`;
+    saveProgress();
   }
 
   function entryContainsInput(entry, input) {
@@ -229,4 +244,14 @@
   if (revealButton) {
     revealButton.addEventListener("click", revealSolution);
   }
+
+  revealEntryButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const entry = entries.find((item) => (
+        String(item.number) === button.dataset.entryNumber
+        && item.direction === button.dataset.entryDirection
+      ));
+      if (entry) revealEntry(entry);
+    });
+  });
 })();
