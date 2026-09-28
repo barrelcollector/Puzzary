@@ -597,6 +597,7 @@ def admin_context(
         "word_bank_entries": {bank.id: word_bank_entries(db, bank) for bank in all_word_banks},
         "categories": categories,
         "tags": tags,
+        "assignable_tags": [tag for tag in tags if tag.tag_type != "Clue"],
         "tag_groups": tag_groups,
         "tag_usage": tag_usage,
         "attempts": attempts,

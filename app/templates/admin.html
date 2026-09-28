@@ -83,7 +83,7 @@
               <fieldset>
                 <legend>Tags</legend>
                 <div class="check-list">
-                  {% for tag in tags %}
+                  {% for tag in assignable_tags %}
                     <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in puzzle.tags %}checked{% endif %}>{{ tag.label }}</label>
                   {% else %}
                     <small>No tags yet.</small>
@@ -152,7 +152,7 @@
         <fieldset>
           <legend>Tags</legend>
           <div class="check-list">
-            {% for tag in tags %}
+            {% for tag in assignable_tags %}
               <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
             {% else %}
               <small>No tags yet.</small>
@@ -162,7 +162,7 @@
         <fieldset>
           <legend>Exclude words with tags</legend>
           <div class="check-list">
-            {% for tag in tags %}
+            {% for tag in assignable_tags %}
               <label><input type="checkbox" name="excluded_tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
             {% else %}
               <small>No tags yet.</small>
@@ -204,7 +204,7 @@
           <fieldset>
             <legend>Tags</legend>
             <div class="check-list">
-              {% for tag in tags %}
+              {% for tag in assignable_tags %}
                 <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
               {% else %}
                 <small>No tags yet.</small>
@@ -268,7 +268,7 @@
           <fieldset>
             <legend>Tags</legend>
             <div class="check-list">
-              {% for tag in tags %}
+              {% for tag in assignable_tags %}
                 <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in bank.tags %}checked{% endif %}>{{ tag.label }}</label>
               {% else %}
                 <small>No tags yet.</small>
@@ -368,7 +368,7 @@
           <fieldset>
             <legend>Tags</legend>
             <div class="check-list">
-              {% for tag in tags %}
+              {% for tag in assignable_tags %}
                 <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
               {% else %}
                 <small>No tags yet.</small>
@@ -441,7 +441,7 @@
                 <fieldset>
                   <legend>Definition tags</legend>
                   <div class="check-list">
-                    {% for tag in tags %}
+                    {% for tag in assignable_tags %}
                       <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in definition.tags %}checked{% endif %}>{{ tag.label }}</label>
                     {% else %}
                       <small>No tags yet.</small>
@@ -466,7 +466,7 @@
             <fieldset>
               <legend>Definition tags</legend>
               <div class="check-list">
-                {% for tag in tags %}
+                {% for tag in assignable_tags %}
                   <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
                 {% else %}
                   <small>No tags yet.</small>
@@ -494,7 +494,7 @@
           <fieldset>
             <legend>Tags</legend>
             <div class="check-list">
-              {% for tag in tags %}
+              {% for tag in assignable_tags %}
                 <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag in selected_word.tags %}checked{% endif %}>{{ tag.label }}</label>
               {% else %}
                 <small>No tags yet.</small>
