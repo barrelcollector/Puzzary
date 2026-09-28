@@ -562,12 +562,24 @@ def admin_context(
     section: str,
     selected_word: DictionaryWord | None = None,
     selected_word_bank: WordBank | None = None,
+    selected_tag: PuzzleTag | None = None,
 ) -> dict:
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
     all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
     word_banks = [bank for bank in all_word_banks if bank.archived_at is None]
     categories = db.scalars(select(PuzzleCategory).order_by(PuzzleCategory.name)).all()
     tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
+    tag_groups: dict[str, list[PuzzleTag]] = {}
+    tag_usage: dict[int, dict[str, int]] = {}
+    for tag in tags:
+        tag_groups.setdefault(tag.tag_type or "General", []).append(tag)
+        tag_usage[tag.id] = {
+            "puzzles": len(tag.puzzles),
+            "word_banks": len(tag.word_banks),
+            "words": len(tag.dictionary_words),
+            "definitions": len(tag.dictionary_definitions),
+        }
+        tag_usage[tag.id]["total"] = sum(tag_usage[tag.id].values())
     attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
@@ -585,12 +597,15 @@ def admin_context(
         "word_bank_entries": {bank.id: word_bank_entries(db, bank) for bank in all_word_banks},
         "categories": categories,
         "tags": tags,
+        "tag_groups": tag_groups,
+        "tag_usage": tag_usage,
         "attempts": attempts,
         "progress_rows": progress_rows,
         "photos": photos,
         "dictionary_words": dictionary_words,
         "selected_word": selected_word,
         "selected_word_bank": selected_word_bank,
+        "selected_tag": selected_tag,
         "puzzle_types": list_puzzle_types(),
     }
 
@@ -601,13 +616,14 @@ def render_admin(
     section: str,
     selected_word: DictionaryWord | None = None,
     selected_word_bank: WordBank | None = None,
+    selected_tag: PuzzleTag | None = None,
 ):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
         "admin.html",
-        admin_context(request, db, user, section, selected_word, selected_word_bank),
+        admin_context(request, db, user, section, selected_word, selected_word_bank, selected_tag),
     )
 
 
@@ -672,6 +688,14 @@ def admin_taxonomy_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/tags", response_class=HTMLResponse)
 def admin_tags_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "tags")
+
+
+@app.get("/admin/tags/{tag_id}", response_class=HTMLResponse)
+def admin_tag_detail_page(tag_id: int, request: Request, db: Session = Depends(get_db)):
+    tag = db.get(PuzzleTag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return render_admin(request, db, "tag_detail", selected_tag=tag)
 
 
 @app.get("/admin/activity", response_class=HTMLResponse)
@@ -1244,15 +1268,14 @@ def admin_create_tag(
     if isinstance(user, RedirectResponse):
         return user
     normalized_type = normalize_tag_type(tag_type)
-    db.add(
-        PuzzleTag(
-            name=name.strip(),
-            tag_type=normalized_type,
-            slug=unique_slug(db, PuzzleTag, slug or typed_tag_slug(normalized_type, name)),
-        )
+    tag = PuzzleTag(
+        name=name.strip(),
+        tag_type=normalized_type,
+        slug=unique_slug(db, PuzzleTag, slug or typed_tag_slug(normalized_type, name)),
     )
+    db.add(tag)
     db.commit()
-    return RedirectResponse(url="/admin/tags", status_code=303)
+    return RedirectResponse(url=f"/admin/tags/{tag.id}", status_code=303)
 
 
 @app.post("/admin/tags/{tag_id}")
@@ -1274,7 +1297,7 @@ def admin_update_tag(
         tag.tag_type = normalized_type
         tag.slug = unique_slug(db, PuzzleTag, slug or typed_tag_slug(normalized_type, name), tag.id)
         db.commit()
-    return RedirectResponse(url="/admin/tags", status_code=303)
+    return RedirectResponse(url=f"/admin/tags/{tag_id}", status_code=303)
 
 
 @app.post("/admin/tags/{tag_id}/delete")

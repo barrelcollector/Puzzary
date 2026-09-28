@@ -440,6 +440,108 @@ legend {
   background: #fbfbf8;
 }
 
+.soft-divider {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 18px 0;
+}
+
+.tag-admin-grid {
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+}
+
+.tag-type-list,
+.tag-groups,
+.relationship-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tag-type-list a,
+.tag-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  text-decoration: none;
+  background: #fbfbf8;
+}
+
+.tag-type-list a:hover,
+.tag-card:hover {
+  border-color: #9ab8ae;
+  background: #f7fbf9;
+}
+
+.tag-type-list span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.section-heading p {
+  margin: 0;
+}
+
+.tag-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.tag-card > span:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tag-card strong,
+.tag-card small {
+  overflow-wrap: anywhere;
+}
+
+.compact-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.relationship-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.relationship-list div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+}
+
+.relationship-list h3 {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+}
+
+.relationship-list a {
+  color: var(--accent);
+  font-weight: 750;
+}
+
 .compact .row {
   padding: 10px 12px;
 }

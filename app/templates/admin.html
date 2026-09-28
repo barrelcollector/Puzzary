@@ -8,7 +8,7 @@
     <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
     <a class="{% if section in ['dictionary', 'word_detail'] %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
     <a class="{% if section in ['word_banks', 'word_bank_detail'] %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
-    <a class="{% if section == 'tags' %}active{% endif %}" href="/admin/tags">Tags</a>
+    <a class="{% if section in ['tags', 'tag_detail'] %}active{% endif %}" href="/admin/tags">Tags</a>
     <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
     <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
   </nav>
@@ -529,57 +529,154 @@
       <section class="puzzle-head">
         <div>
           <h1>Tags</h1>
-          <p class="muted">Reusable labels for words, word banks, and puzzles.</p>
+          <p class="muted">Reusable labels for words, definitions, word banks, and puzzles.</p>
+        </div>
+      </section>
+      <section class="admin-grid two tag-admin-grid">
+        <div class="panel">
+          <h2>Add Tag</h2>
+          <form method="post" action="/admin/tags">
+            <label>Type <input name="tag_type" value="General" required></label>
+            <label>Value <input name="name" required></label>
+            <label>Slug <input name="slug" placeholder="optional"></label>
+            <button type="submit">Add Tag</button>
+          </form>
+          <hr class="soft-divider">
+          <h2>Tag Types</h2>
+          <div class="tag-type-list">
+            {% for tag_type, group in tag_groups.items() %}
+              <a href="#tag-type-{{ tag_type | lower | replace(' ', '-') }}">
+                <strong>{{ tag_type }}</strong>
+                <span>{{ group | length }}</span>
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="tag-groups">
+          {% for tag_type, group in tag_groups.items() %}
+            <section class="panel tag-group" id="tag-type-{{ tag_type | lower | replace(' ', '-') }}">
+              <div class="section-heading">
+                <div>
+                  <h2>{{ tag_type }}</h2>
+                  <p class="muted">{{ group | length }} tags</p>
+                </div>
+              </div>
+              <div class="tag-card-grid">
+                {% for tag in group %}
+                  <a class="tag-card" href="/admin/tags/{{ tag.id }}">
+                    <span>
+                      <strong>{{ tag.name }}</strong>
+                      <small>{{ tag.slug }}</small>
+                    </span>
+                    <span class="status-pill">{{ tag_usage[tag.id].total }} uses</span>
+                  </a>
+                {% endfor %}
+              </div>
+            </section>
+          {% else %}
+            <section class="panel">
+              <h2>No tags yet</h2>
+              <p class="muted">Add your first tag to start organizing words and puzzle generation.</p>
+            </section>
+          {% endfor %}
+          <details class="panel">
+            <summary>Optional categories</summary>
+            <p class="muted">Categories are still available as one broad grouping for puzzles and word banks.</p>
+            <form method="post" action="/admin/categories">
+              <label>Name <input name="name" required></label>
+              <label>Slug <input name="slug"></label>
+              <label>Description <textarea name="description" rows="2"></textarea></label>
+              <button type="submit">Add Category</button>
+            </form>
+            <div class="admin-list compact-admin">
+              {% for category in categories %}
+                <form class="edit-card" method="post" action="/admin/categories/{{ category.id }}">
+                  <label>Name <input name="name" value="{{ category.name }}" required></label>
+                  <label>Slug <input name="slug" value="{{ category.slug }}" required></label>
+                  <label>Description <textarea name="description" rows="2">{{ category.description }}</textarea></label>
+                  <div class="action-row">
+                    <button type="submit">Save</button>
+                    <button type="submit" form="delete-category-{{ category.id }}" class="danger-button">Delete</button>
+                  </div>
+                </form>
+                <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
+              {% endfor %}
+            </div>
+          </details>
+        </div>
+      </section>
+    {% endif %}
+
+    {% if section == "tag_detail" and selected_tag %}
+      <section class="puzzle-head">
+        <div>
+          <a class="ghost-link" href="/admin/tags">Back to Tags</a>
+          <h1>{{ selected_tag.label }}</h1>
+          <p class="muted">{{ selected_tag.slug }}</p>
         </div>
       </section>
       <section class="admin-grid two">
         <div class="panel">
-          <h2>Tags</h2>
-          <form method="post" action="/admin/tags">
-            <label>Type <input name="tag_type" value="General" required></label>
-            <label>Value <input name="name" required></label>
-            <label>Slug <input name="slug"></label>
-            <button type="submit">Add Tag</button>
+          <h2>Settings</h2>
+          <form method="post" action="/admin/tags/{{ selected_tag.id }}">
+            <label>Type <input name="tag_type" value="{{ selected_tag.tag_type or 'General' }}" required></label>
+            <label>Value <input name="name" value="{{ selected_tag.name }}" required></label>
+            <label>Slug <input name="slug" value="{{ selected_tag.slug }}" required></label>
+            <div class="action-row">
+              <button type="submit">Save Tag</button>
+              <button type="submit" form="delete-tag-{{ selected_tag.id }}" class="danger-button">Delete</button>
+            </div>
           </form>
-          <div class="admin-list compact-admin">
-            {% for tag in tags %}
-              <form class="edit-card" method="post" action="/admin/tags/{{ tag.id }}">
-                <label>Type <input name="tag_type" value="{{ tag.tag_type or 'General' }}" required></label>
-                <label>Value <input name="name" value="{{ tag.name }}" required></label>
-                <label>Slug <input name="slug" value="{{ tag.slug }}" required></label>
-                <div class="action-row">
-                  <button type="submit">Save</button>
-                  <button type="submit" form="delete-tag-{{ tag.id }}" class="danger-button">Delete</button>
-                </div>
-              </form>
-              <form id="delete-tag-{{ tag.id }}" method="post" action="/admin/tags/{{ tag.id }}/delete"></form>
-            {% endfor %}
-          </div>
+          <form id="delete-tag-{{ selected_tag.id }}" method="post" action="/admin/tags/{{ selected_tag.id }}/delete"></form>
         </div>
-        <details class="panel">
-          <summary>Optional categories</summary>
-          <p class="muted">Categories are still available as one broad grouping for puzzles and word banks.</p>
-          <form method="post" action="/admin/categories">
-            <label>Name <input name="name" required></label>
-            <label>Slug <input name="slug"></label>
-            <label>Description <textarea name="description" rows="2"></textarea></label>
-            <button type="submit">Add Category</button>
-          </form>
-          <div class="admin-list compact-admin">
-            {% for category in categories %}
-              <form class="edit-card" method="post" action="/admin/categories/{{ category.id }}">
-                <label>Name <input name="name" value="{{ category.name }}" required></label>
-                <label>Slug <input name="slug" value="{{ category.slug }}" required></label>
-                <label>Description <textarea name="description" rows="2">{{ category.description }}</textarea></label>
-                <div class="action-row">
-                  <button type="submit">Save</button>
-                  <button type="submit" form="delete-category-{{ category.id }}" class="danger-button">Delete</button>
-                </div>
-              </form>
-              <form id="delete-category-{{ category.id }}" method="post" action="/admin/categories/{{ category.id }}/delete"></form>
-            {% endfor %}
+        <div class="tag-groups">
+          <section class="panel">
+            <h2>Used By</h2>
+            <div class="metric-grid compact-metrics">
+              <div class="metric-card"><strong>{{ tag_usage[selected_tag.id].words }}</strong><span>Words</span></div>
+              <div class="metric-card"><strong>{{ tag_usage[selected_tag.id].definitions }}</strong><span>Definitions</span></div>
+              <div class="metric-card"><strong>{{ tag_usage[selected_tag.id].word_banks }}</strong><span>Word banks</span></div>
+              <div class="metric-card"><strong>{{ tag_usage[selected_tag.id].puzzles }}</strong><span>Puzzles</span></div>
+            </div>
+          </section>
+          <section class="panel">
+            <h2>Relationships</h2>
+            <div class="relationship-list">
+              <div>
+                <h3>Words</h3>
+                {% for word in selected_tag.dictionary_words %}
+                  <a href="/admin/dictionary/{{ word.id }}">{{ word.word }}</a>
+                {% else %}
+                  <span class="muted">None</span>
+                {% endfor %}
+              </div>
+              <div>
+                <h3>Definitions</h3>
+                {% for definition in selected_tag.dictionary_definitions %}
+                  <a href="/admin/dictionary/{{ definition.word.id }}">{{ definition.word.word }}</a>
+                {% else %}
+                  <span class="muted">None</span>
+                {% endfor %}
+              </div>
+              <div>
+                <h3>Word Banks</h3>
+                {% for bank in selected_tag.word_banks %}
+                  <a href="/admin/word-banks/{{ bank.id }}">{{ bank.name }}</a>
+                {% else %}
+                  <span class="muted">None</span>
+                {% endfor %}
+              </div>
+              <div>
+                <h3>Puzzles</h3>
+                {% for puzzle in selected_tag.puzzles %}
+                  <a href="/puzzles/{{ puzzle.id }}">{{ puzzle.title }}</a>
+                {% else %}
+                  <span class="muted">None</span>
+                {% endfor %}
+              </div>
           </div>
-        </details>
+          </section>
+        </div>
       </section>
     {% endif %}
 
