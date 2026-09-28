@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 from typing import Any
 
 from app.content import words_for_theme
@@ -42,6 +43,23 @@ def typed_tag_values(tags: list[Any], tag_type: str) -> list[str]:
     return values
 
 
+def progressive_clues(clues: list[str], word: str) -> tuple[str, list[str]]:
+    if not clues:
+        fallback = f"{word.title()} entry."
+        return fallback, [fallback]
+    primary = clues[0]
+    match = re.fullmatch(r"(.+) term starting with ([A-Z0-9]) \((\d+) letters\)\.", primary)
+    if not match:
+        return primary, clues
+    theme, first_letter, _length = match.groups()
+    stepped = [f"{theme} entry."]
+    for clue in clues[1:]:
+        if clue not in stepped:
+            stepped.append(clue)
+    stepped.append(f"Starts with {first_letter}.")
+    return stepped[0], stepped
+
+
 def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, list[str], int | None] | None:
     definitions = sorted(getattr(word, "definitions", []), key=lambda item: item.position)
     for definition in definitions:
@@ -51,7 +69,8 @@ def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, li
             if definition_text and definition_text not in clues:
                 clues.append(definition_text)
             if clues:
-                return clues[0], clues, definition.id
+                primary, clue_steps = progressive_clues(clues, str(getattr(word, "display_text", "") or getattr(word, "word", "")))
+                return primary, clue_steps, definition.id
     clue = str(getattr(word, "clue", "") or "").strip()
     if clue:
         return clue, [clue], None
@@ -137,15 +156,19 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
         if len(word) < 3 or word in seen:
             continue
         seen.add(word)
+        primary_clue, clue_steps = progressive_clues(
+            [
+                str(clue).strip()
+                for clue in entry.get("clues", [entry.get("clue") or f"{word.title()} entry."])
+                if str(clue).strip()
+            ],
+            word,
+        )
         entries.append(
             {
                 "word": word,
-                "clue": str(entry.get("clue") or f"{word.title()} entry."),
-                "clues": [
-                    str(clue).strip()
-                    for clue in entry.get("clues", [entry.get("clue") or f"{word.title()} entry."])
-                    if str(clue).strip()
-                ],
+                "clue": primary_clue,
+                "clues": clue_steps,
                 "definition_id": entry.get("definition_id"),
             }
         )

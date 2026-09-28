@@ -702,26 +702,22 @@ legend {
   color: var(--muted);
 }
 
-.clue-list .reveal-entry {
+.clue-list .reveal-entry,
+.clue-list .more-clue {
   width: auto;
   margin-top: 6px;
   padding: 5px 8px;
   font-size: 13px;
 }
 
-.clue-more {
-  margin: 5px 0;
-}
-
-.clue-more summary {
-  color: var(--accent);
-  font-size: 13px;
-}
-
-.clue-more ul {
+.clue-steps {
   margin: 5px 0 0;
   padding-left: 18px;
   color: var(--muted);
+}
+
+.clue-steps li {
+  margin: 3px 0;
 }
 
 .solution-list {

@@ -8,6 +8,7 @@
   const clearButton = document.getElementById("crossword-clear");
   const revealButton = document.getElementById("reveal-solution");
   const revealEntryButtons = Array.from(document.querySelectorAll(".reveal-entry"));
+  const moreClueButtons = Array.from(document.querySelectorAll(".more-clue"));
   const progressUrl = root.dataset.progressUrl;
   let solution = [];
   let entries = [];
@@ -252,6 +253,20 @@
         && item.direction === button.dataset.entryDirection
       ));
       if (entry) revealEntry(entry);
+    });
+  });
+
+  moreClueButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const list = button.nextElementSibling;
+      if (!list || !list.classList.contains("clue-steps")) return;
+      const hiddenSteps = Array.from(list.querySelectorAll("li[hidden]"));
+      if (!hiddenSteps.length) return;
+      list.hidden = false;
+      hiddenSteps[0].hidden = false;
+      const remaining = hiddenSteps.length - 1;
+      button.textContent = remaining ? `More clues (${remaining})` : "No more clues";
+      button.disabled = remaining === 0;
     });
   });
 })();
