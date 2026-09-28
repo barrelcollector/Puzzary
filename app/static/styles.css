@@ -500,11 +500,12 @@ legend {
 
 .crossword-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
-  width: min(100%, 560px);
-  border: 2px solid var(--ink);
-  background: var(--ink);
-  gap: 1px;
+  grid-template-columns: repeat(var(--grid-size), minmax(0, 54px));
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  background: transparent;
+  gap: 0;
   margin: 18px 0;
 }
 
@@ -513,10 +514,14 @@ legend {
   display: grid;
   aspect-ratio: 1;
   background: white;
+  border: 1px solid var(--ink);
+  margin: -1px 0 0 -1px;
 }
 
-.crossword-cell.black {
-  background: var(--ink);
+.crossword-spacer {
+  display: block;
+  aspect-ratio: 1;
+  min-width: 0;
 }
 
 .crossword-cell span {

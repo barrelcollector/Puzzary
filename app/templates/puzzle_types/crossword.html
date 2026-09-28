@@ -20,7 +20,7 @@
             <input aria-label="Cell {{ x + 1 }}, {{ y + 1 }}" maxlength="1" autocomplete="off" inputmode="text" data-key="{{ x }},{{ y }}" value="{{ progress_answers[x ~ ',' ~ y] | default('') }}">
           </label>
         {% else %}
-          <span class="crossword-cell black"></span>
+          <span class="crossword-spacer" aria-hidden="true"></span>
         {% endif %}
       {% endfor %}
     {% endfor %}
