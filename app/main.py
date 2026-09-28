@@ -203,6 +203,12 @@ def word_bank_for_slug(db: Session, slug: str) -> WordBank | None:
     return db.scalar(select(WordBank).where(WordBank.slug == slug, WordBank.archived_at.is_(None)))
 
 
+def tags_for_ids(db: Session, tag_ids: list[int]) -> list[PuzzleTag]:
+    if not tag_ids:
+        return []
+    return db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all()
+
+
 def require_admin_user(request: Request, db: Session) -> User | RedirectResponse:
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
@@ -520,6 +526,7 @@ def admin_generate_puzzle(
     difficulty: str = Form("easy"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
+    excluded_tag_ids: list[int] = Form(default=[]),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -528,11 +535,19 @@ def admin_generate_puzzle(
     bank = db.get(WordBank, bank_id)
     if bank is None or bank.archived_at is not None:
         raise HTTPException(status_code=404, detail="Word bank not found")
-    puzzle = create_puzzle(PuzzleGenerateRequest(puzzle_type=puzzle_type, theme=bank.slug, difficulty=difficulty), db)
+    puzzle = create_puzzle(
+        PuzzleGenerateRequest(
+            puzzle_type=puzzle_type,
+            theme=bank.slug,
+            difficulty=difficulty,
+            excluded_tag_ids=excluded_tag_ids,
+        ),
+        db,
+    )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle is not None:
         saved_puzzle.category_id = category_id or bank.category_id
-        saved_puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else list(bank.tags)
+        saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else list(bank.tags)
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -653,7 +668,7 @@ def admin_create_dictionary_word(
         entry.display_text = display_text.strip() or normalize_word(word)
         entry.clue = clue.strip()
         entry.part_of_speech = part_of_speech.strip()
-        entry.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+        entry.tags = tags_for_ids(db, tag_ids)
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{entry.id}" if entry is not None else "/admin/dictionary", status_code=303)
@@ -678,10 +693,77 @@ def admin_update_dictionary_word(
         entry.display_text = display_text.strip() or entry.word
         entry.clue = clue.strip()
         entry.part_of_speech = part_of_speech.strip()
-        entry.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+        entry.tags = tags_for_ids(db, tag_ids)
         entry.properties = {"notes": properties.strip()} if properties.strip() else {}
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/archive")
+def admin_archive_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryWord, word_id)
+    if entry is not None:
+        entry.archived_at = datetime.now(timezone.utc)
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/unarchive")
+def admin_unarchive_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryWord, word_id)
+    if entry is not None:
+        entry.archived_at = None
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/ban")
+def admin_ban_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryWord, word_id)
+    if entry is not None:
+        entry.banned_at = datetime.now(timezone.utc)
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/unban")
+def admin_unban_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryWord, word_id)
+    if entry is not None:
+        entry.banned_at = None
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/delete")
+def admin_delete_dictionary_word(word_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryWord, word_id)
+    if entry is not None:
+        linked_banks = [link.word_bank for link in entry.bank_links]
+        for bank in linked_banks:
+            payload_words = bank.payload.get("words", []) if isinstance(bank.payload, dict) else []
+            if isinstance(payload_words, list):
+                bank.payload = {"words": [word for word in payload_words if normalize_word(str(word)) != entry.word]}
+        entry.tags = []
+        entry.bank_links.clear()
+        db.delete(entry)
+        db.commit()
+    return RedirectResponse(url="/admin/dictionary", status_code=303)
 
 
 @app.post("/admin/dictionaries")
@@ -933,7 +1015,14 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
 
     word_bank = word_bank_for_slug(db, payload.theme)
-    generated = puzzle_type.generator(payload.theme, payload.difficulty, puzzle_type.source_builder(word_bank, payload.difficulty))
+    excluded_tag_ids = set(payload.excluded_tag_ids)
+    excluded_tags = tags_for_ids(db, payload.excluded_tag_ids)
+    source_data = puzzle_type.source_builder(word_bank, payload.difficulty, excluded_tag_ids)
+    if word_bank is not None and source_data is None:
+        raise HTTPException(status_code=400, detail="No usable words remain after archive, ban, and tag exclusions")
+    generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data)
+    generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
+    generated.metadata["excluded_tag_slugs"] = [tag.slug for tag in excluded_tags]
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,

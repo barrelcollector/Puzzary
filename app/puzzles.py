@@ -21,7 +21,7 @@ class PuzzleType:
     slug: str
     label: str
     generator: Callable[[str, str, Any], GeneratedPuzzle]
-    source_builder: Callable[[Any, str], Any]
+    source_builder: Callable[[Any, str, set[int] | None], Any]
     answer_checker: Callable[[str, dict], tuple[bool, int, int]]
     progress_normalizer: Callable[[Any, dict], dict]
     progress_counter: Callable[[dict, dict], tuple[int, int]]

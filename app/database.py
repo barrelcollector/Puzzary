@@ -50,6 +50,7 @@ def ensure_schema() -> None:
 
     puzzle_columns = {column["name"] for column in inspector.get_columns("puzzles")}
     user_columns = {column["name"] for column in inspector.get_columns("users")}
+    dictionary_word_columns = {column["name"] for column in inspector.get_columns("dictionary_words")} if "dictionary_words" in table_names else set()
     with engine.begin() as connection:
         if "archived_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
@@ -61,6 +62,11 @@ def ensure_schema() -> None:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN word_bank_id INTEGER"))
         if "is_admin" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "dictionary_words" in table_names:
+            if "archived_at" not in dictionary_word_columns:
+                connection.execute(text("ALTER TABLE dictionary_words ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
+            if "banned_at" not in dictionary_word_columns:
+                connection.execute(text("ALTER TABLE dictionary_words ADD COLUMN banned_at TIMESTAMP WITH TIME ZONE"))
 
         if "word_banks" in table_names:
             word_bank_columns = {column["name"] for column in inspector.get_columns("word_banks")}

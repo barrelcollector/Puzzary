@@ -397,6 +397,17 @@ legend {
   font-weight: 800;
 }
 
+.muted-chip {
+  background: #efeadc;
+  color: var(--muted);
+}
+
+.danger-chip {
+  background: #f4d1ca;
+  color: #8b2e24;
+  border-color: #d8a69e;
+}
+
 .dictionary-title {
   margin-top: 8px;
   font-size: clamp(34px, 6vw, 58px);

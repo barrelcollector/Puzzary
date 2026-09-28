@@ -159,6 +159,17 @@
             {% endfor %}
           </div>
         </fieldset>
+        <fieldset>
+          <legend>Exclude words with tags</legend>
+          <div class="check-list">
+            {% for tag in tags %}
+              <label><input type="checkbox" name="excluded_tag_ids" value="{{ tag.id }}">{{ tag.name }}</label>
+            {% else %}
+              <small>No tags yet.</small>
+            {% endfor %}
+          </div>
+          <p class="muted">Archived and banned words are always skipped.</p>
+        </fieldset>
         <button type="submit">Generate Puzzle</button>
       </form>
     {% endif %}
@@ -270,6 +281,8 @@
                 <small>{{ word.part_of_speech or "word" }} / {{ word.bank_links | length }} bank{% if word.bank_links | length != 1 %}s{% endif %}</small>
               </span>
               <span class="chip-list compact-chips">
+                {% if word.banned_at %}<small class="chip danger-chip">Banned</small>{% endif %}
+                {% if word.archived_at %}<small class="chip muted-chip">Archived</small>{% endif %}
                 {% for tag in word.tags[:3] %}
                   <small class="chip">{{ tag.name }}</small>
                 {% endfor %}
@@ -288,6 +301,10 @@
           <a class="ghost-link" href="/admin/dictionary">Back to Dictionary</a>
           <h1 class="dictionary-title">{{ selected_word.display_text or selected_word.word }}</h1>
           <p class="muted">{{ selected_word.word }}{% if selected_word.part_of_speech %} / {{ selected_word.part_of_speech }}{% endif %}</p>
+          <div class="chip-list">
+            {% if selected_word.banned_at %}<span class="chip danger-chip">Banned</span>{% endif %}
+            {% if selected_word.archived_at %}<span class="chip muted-chip">Archived</span>{% endif %}
+          </div>
         </div>
       </section>
       <section class="word-entry-grid">
@@ -334,8 +351,26 @@
             </div>
           </fieldset>
           <label>Properties / notes <textarea name="properties" rows="5">{{ selected_word.properties.notes | default('') }}</textarea></label>
-          <button type="submit">Save Word</button>
+          <div class="action-row">
+            <button type="submit">Save Word</button>
+            {% if selected_word.archived_at %}
+              <button type="submit" form="unarchive-word-{{ selected_word.id }}" class="ghost-button">Unarchive</button>
+            {% else %}
+              <button type="submit" form="archive-word-{{ selected_word.id }}" class="ghost-button">Archive</button>
+            {% endif %}
+            {% if selected_word.banned_at %}
+              <button type="submit" form="unban-word-{{ selected_word.id }}" class="ghost-button">Unban</button>
+            {% else %}
+              <button type="submit" form="ban-word-{{ selected_word.id }}" class="danger-button">Ban</button>
+            {% endif %}
+            <button type="submit" form="delete-word-{{ selected_word.id }}" class="danger-button">Delete</button>
+          </div>
         </form>
+        <form id="archive-word-{{ selected_word.id }}" method="post" action="/admin/dictionary/{{ selected_word.id }}/archive"></form>
+        <form id="unarchive-word-{{ selected_word.id }}" method="post" action="/admin/dictionary/{{ selected_word.id }}/unarchive"></form>
+        <form id="ban-word-{{ selected_word.id }}" method="post" action="/admin/dictionary/{{ selected_word.id }}/ban"></form>
+        <form id="unban-word-{{ selected_word.id }}" method="post" action="/admin/dictionary/{{ selected_word.id }}/unban"></form>
+        <form id="delete-word-{{ selected_word.id }}" method="post" action="/admin/dictionary/{{ selected_word.id }}/delete"></form>
       </section>
     {% endif %}
 

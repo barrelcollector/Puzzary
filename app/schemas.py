@@ -11,6 +11,7 @@ class PuzzleGenerateRequest(BaseModel):
     puzzle_type: str = "word_search"
     theme: str = "daily_stripe"
     difficulty: str = "easy"
+    excluded_tag_ids: list[int] = Field(default_factory=list)
 
 
 class PuzzleAttemptCreate(BaseModel):

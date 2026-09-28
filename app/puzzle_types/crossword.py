@@ -7,12 +7,22 @@ from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, PuzzleType, normalize_answer, register_puzzle_type
 
 
-def build_source(word_bank: Any, difficulty: str) -> list[dict] | None:
+def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
+    if getattr(word, "archived_at", None) is not None or getattr(word, "banned_at", None) is not None:
+        return False
+    if excluded_tag_ids and any(getattr(tag, "id", None) in excluded_tag_ids for tag in getattr(word, "tags", [])):
+        return False
+    return True
+
+
+def build_source(word_bank: Any, difficulty: str, excluded_tag_ids: set[int] | None = None) -> list[dict] | None:
     if word_bank is None:
         return None
     count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
     entries = []
     for link in sorted(word_bank.word_links, key=lambda item: item.position):
+        if not word_allowed(link.word, excluded_tag_ids):
+            continue
         entries.append(
             {
                 "word": link.word.word,
