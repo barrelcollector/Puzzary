@@ -1,0 +1,56 @@
+name: Puzzary task
+about: Track a puzzle type, platform feature, content system, or integration task
+labels: triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape Puzzary. Use this template for puzzle modules, dictionary/content work, API work, print/publishing features, and portal improvements.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should be built or changed?
+      placeholder: Describe the task in a few sentences.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Puzzle module
+        - Dictionary and content
+        - Web portal
+        - Admin
+        - API
+        - Publishing and print
+        - Infrastructure
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: goals
+    attributes:
+      label: Goals
+      description: What should be true when this is done?
+      placeholder: |
+        - Goal one
+        - Goal two
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes and constraints
+      description: Include puzzle rules, data needs, UI expectations, or integration constraints.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Criterion one
+        - [ ] Criterion two
+    validations:
+      required: true
