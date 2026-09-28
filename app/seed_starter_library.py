@@ -179,6 +179,20 @@ def starter_definition(word: str, bank_name: str) -> DefinitionSeed:
     return DefinitionSeed("Noun", f"A term connected with {bank_name.lower()}.", clue)
 
 
+def should_refresh_definition(word: str, definition: DictionaryDefinition, definition_seed: DefinitionSeed) -> bool:
+    if word in SPECIFIC_DEFINITIONS or word in MULTIPLE_DEFINITIONS:
+        return True
+    properties = definition.properties or {}
+    old_clue = str(properties.get("clue", ""))
+    return (
+        old_clue.endswith("letters).")
+        or " term starting with " in old_clue
+        or str(definition.definition).startswith("A term connected with ")
+        or not str(definition.definition).strip()
+        or not str(definition.part_of_speech).strip()
+    )
+
+
 def ensure_definition_tags(db, definition: DictionaryDefinition, bank_name: str):
     definition.tags = [
         get_or_create_tag(db, "Part of Speech", definition.part_of_speech),
@@ -271,16 +285,17 @@ def seed():
                         db.flush()
                         definitions_created += 1
                     else:
-                        definition.definition = definition_seed.definition
-                        definition.part_of_speech = definition_seed.part_of_speech
-                        definition.example = definition_seed.example
+                        if should_refresh_definition(normalized, definition, definition_seed):
+                            definition.definition = definition_seed.definition
+                            definition.part_of_speech = definition_seed.part_of_speech
+                            definition.example = definition_seed.example
+                            definition.properties = {
+                                **(definition.properties or {}),
+                                "clue": definition_seed.clue,
+                                "starter_bank": bank_name,
+                            }
                         definition.position = definition_position
                         definition.source = "puzzary_starter_library"
-                        definition.properties = {
-                            **(definition.properties or {}),
-                            "clue": definition_seed.clue,
-                            "starter_bank": bank_name,
-                        }
                     ensure_definition_tags(db, definition, bank_name)
                     if first_definition is None:
                         first_definition = definition
