@@ -135,6 +135,18 @@ MULTIPLE_DEFINITIONS: dict[str, list[DefinitionSeed]] = {
 }
 
 
+SPECIFIC_DEFINITIONS: dict[str, DefinitionSeed] = {
+    "actor": DefinitionSeed("Noun", "A performer who plays a role in a film, show, or play.", "Performer in a film or play."),
+    "director": DefinitionSeed("Noun", "The person who guides the creative work of a film or stage production.", "Person guiding a film's creative work."),
+    "cinema": DefinitionSeed("Noun", "Movies considered as an art form, industry, or place to watch films.", "The world of movies."),
+    "trailer": DefinitionSeed("Noun", "A short preview used to advertise a movie or show.", "Movie preview."),
+    "cameo": DefinitionSeed("Noun", "A brief appearance by a known person in a movie or show.", "Brief guest appearance."),
+    "studio": DefinitionSeed("Noun", "A company or space where movies, shows, or recordings are made.", "Place or company that makes films."),
+    "screen": DefinitionSeed("Noun", "The surface where a movie or image is shown.", "Where the movie appears."),
+    "montage": DefinitionSeed("Noun", "A sequence of short shots edited together to show time, action, or mood.", "Rapid sequence of edited shots."),
+}
+
+
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "item"
@@ -153,6 +165,8 @@ def get_or_create_tag(db, tag_type: str, name: str) -> PuzzleTag:
 
 
 def starter_definition(word: str, bank_name: str) -> DefinitionSeed:
+    if word in SPECIFIC_DEFINITIONS:
+        return SPECIFIC_DEFINITIONS[word]
     clue = f"{bank_name} term starting with {word[0].upper()} ({len(word)} letters)."
     if bank_name == "Action Verbs":
         return DefinitionSeed("Verb", f"To {word.lower()} as an action.", clue)
@@ -229,6 +243,17 @@ def seed():
                 for definition_position, definition_seed in enumerate(seeds, start=1):
                     definition = existing_definitions.get((definition_seed.part_of_speech, definition_seed.definition))
                     if definition is None:
+                        definition = next(
+                            (
+                                item
+                                for item in word.definitions
+                                if item.source == "puzzary_starter_library"
+                                and (item.properties or {}).get("starter_bank") == bank_name
+                                and str(item.definition).startswith("A term connected with ")
+                            ),
+                            None,
+                        )
+                    if definition is None:
                         definition = DictionaryDefinition(
                             word=word,
                             part_of_speech=definition_seed.part_of_speech,
@@ -242,7 +267,16 @@ def seed():
                         db.flush()
                         definitions_created += 1
                     else:
-                        definition.properties = {**(definition.properties or {}), "clue": definition_seed.clue}
+                        definition.definition = definition_seed.definition
+                        definition.part_of_speech = definition_seed.part_of_speech
+                        definition.example = definition_seed.example
+                        definition.position = definition_position
+                        definition.source = "puzzary_starter_library"
+                        definition.properties = {
+                            **(definition.properties or {}),
+                            "clue": definition_seed.clue,
+                            "starter_bank": bank_name,
+                        }
                     ensure_definition_tags(db, definition, bank_name)
                     if first_definition is None:
                         first_definition = definition
