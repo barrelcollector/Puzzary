@@ -438,6 +438,7 @@
           <div class="definition-list">
             {% for definition in selected_word.definitions %}
               <form class="edit-card" method="post" action="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}">
+                {% if definition.archived_at %}<small class="chip muted-chip">Archived</small>{% endif %}
                 <label>Definition <textarea name="definition" rows="3" required>{{ definition.definition }}</textarea></label>
                 <label>Part of Speech tag <input name="part_of_speech_tag" value="{{ tag_value(definition.tags, 'Part of Speech') or definition.part_of_speech }}" placeholder="Noun"></label>
                 <label>Clues <textarea name="clue_tag" rows="3" placeholder="One clue per line">{{ tag_lines(definition.tags, 'Clue') }}</textarea></label>
@@ -455,6 +456,11 @@
                 </fieldset>
                 <div class="action-row">
                   <button type="submit">Save Definition</button>
+                  {% if definition.archived_at %}
+                    <button type="submit" formaction="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}/unarchive" formnovalidate>Restore</button>
+                  {% else %}
+                    <button type="submit" formaction="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}/archive" formnovalidate>Archive</button>
+                  {% endif %}
                   <button type="submit" formaction="/admin/dictionary/{{ selected_word.id }}/definitions/{{ definition.id }}/delete" formnovalidate class="danger-button">Delete</button>
                 </div>
               </form>

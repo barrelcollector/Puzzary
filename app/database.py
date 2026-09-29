@@ -51,6 +51,7 @@ def ensure_schema() -> None:
     puzzle_columns = {column["name"] for column in inspector.get_columns("puzzles")}
     user_columns = {column["name"] for column in inspector.get_columns("users")}
     dictionary_word_columns = {column["name"] for column in inspector.get_columns("dictionary_words")} if "dictionary_words" in table_names else set()
+    dictionary_definition_columns = {column["name"] for column in inspector.get_columns("dictionary_definitions")} if "dictionary_definitions" in table_names else set()
     tag_columns = {column["name"] for column in inspector.get_columns("puzzle_tags")} if "puzzle_tags" in table_names else set()
     with engine.begin() as connection:
         if "archived_at" not in puzzle_columns:
@@ -68,6 +69,9 @@ def ensure_schema() -> None:
                 connection.execute(text("ALTER TABLE dictionary_words ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
             if "banned_at" not in dictionary_word_columns:
                 connection.execute(text("ALTER TABLE dictionary_words ADD COLUMN banned_at TIMESTAMP WITH TIME ZONE"))
+        if "dictionary_definitions" in table_names and "archived_at" not in dictionary_definition_columns:
+            connection.execute(text("ALTER TABLE dictionary_definitions ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dictionary_definitions_archived_at ON dictionary_definitions (archived_at)"))
         if "puzzle_tags" in table_names and "tag_type" not in tag_columns:
             connection.execute(text("ALTER TABLE puzzle_tags ADD COLUMN tag_type VARCHAR(80) NOT NULL DEFAULT 'General'"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzle_tags_tag_type ON puzzle_tags (tag_type)"))

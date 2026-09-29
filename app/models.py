@@ -205,6 +205,7 @@ class DictionaryDefinition(Base):
     source: Mapped[str] = mapped_column(String(120), default="local")
     position: Mapped[int] = mapped_column(Integer, default=0)
     properties: Mapped[dict] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     word: Mapped[DictionaryWord] = relationship(back_populates="definitions")

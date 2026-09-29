@@ -92,3 +92,4 @@ class DictionaryDefinitionPatch(BaseModel):
     position: int | None = None
     tag_ids: list[int] | None = None
     properties: dict | None = None
+    archived: bool | None = None

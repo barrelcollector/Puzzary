@@ -17,6 +17,8 @@ def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
 
 
 def definition_allowed(definition: Any, excluded_tag_ids: set[int] | None) -> bool:
+    if getattr(definition, "archived_at", None) is not None:
+        return False
     text = str(getattr(definition, "definition", "")).strip()
     if not text:
         return False

@@ -129,6 +129,8 @@ def serialize_definition(definition: DictionaryDefinition) -> dict:
         "source": definition.source,
         "position": definition.position,
         "properties": definition.properties or {},
+        "archived": definition.archived_at is not None,
+        "archived_at": definition.archived_at.isoformat() if definition.archived_at else None,
         "tags": [serialize_tag(tag) for tag in definition.tags],
     }
 
@@ -241,7 +243,10 @@ def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[
             if word.archived_at is not None or word.banned_at is not None:
                 continue
             word_tag_ids = {tag.id for tag in word.tags}
-            definitions = sorted(word.definitions, key=lambda item: item.position)
+            definitions = sorted(
+                [definition for definition in word.definitions if definition.archived_at is None],
+                key=lambda item: item.position,
+            )
             matched_definitions = [
                 definition
                 for definition in definitions
@@ -264,6 +269,8 @@ def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[
         if excluded_tag_ids & {tag.id for tag in word.tags}:
             continue
         definition = link.definition
+        if definition is not None and definition.archived_at is not None:
+            continue
         if definition is not None and excluded_tag_ids & {tag.id for tag in definition.tags}:
             continue
         entries.append({"word": word, "definition": definition})
@@ -1246,6 +1253,40 @@ def admin_delete_dictionary_definition(
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
 
 
+@app.post("/admin/dictionary/{word_id}/definitions/{definition_id}/archive")
+def admin_archive_dictionary_definition(
+    word_id: int,
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryDefinition, definition_id)
+    if entry is not None and entry.word_id == word_id:
+        entry.archived_at = datetime.now(timezone.utc)
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
+@app.post("/admin/dictionary/{word_id}/definitions/{definition_id}/unarchive")
+def admin_unarchive_dictionary_definition(
+    word_id: int,
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    entry = db.get(DictionaryDefinition, definition_id)
+    if entry is not None and entry.word_id == word_id:
+        entry.archived_at = None
+        db.commit()
+    return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
+
+
 @app.post("/admin/dictionaries")
 def admin_create_dictionary(
     request: Request,
@@ -1519,6 +1560,8 @@ def apply_definition_payload(
         definition.position = payload.position
     if payload.properties is not None:
         definition.properties = payload.properties
+    if isinstance(payload, DictionaryDefinitionPatch) and payload.archived is not None:
+        definition.archived_at = datetime.now(timezone.utc) if payload.archived else None
     if payload.tag_ids is not None or payload.clues is not None or payload.part_of_speech is not None:
         tag_ids = payload.tag_ids if payload.tag_ids is not None else [tag.id for tag in definition.tags if tag.tag_type != "Clue"]
         clues = payload.clues if payload.clues is not None else tag_values(definition.tags, "Clue")
