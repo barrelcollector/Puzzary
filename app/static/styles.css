@@ -720,6 +720,75 @@ legend {
   margin: 3px 0;
 }
 
+.word-pyramid-play {
+  display: grid;
+  gap: 14px;
+}
+
+.word-pyramid-rows {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.word-pyramid-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) minmax(110px, 220px) auto auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
+}
+
+.word-pyramid-row.correct {
+  background: #dff3ed;
+  border-color: #8fd0be;
+}
+
+.word-pyramid-row.incorrect {
+  background: #f4d1ca;
+  border-color: #d8a69e;
+}
+
+.word-pyramid-number {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  font-weight: 850;
+}
+
+.word-pyramid-clue {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.word-pyramid-row input {
+  text-align: center;
+  text-transform: uppercase;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.word-pyramid-row .reveal-pyramid-row,
+.word-pyramid-row .more-pyramid-clue {
+  width: auto;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+.pyramid-clue-steps {
+  display: grid;
+  gap: 3px;
+}
+
 .solution-list {
   display: grid;
   gap: 10px;
@@ -767,6 +836,7 @@ summary {
   .puzzle-layout,
   .history,
   .clue-board,
+  .word-pyramid-row,
   .admin-grid,
   .admin-grid.two,
   .word-entry-grid,
@@ -783,5 +853,9 @@ summary {
   .topbar {
     display: grid;
     gap: 2px;
+  }
+
+  .word-pyramid-row {
+    justify-items: stretch;
   }
 }

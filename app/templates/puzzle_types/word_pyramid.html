@@ -1,0 +1,41 @@
+<p>{{ puzzle.prompt }}</p>
+<div
+  class="word-pyramid-play"
+  data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
+  data-answers='{{ progress_answers | tojson }}'
+  data-solution='{{ puzzle.solution_payload.rows | tojson }}'
+>
+  <div class="word-pyramid-rows">
+    {% for row in puzzle.play_payload.rows %}
+      <label class="word-pyramid-row" style="--row-length: {{ row.length }}">
+        <span class="word-pyramid-number">{{ row.number }}</span>
+        <span class="word-pyramid-clue">
+          {{ row.clue }}
+          {% if row.clues and row.clues | length > 1 %}
+            <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
+            <span class="pyramid-clue-steps" hidden>
+              {% for extra_clue in row.clues[1:] %}
+                <small hidden>{{ extra_clue }}</small>
+              {% endfor %}
+            </span>
+          {% endif %}
+        </span>
+        <input
+          autocomplete="off"
+          inputmode="text"
+          maxlength="{{ row.length }}"
+          data-row="{{ row.index }}"
+          value="{{ progress_answers[row.index | string] | default('') }}"
+          aria-label="Row {{ row.number }}, {{ row.length }} letters"
+        >
+        <small>{{ row.length }} letters</small>
+        <button type="button" class="ghost-button reveal-pyramid-row" data-row="{{ row.index }}">Reveal row</button>
+      </label>
+    {% endfor %}
+  </div>
+  <p class="muted" id="word-pyramid-status">Fill the pyramid from top to bottom.</p>
+  <div class="action-row">
+    <button type="button" class="ghost-button" id="word-pyramid-check">Check</button>
+    <button type="button" class="ghost-button" id="word-pyramid-clear">Clear Pyramid</button>
+  </div>
+</div>

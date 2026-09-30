@@ -17,6 +17,7 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Canonical dictionary words with reusable properties and tags
 - Word banks that reference canonical dictionary words without duplicating them
 - Word-search puzzle generator
+- Word-pyramid puzzle generator
 - Puzzle hints
 - Answer checking
 - Account-based puzzle progress
