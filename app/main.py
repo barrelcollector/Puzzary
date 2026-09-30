@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import TemplateNotFound
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -77,6 +78,14 @@ def tag_lines(tags: list[PuzzleTag], tag_type: str) -> str:
 templates.env.globals["tag_value"] = tag_value
 templates.env.globals["tag_values"] = tag_values
 templates.env.globals["tag_lines"] = tag_lines
+
+
+def template_exists(template_name: str) -> bool:
+    try:
+        templates.env.get_template(template_name)
+    except TemplateNotFound:
+        return False
+    return True
 
 
 @app.on_event("startup")
@@ -214,17 +223,6 @@ def definition_clue(definition: DictionaryDefinition | None) -> str:
     return tag_value(definition.tags, "Clue") or definition.definition
 
 
-def definition_clues(definition: DictionaryDefinition | None) -> list[str]:
-    if definition is None:
-        return []
-    clues = tag_values(definition.tags, "Clue")
-    definition_text = definition.definition.strip()
-    definition_clue_text = f"Definition: {definition_text}" if definition_text else ""
-    if definition_clue_text and definition_clue_text not in clues:
-        clues.append(definition_clue_text)
-    return clues
-
-
 templates.env.globals["word_bank_mode"] = word_bank_mode
 templates.env.globals["definition_clue"] = definition_clue
 
@@ -275,42 +273,6 @@ def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[
             continue
         entries.append({"word": word, "definition": definition})
     return entries
-
-
-def source_data_for_puzzle(
-    db: Session,
-    puzzle_type_slug: str,
-    bank: WordBank | None,
-    difficulty: str,
-    excluded_tag_ids: set[int],
-):
-    if bank is None:
-        return None
-    count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
-    entries = word_bank_entries(db, bank, excluded_tag_ids)
-    if puzzle_type_slug == "crossword":
-        source = []
-        for entry in entries:
-            word = entry["word"]
-            definition = entry.get("definition")
-            clues = definition_clues(definition)
-            clue = clues[0] if clues else ""
-            if not clue:
-                clue = word.clue or word.properties.get("notes") or f"{word.display_text.title()} entry."
-                clues = [clue]
-            source.append(
-                {
-                    "word": word.word,
-                    "clue": clue,
-                    "clues": clues,
-                    "definition_id": definition.id if definition else None,
-                }
-            )
-            if len(source) >= count:
-                break
-        return source or None
-    source = [entry["word"].word for entry in entries]
-    return source[:count] or None
 
 
 def get_or_create_word(db: Session, value: str) -> DictionaryWord | None:
@@ -1478,6 +1440,11 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     progress_answers = progress_payload.get("answers", {})
     if not isinstance(progress_answers, dict):
         progress_answers = {}
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    puzzle_template_name = f"puzzle_types/{puzzle.puzzle_type}.html"
+    solution_template_name = f"puzzle_solutions/{puzzle.puzzle_type}.html"
+    has_puzzle_template = template_exists(puzzle_template_name)
+    has_solution_template = template_exists(solution_template_name)
     return templates.TemplateResponse(
         "puzzle.html",
         {
@@ -1490,7 +1457,12 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "progress_found_words": found_words_for_progress(progress),
             "progress_payload": progress_payload,
             "progress_answers": progress_answers,
-            "playable_puzzle_type": get_puzzle_type(puzzle.puzzle_type) is not None,
+            "puzzle_type_definition": puzzle_type,
+            "puzzle_template": puzzle_template_name,
+            "solution_template": solution_template_name,
+            "has_puzzle_template": has_puzzle_template,
+            "has_solution_template": has_solution_template,
+            "playable_puzzle_type": puzzle_type is not None and puzzle_type.supports_web_play and has_puzzle_template,
         },
     )
 
@@ -1758,7 +1730,8 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     word_bank = word_bank_for_slug(db, payload.theme)
     excluded_tag_ids = set(payload.excluded_tag_ids)
     excluded_tags = tags_for_ids(db, payload.excluded_tag_ids)
-    source_data = source_data_for_puzzle(db, payload.puzzle_type, word_bank, payload.difficulty, excluded_tag_ids)
+    source_entries = word_bank_entries(db, word_bank, excluded_tag_ids) if word_bank is not None else []
+    source_data = puzzle_type.source_builder(source_entries, payload.difficulty, excluded_tag_ids) if word_bank is not None else None
     if word_bank is not None and source_data is None:
         raise HTTPException(status_code=400, detail="No usable words remain after archive, ban, and tag exclusions")
     if payload.puzzle_type == "word_search":

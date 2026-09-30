@@ -81,21 +81,38 @@ def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, li
     return fallback, [fallback], None
 
 
-def build_source(word_bank: Any, difficulty: str, excluded_tag_ids: set[int] | None = None) -> list[dict] | None:
-    if word_bank is None:
-        return None
+def clues_for_definition(definition: Any) -> list[str]:
+    if definition is None:
+        return []
+    clues = typed_tag_values(getattr(definition, "tags", []), "Clue")
+    definition_text = str(getattr(definition, "definition", "")).strip()
+    definition_clue = f"Definition: {definition_text}" if definition_text else ""
+    if definition_clue and definition_clue not in clues:
+        clues.append(definition_clue)
+    return clues
+
+
+def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] | None = None) -> list[dict] | None:
     count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
     entries = []
-    for link in sorted(word_bank.word_links, key=lambda item: item.position):
-        if not word_allowed(link.word, excluded_tag_ids):
+    for entry in word_entries or []:
+        word = entry.get("word") if isinstance(entry, dict) else None
+        definition = entry.get("definition") if isinstance(entry, dict) else None
+        if word is None or not word_allowed(word, excluded_tag_ids):
             continue
-        clue = clue_for_word(link.word, excluded_tag_ids)
-        if clue is None:
+        if definition is not None and not definition_allowed(definition, excluded_tag_ids):
             continue
-        clue_text, clues, definition_id = clue
+        clues = clues_for_definition(definition)
+        clue_text = clues[0] if clues else ""
+        definition_id = getattr(definition, "id", None) if definition is not None else None
+        if not clue_text:
+            clue = clue_for_word(word, excluded_tag_ids)
+            if clue is None:
+                continue
+            clue_text, clues, definition_id = clue
         entries.append(
             {
-                "word": link.word.word,
+                "word": word.word,
                 "clue": clue_text,
                 "clues": clues,
                 "definition_id": definition_id,
@@ -355,5 +372,9 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        description="A clue-driven crossword built from dictionary definitions.",
+        supports_print=True,
+        supports_web_play=True,
+        source_requirements=("word_bank", "definitions"),
     )
 )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -25,9 +27,15 @@ class PuzzleType:
     answer_checker: Callable[[str, dict], tuple[bool, int, int]]
     progress_normalizer: Callable[[Any, dict], dict]
     progress_counter: Callable[[dict, dict], tuple[int, int]]
+    description: str = ""
+    supports_print: bool = True
+    supports_web_play: bool = True
+    digital_only: bool = False
+    source_requirements: tuple[str, ...] = ()
 
 
 PUZZLE_TYPES: dict[str, PuzzleType] = {}
+_PUZZLE_TYPES_LOADED = False
 
 
 def register_puzzle_type(puzzle_type: PuzzleType) -> PuzzleType:
@@ -50,8 +58,18 @@ def normalize_answer(value: str) -> set[str]:
     return {part.strip().upper() for part in parts if part.strip()}
 
 
-def load_builtin_puzzle_types() -> None:
-    from app.puzzle_types import crossword, word_search  # noqa: F401
+def load_puzzle_types(package_name: str = "app.puzzle_types") -> None:
+    global _PUZZLE_TYPES_LOADED
+    if _PUZZLE_TYPES_LOADED:
+        return
+
+    package = importlib.import_module(package_name)
+    for module_info in pkgutil.iter_modules(package.__path__, f"{package_name}."):
+        module_name = module_info.name.rsplit(".", 1)[-1]
+        if module_name.startswith("_"):
+            continue
+        importlib.import_module(module_info.name)
+    _PUZZLE_TYPES_LOADED = True
 
 
-load_builtin_puzzle_types()
+load_puzzle_types()

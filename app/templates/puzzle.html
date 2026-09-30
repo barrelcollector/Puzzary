@@ -11,10 +11,14 @@
 
 <section class="puzzle-layout">
   <div class="panel">
-    {% set puzzle_template = "puzzle_types/" ~ puzzle.puzzle_type ~ ".html" %}
-    {% include puzzle_template ignore missing %}
+    {% if has_puzzle_template %}
+      {% include puzzle_template %}
+    {% endif %}
     {% if not playable_puzzle_type %}
       <p>{{ puzzle.prompt }}</p>
+      {% if puzzle_type_definition and not has_puzzle_template %}
+        <p class="muted">This puzzle type is registered, but it does not have a custom web-play template yet.</p>
+      {% endif %}
     {% endif %}
   </div>
 
@@ -45,9 +49,10 @@
     {% if current_user.is_admin %}
       <section class="panel">
         <h2>Admin Solution</h2>
-        {% set solution_template = "puzzle_solutions/" ~ puzzle.puzzle_type ~ ".html" %}
-        {% include solution_template ignore missing %}
-        {% if not playable_puzzle_type %}
+        {% if has_solution_template %}
+          {% include solution_template %}
+        {% endif %}
+        {% if not has_solution_template %}
           <pre>{{ puzzle.solution_payload | tojson(indent=2) }}</pre>
         {% endif %}
       </section>

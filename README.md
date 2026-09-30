@@ -92,11 +92,62 @@ Puzzary is intentionally separate from Home Assistant and Daily Stripe:
 
 ## Puzzle Types
 
-Puzzle types are registered modules under `app/puzzle_types`.
+Puzzle types are auto-discovered modules under `app/puzzle_types`.
 
-Each type owns its generator, word-bank adapter, answer checker, and progress logic. Browser UI lives in `app/templates/puzzle_types/{slug}.html`, with optional admin solution display in `app/templates/puzzle_solutions/{slug}.html`.
+Each type owns its generator, source adapter, answer checker, and progress logic. Browser UI lives in `app/templates/puzzle_types/{slug}.html`, with optional admin solution display in `app/templates/puzzle_solutions/{slug}.html`.
 
-To add a type, create a module that calls `register_puzzle_type(...)`, then import it from `load_builtin_puzzle_types()` in `app/puzzles.py`.
+To add a type, drop a new Python file into `app/puzzle_types/`. Files whose names start with `_` are ignored. The module must call `register_puzzle_type(...)` at import time:
+
+```python
+from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
+
+
+def generate(theme, difficulty, source_data=None, seed=None) -> GeneratedPuzzle:
+    ...
+
+
+def build_source(word_entries, difficulty, excluded_tag_ids=None):
+    ...
+
+
+def check_answer(answer, solution_payload):
+    ...
+
+
+def normalize_progress(payload, solution_payload):
+    ...
+
+
+def count_progress(progress_payload, solution_payload):
+    ...
+
+
+register_puzzle_type(
+    PuzzleType(
+        slug="example",
+        label="Example",
+        generator=generate,
+        source_builder=build_source,
+        answer_checker=check_answer,
+        progress_normalizer=normalize_progress,
+        progress_counter=count_progress,
+        description="Short description shown to admins and future tooling.",
+        supports_print=True,
+        supports_web_play=True,
+        digital_only=False,
+        source_requirements=("word_bank",),
+    )
+)
+```
+
+Optional templates:
+
+- `app/templates/puzzle_types/{slug}.html` for custom web play.
+- `app/templates/puzzle_solutions/{slug}.html` for admin solution display.
+
+If a registered type has no web template, Puzzary falls back to the puzzle prompt and answer submission form. If it has no solution template, admins see the raw solution payload.
+
+`word_entries` is the shared source format Puzzary passes to puzzle modules after applying archive, ban, and excluded-tag filters. Each item is a dict with `word` and `definition` keys; `definition` may be `None`.
 
 ## AI Assistance Disclosure
 
