@@ -733,7 +733,7 @@ legend {
 
 .word-pyramid-row {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) minmax(110px, 220px) auto auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
   gap: 10px;
   align-items: center;
   margin: 0;
@@ -766,13 +766,18 @@ legend {
 
 .word-pyramid-clue {
   display: grid;
+  grid-column: 2 / -1;
   gap: 5px;
   min-width: 0;
 }
 
 .word-pyramid-row input {
+  grid-column: 2;
+  justify-self: center;
+  width: min(100%, calc(36px * var(--row-length)));
   text-align: center;
   text-transform: uppercase;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-weight: 850;
   letter-spacing: 0;
 }

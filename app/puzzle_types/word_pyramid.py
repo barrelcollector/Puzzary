@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
 from typing import Any
 
 from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
+
+
+GUARANTEED_CHAINS = [
+    ["TIP", "PINT", "POINT", "PISTON", "OPTIONS", "STOOPING"],
+]
 
 
 def normalize_word(value: str) -> str:
@@ -74,7 +80,7 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
 
 
 def fallback_source(theme: str, difficulty: str) -> list[dict]:
-    guaranteed = ["INK", "CLUE", "PRINT", "PUZZLE", "ARTICLE", "MERIDIAN"]
+    guaranteed = [word for chain in GUARANTEED_CHAINS for word in chain]
     themed = words_for_theme(theme, difficulty)
     words = []
     for word in themed + guaranteed:
@@ -92,6 +98,14 @@ def fallback_source(theme: str, difficulty: str) -> list[dict]:
     ]
 
 
+def extends_by_one_letter(previous: str, candidate: str) -> bool:
+    if len(candidate) != len(previous) + 1:
+        return False
+    previous_counts = Counter(previous)
+    candidate_counts = Counter(candidate)
+    return all(candidate_counts[letter] >= count for letter, count in previous_counts.items())
+
+
 def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -> list[dict]:
     target_count = {"easy": 4, "medium": 5, "hard": 6}.get(difficulty, 4)
     candidates_by_length: dict[int, list[dict]] = {}
@@ -102,32 +116,48 @@ def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -
         item = {**entry, "word": word}
         candidates_by_length.setdefault(len(word), []).append(item)
 
-    lengths = sorted(candidates_by_length)
-    starts = lengths[:]
-    rng.shuffle(starts)
-    for start in starts:
-        chain = []
-        for length in range(start, start + target_count):
-            options = candidates_by_length.get(length, [])
-            if not options:
-                break
-            chain.append(rng.choice(options))
+    for options in candidates_by_length.values():
+        rng.shuffle(options)
+
+    def extend(chain: list[dict]) -> list[dict] | None:
         if len(chain) == target_count:
             return chain
+        previous = chain[-1]["word"]
+        next_options = [
+            entry
+            for entry in candidates_by_length.get(len(previous) + 1, [])
+            if extends_by_one_letter(previous, entry["word"])
+        ]
+        rng.shuffle(next_options)
+        for entry in next_options:
+            result = extend([*chain, entry])
+            if result is not None:
+                return result
+        return None
 
-    longest_available = []
-    for start in lengths:
-        chain = []
-        for length in range(start, start + target_count):
-            options = candidates_by_length.get(length, [])
-            if not options:
-                break
-            chain.append(rng.choice(options))
-        if len(chain) > len(longest_available):
-            longest_available = chain
-    if len(longest_available) >= 3:
-        return longest_available
-    raise ValueError("Word pyramid generation needs words across at least three consecutive lengths.")
+    starts = [entry for options in candidates_by_length.values() for entry in options]
+    rng.shuffle(starts)
+    for entry in starts:
+        result = extend([entry])
+        if result is not None:
+            return result
+
+    best_chain: list[dict] = []
+
+    def collect_best(chain: list[dict]) -> None:
+        nonlocal best_chain
+        if len(chain) > len(best_chain):
+            best_chain = chain
+        previous = chain[-1]["word"]
+        for entry in candidates_by_length.get(len(previous) + 1, []):
+            if extends_by_one_letter(previous, entry["word"]):
+                collect_best([*chain, entry])
+
+    for entry in starts:
+        collect_best([entry])
+    if len(best_chain) >= 3:
+        return best_chain
+    raise ValueError("Word pyramid generation needs at least three words where each row adds one letter to the previous row.")
 
 
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
@@ -172,7 +202,12 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
     source = source_data if source_data is not None else fallback_source(theme, difficulty)
     generation_seed = seed or f"word_pyramid:{theme}:{difficulty}:{','.join(str(item.get('word', '')) for item in source)}"
     rng = random.Random(generation_seed)
-    chain = choose_chain(source, difficulty, rng)
+    try:
+        chain = choose_chain(source, difficulty, rng)
+    except ValueError:
+        if source_data is None:
+            raise
+        chain = choose_chain([*source, *fallback_source(theme, difficulty)], difficulty, rng)
 
     rows = []
     solution_rows = []
@@ -191,7 +226,7 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
         rows.append(row)
         solution_rows.append({**row, "answer": answer})
 
-    prompt = "Fill each row. Every answer changes by one letter from the row above it."
+    prompt = "Fill each row. Every answer is an anagram of the row above it plus one new letter."
     play_payload = {"kind": "word_pyramid", "rows": rows}
     print_payload = {"kind": "word_pyramid", "rows": rows}
     solution_payload = {"rows": solution_rows}
@@ -203,7 +238,7 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
         solution_payload=solution_payload,
         hints=[
             f"The pyramid has {len(rows)} rows.",
-            "Answer lengths increase by one letter per row.",
+            "Each answer uses every letter from the row above, plus one new letter.",
             f"The shortest answer has {rows[0]['length']} letters.",
         ],
         metadata={"generator": "local.word_pyramid.v1", "seed": generation_seed, "row_count": len(rows)},
