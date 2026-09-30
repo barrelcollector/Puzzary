@@ -750,7 +750,6 @@ legend {
 
 .word-pyramid-cells {
   display: grid;
-  grid-template-columns: repeat(var(--row-length), 34px);
   justify-content: center;
 }
 

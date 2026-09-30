@@ -11,7 +11,7 @@
       <div class="word-pyramid-row" style="--row-length: {{ row.length }}">
         <div class="word-pyramid-answer" aria-label="Row {{ row.number }}, {{ row.length }} letters">
           <span class="word-pyramid-number">{{ row.number }}</span>
-          <div class="word-pyramid-cells">
+          <div class="word-pyramid-cells" style="grid-template-columns: repeat({{ row.length }}, 34px)">
             {% for cell_index in range(row.length) %}
               <input
                 autocomplete="off"
