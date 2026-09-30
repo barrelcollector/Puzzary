@@ -727,59 +727,98 @@ legend {
 
 .word-pyramid-rows {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin: 18px 0;
 }
 
 .word-pyramid-row {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
+  gap: 8px;
+  justify-items: center;
   margin: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fbfbf8;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
-.word-pyramid-row.correct {
-  background: #dff3ed;
-  border-color: #8fd0be;
+.word-pyramid-answer {
+  display: inline-grid;
+  grid-template-columns: 24px auto;
+  gap: 6px;
+  align-items: start;
 }
 
-.word-pyramid-row.incorrect {
-  background: #f4d1ca;
-  border-color: #d8a69e;
+.word-pyramid-cells {
+  display: grid;
+  grid-template-columns: repeat(var(--row-length), 34px);
+  justify-content: center;
 }
 
 .word-pyramid-number {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--line);
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: white;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
   font-weight: 850;
 }
 
 .word-pyramid-clue {
   display: grid;
-  grid-column: 2 / -1;
   gap: 5px;
+  width: min(100%, 680px);
   min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbf8;
 }
 
-.word-pyramid-row input {
-  grid-column: 2;
-  justify-self: center;
-  width: min(100%, calc(36px * var(--row-length)));
+.word-pyramid-cells input {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--ink);
+  border-left-width: 0;
+  border-radius: 0;
+  padding: 0;
   text-align: center;
   text-transform: uppercase;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 20px;
   font-weight: 850;
   letter-spacing: 0;
+  background: white;
+}
+
+.word-pyramid-cells input:first-child {
+  border-left-width: 1px;
+}
+
+.word-pyramid-cells input:focus {
+  outline: 2px solid #3c8f7a;
+  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
+}
+
+.word-pyramid-row.correct .word-pyramid-cells input {
+  background: #dff3ed;
+}
+
+.word-pyramid-row.incorrect .word-pyramid-cells input {
+  background: #f4d1ca;
+}
+
+.word-pyramid-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .word-pyramid-row .reveal-pyramid-row,
@@ -841,7 +880,6 @@ summary {
   .puzzle-layout,
   .history,
   .clue-board,
-  .word-pyramid-row,
   .admin-grid,
   .admin-grid.two,
   .word-entry-grid,
@@ -860,7 +898,8 @@ summary {
     gap: 2px;
   }
 
-  .word-pyramid-row {
-    justify-items: stretch;
+  .word-pyramid-answer {
+    max-width: 100%;
+    overflow-x: auto;
   }
 }

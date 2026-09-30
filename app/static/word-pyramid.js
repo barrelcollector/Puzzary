@@ -2,7 +2,7 @@
   const root = document.querySelector(".word-pyramid-play");
   if (!root) return;
 
-  const inputs = Array.from(root.querySelectorAll("input[data-row]"));
+  const inputs = Array.from(root.querySelectorAll("input[data-row][data-cell]"));
   const status = document.getElementById("word-pyramid-status");
   const checkButton = document.getElementById("word-pyramid-check");
   const clearButton = document.getElementById("word-pyramid-clear");
@@ -19,15 +19,32 @@
     rows = [];
   }
 
+  const inputsByRow = new Map();
+  inputs.forEach((input) => {
+    const rowIndex = Number(input.dataset.row);
+    const list = inputsByRow.get(rowIndex) || [];
+    list.push(input);
+    inputsByRow.set(rowIndex, list);
+  });
+  inputsByRow.forEach((list) => {
+    list.sort((a, b) => Number(a.dataset.cell) - Number(b.dataset.cell));
+  });
+
   function answerFor(index) {
     return String((rows[index] && rows[index].answer) || "").toUpperCase();
   }
 
+  function rowAnswer(index) {
+    return (inputsByRow.get(index) || [])
+      .map((input) => input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""))
+      .join("");
+  }
+
   function currentAnswers() {
     const answers = {};
-    inputs.forEach((input) => {
-      const value = input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (value) answers[input.dataset.row] = value;
+    inputsByRow.forEach((_list, rowIndex) => {
+      const value = rowAnswer(rowIndex);
+      if (value) answers[String(rowIndex)] = value;
     });
     return answers;
   }
@@ -52,56 +69,89 @@
     if (status) status.textContent = text;
   }
 
+  function rowElement(index) {
+    const list = inputsByRow.get(index) || [];
+    return list[0] ? list[0].closest(".word-pyramid-row") : null;
+  }
+
+  function setRowState(index, state) {
+    const row = rowElement(index);
+    if (!row) return;
+    row.classList.remove("correct", "incorrect");
+    if (state) row.classList.add(state);
+  }
+
   function cleanInput(input) {
-    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, Number(input.maxLength || 20));
-    input.closest(".word-pyramid-row").classList.remove("correct", "incorrect");
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
+    setRowState(Number(input.dataset.row), "");
     queueSave();
+  }
+
+  function focusRelative(input, direction) {
+    const rowInputs = inputsByRow.get(Number(input.dataset.row)) || [];
+    const index = rowInputs.indexOf(input);
+    const next = rowInputs[index + direction];
+    if (next) {
+      next.focus();
+      next.select();
+    }
   }
 
   function checkPyramid() {
     let correct = 0;
-    inputs.forEach((input) => {
-      const row = input.closest(".word-pyramid-row");
-      const expected = answerFor(Number(input.dataset.row));
-      const value = input.value.trim().toUpperCase();
-      row.classList.remove("correct", "incorrect");
+    inputsByRow.forEach((_list, rowIndex) => {
+      const expected = answerFor(rowIndex);
+      const value = rowAnswer(rowIndex);
+      setRowState(rowIndex, "");
       if (!value) return;
       if (value === expected) {
         correct += 1;
-        row.classList.add("correct");
+        setRowState(rowIndex, "correct");
       } else {
-        row.classList.add("incorrect");
+        setRowState(rowIndex, "incorrect");
       }
     });
-    setStatus(correct === inputs.length ? "Word pyramid complete." : `${correct} of ${inputs.length} rows correct.`);
+    setStatus(correct === inputsByRow.size ? "Word pyramid complete." : `${correct} of ${inputsByRow.size} rows correct.`);
   }
 
   function revealRow(index) {
-    const input = inputs.find((item) => Number(item.dataset.row) === index);
-    if (!input) return;
-    input.value = answerFor(index);
-    input.closest(".word-pyramid-row").classList.remove("incorrect");
-    input.closest(".word-pyramid-row").classList.add("correct");
+    const answer = answerFor(index);
+    (inputsByRow.get(index) || []).forEach((input, cellIndex) => {
+      input.value = answer[cellIndex] || "";
+    });
+    setRowState(index, "correct");
     setStatus(`Row ${index + 1} revealed.`);
     saveProgress();
   }
 
   function revealAll() {
-    inputs.forEach((input) => {
-      const index = Number(input.dataset.row);
-      input.value = answerFor(index);
-      input.closest(".word-pyramid-row").classList.remove("incorrect");
-      input.closest(".word-pyramid-row").classList.add("correct");
-    });
+    inputsByRow.forEach((_list, rowIndex) => revealRow(rowIndex));
     setStatus("Solution revealed. Reset the puzzle to start over.");
     saveProgress();
   }
 
-  inputs.forEach((input, index) => {
+  inputs.forEach((input) => {
+    input.addEventListener("focus", () => input.select());
     input.addEventListener("input", () => {
       cleanInput(input);
-      if (input.value.length >= Number(input.maxLength || 0) && inputs[index + 1]) {
-        inputs[index + 1].focus();
+      if (input.value) focusRelative(input, 1);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (/^[a-zA-Z0-9]$/.test(event.key)) {
+        event.preventDefault();
+        input.value = event.key;
+        cleanInput(input);
+        focusRelative(input, 1);
+      } else if (event.key === "Backspace" && !input.value) {
+        event.preventDefault();
+        focusRelative(input, -1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        focusRelative(input, -1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        focusRelative(input, 1);
       }
     });
   });
@@ -112,7 +162,7 @@
     clearButton.addEventListener("click", () => {
       inputs.forEach((input) => {
         input.value = "";
-        input.closest(".word-pyramid-row").classList.remove("correct", "incorrect");
+        setRowState(Number(input.dataset.row), "");
       });
       setStatus("Pyramid cleared.");
       saveProgress();
