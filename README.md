@@ -26,6 +26,11 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Photo submission upload endpoint
 - Printable puzzle payload API for Daily Stripe
 
+## Planned Features
+
+- Native print option in the web app.
+- Dictionary imports from online sources such as a GitHub repository. Imports should try to filter or merge duplicate words and duplicate definitions while preserving any genuinely new definitions that arrive from the source.
+
 ## Run
 
 Copy the sample environment:
