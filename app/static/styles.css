@@ -961,17 +961,6 @@ legend {
   outline-offset: -2px;
 }
 
-.print-gimme-cell::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid #2f7d6c;
-  border-radius: 999px;
-}
-
 .print-crossword-cell.print-gimme-cell strong {
   position: relative;
   display: block;
@@ -1182,19 +1171,10 @@ summary {
   }
 
   .print-gimme-cell {
-    background: white !important;
+    background-color: #b7e1d6 !important;
     border-color: var(--accent);
-    outline: 2px dashed var(--accent);
-    outline-offset: -4px;
-  }
-
-  .print-gimme-cell::after {
-    right: 4px;
-    bottom: 4px;
-    width: 7px;
-    height: 7px;
-    border: 2px solid var(--accent);
-    background: white;
+    outline: 1px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .print-gimme-word,
