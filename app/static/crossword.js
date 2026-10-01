@@ -163,7 +163,11 @@
     const keys = cellsByEntry.get(entryId(entry)) || [];
     const index = keys.indexOf(input.dataset.key);
     if (index < 0) return null;
-    return inputsByKey.get(keys[index + direction]) || null;
+    for (let nextIndex = index + direction; nextIndex >= 0 && nextIndex < keys.length; nextIndex += direction) {
+      const next = inputsByKey.get(keys[nextIndex]);
+      if (next && !next.disabled) return next;
+    }
+    return null;
   }
 
   function moveFrom(input, direction) {
