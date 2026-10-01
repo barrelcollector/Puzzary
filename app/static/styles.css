@@ -955,9 +955,9 @@ legend {
 }
 
 .print-gimme-cell {
-  background-color: #b7e1d6 !important;
+  background-color: #dceee8 !important;
   background-image: none;
-  outline: 1px solid #2f7d6c;
+  outline: 1px solid #4f8d80;
   outline-offset: -2px;
 }
 
@@ -987,10 +987,10 @@ legend {
 }
 
 .print-gimme-word {
-  background-color: #b7e1d6;
+  background-color: #dceee8;
   background-image: none;
-  border-color: #8fd0be;
-  outline: 1px solid #2f7d6c;
+  border-color: #a9d6cb;
+  outline: 1px solid #4f8d80;
   outline-offset: -2px;
 }
 
