@@ -13,12 +13,6 @@
   </header>
 
   {% if print_payload.kind == "word_search" %}
-    {% set gimme_words = [] %}
-    {% if print_payload.gimmes is defined and print_payload.gimmes.words is defined %}
-      {% set gimme_words = print_payload.gimmes.words %}
-    {% elif puzzle.solution_payload.gimmes is defined and puzzle.solution_payload.gimmes.words is defined %}
-      {% set gimme_words = puzzle.solution_payload.gimmes.words %}
-    {% endif %}
     <section class="print-word-search">
       <div class="print-word-grid" style="--grid-size: {{ print_payload.grid | length }}">
         {% for row in print_payload.grid %}
@@ -32,9 +26,9 @@
       <h2>Words</h2>
       <div class="print-word-list">
         {% for word in print_payload.words %}
-          <span class="{% if word in gimme_words %}print-gimme-word{% endif %}">
+          <span class="{% if word | upper in print_gimme_words %}print-gimme-word{% endif %}">
             {{ word }}
-            {% if word in gimme_words %}<small>Gimme</small>{% endif %}
+            {% if word | upper in print_gimme_words %}<small>Gimme</small>{% endif %}
           </span>
         {% endfor %}
       </div>

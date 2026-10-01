@@ -907,6 +907,8 @@ legend {
   background: white;
   border: 1px solid var(--line);
   border-radius: 8px;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
 }
 
 .print-header {
@@ -953,6 +955,8 @@ legend {
 
 .print-gimme-cell {
   background: #dff3ed;
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .print-crossword-cell.print-gimme-cell strong {
@@ -981,6 +985,8 @@ legend {
 .print-gimme-word {
   background: #dff3ed;
   border-color: #8fd0be;
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .print-gimme-label,
@@ -1157,5 +1163,18 @@ summary {
     padding: 0;
     border: 0;
     border-radius: 0;
+  }
+
+  .print-gimme-cell {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: -3px;
+  }
+
+  .print-gimme-word,
+  .print-gimme-label,
+  .print-word-list small {
+    border-color: var(--accent);
+    color: var(--ink);
   }
 }

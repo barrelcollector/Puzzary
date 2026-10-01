@@ -151,6 +151,15 @@ def printable_gimme_cells(puzzle: Puzzle) -> dict[str, str]:
     return {}
 
 
+def printable_gimme_words(puzzle: Puzzle) -> list[str]:
+    print_payload = puzzle.print_payload if isinstance(puzzle.print_payload, dict) else {}
+    solution_payload = puzzle.solution_payload if isinstance(puzzle.solution_payload, dict) else {}
+    gimmes = print_payload.get("gimmes") if isinstance(print_payload.get("gimmes"), dict) else solution_payload.get("gimmes", {})
+    if not isinstance(gimmes, dict):
+        return []
+    return sorted({str(word).upper() for word in gimmes.get("words", []) if str(word).strip()})
+
+
 def serialize_tag(tag: PuzzleTag) -> dict:
     return {
         "id": tag.id,
@@ -1520,6 +1529,7 @@ def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(ge
             "puzzle_type_definition": puzzle_type,
             "print_payload": puzzle.print_payload or {},
             "print_gimme_cells": printable_gimme_cells(puzzle),
+            "print_gimme_words": printable_gimme_words(puzzle),
         },
     )
 
