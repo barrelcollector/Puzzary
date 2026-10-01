@@ -941,6 +941,7 @@ legend {
 .print-crossword-cell,
 .print-crossword-spacer,
 .print-pyramid-cells span {
+  position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 1;
@@ -954,15 +955,19 @@ legend {
 }
 
 .print-gimme-cell {
-  background: #cfece3;
+  background-color: #b7e1d6 !important;
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(21, 21, 21, 0.16) 6px 7px);
+  box-shadow: inset 0 0 0 999px rgba(47, 125, 108, 0.08);
   outline: 1px solid #2f7d6c;
   outline-offset: -2px;
 }
 
 .print-crossword-cell.print-gimme-cell strong {
+  position: relative;
   display: block;
   font-size: 18px;
   line-height: 1;
+  z-index: 1;
 }
 
 .print-word-list {
@@ -983,7 +988,8 @@ legend {
 }
 
 .print-gimme-word {
-  background: #cfece3;
+  background-color: #b7e1d6;
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(21, 21, 21, 0.12) 6px 7px);
   border-color: #8fd0be;
   outline: 1px solid #2f7d6c;
   outline-offset: -2px;
@@ -1166,7 +1172,8 @@ summary {
   }
 
   .print-gimme-cell {
-    background: #cfece3;
+    background-color: #b7e1d6 !important;
+    background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0, 0, 0, 0.22) 6px 7px);
     border-color: var(--accent);
     outline: 1px solid var(--accent);
     outline-offset: -2px;
