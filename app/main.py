@@ -118,6 +118,39 @@ def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
     )
 
 
+def printable_gimme_cells(puzzle: Puzzle) -> dict[str, str]:
+    print_payload = puzzle.print_payload if isinstance(puzzle.print_payload, dict) else {}
+    solution_payload = puzzle.solution_payload if isinstance(puzzle.solution_payload, dict) else {}
+    gimmes = print_payload.get("gimmes") if isinstance(print_payload.get("gimmes"), dict) else solution_payload.get("gimmes", {})
+    if not isinstance(gimmes, dict):
+        return {}
+
+    if print_payload.get("kind") == "crossword":
+        cells = gimmes.get("cells", {})
+        if not isinstance(cells, dict):
+            return {}
+        return {str(key): str(value).upper()[:1] for key, value in cells.items() if str(value).strip()}
+
+    if print_payload.get("kind") == "word_search":
+        gimme_words = {str(word).upper() for word in gimmes.get("words", []) if str(word).strip()}
+        cells = {}
+        for placement in solution_payload.get("placements", []):
+            word = str(placement.get("word", "")).upper()
+            if word not in gimme_words:
+                continue
+            start = placement.get("start", [])
+            direction = placement.get("direction", [])
+            if len(start) != 2 or len(direction) != 2:
+                continue
+            x, y = int(start[0]), int(start[1])
+            dx, dy = int(direction[0]), int(direction[1])
+            for index, letter in enumerate(word):
+                cells[f"{x + dx * index},{y + dy * index}"] = letter
+        return cells
+
+    return {}
+
+
 def serialize_tag(tag: PuzzleTag) -> dict:
     return {
         "id": tag.id,
@@ -1486,6 +1519,7 @@ def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(ge
             "current_user": user,
             "puzzle_type_definition": puzzle_type,
             "print_payload": puzzle.print_payload or {},
+            "print_gimme_cells": printable_gimme_cells(puzzle),
         },
     )
 

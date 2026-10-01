@@ -13,29 +13,49 @@
   </header>
 
   {% if print_payload.kind == "word_search" %}
+    {% set gimme_words = [] %}
+    {% if print_payload.gimmes is defined and print_payload.gimmes.words is defined %}
+      {% set gimme_words = print_payload.gimmes.words %}
+    {% elif puzzle.solution_payload.gimmes is defined and puzzle.solution_payload.gimmes.words is defined %}
+      {% set gimme_words = puzzle.solution_payload.gimmes.words %}
+    {% endif %}
     <section class="print-word-search">
       <div class="print-word-grid" style="--grid-size: {{ print_payload.grid | length }}">
         {% for row in print_payload.grid %}
+          {% set y = loop.index0 %}
           {% for letter in row %}
-            <span>{{ letter }}</span>
+            {% set cell_key = loop.index0 ~ ',' ~ y %}
+            <span class="{% if cell_key in print_gimme_cells %}print-gimme-cell{% endif %}">{{ letter }}</span>
           {% endfor %}
         {% endfor %}
       </div>
       <h2>Words</h2>
       <div class="print-word-list">
         {% for word in print_payload.words %}
-          <span>{{ word }}</span>
+          <span class="{% if word in gimme_words %}print-gimme-word{% endif %}">
+            {{ word }}
+            {% if word in gimme_words %}<small>Gimme</small>{% endif %}
+          </span>
         {% endfor %}
       </div>
     </section>
   {% elif print_payload.kind == "crossword" %}
+    {% set gimme_entries = [] %}
+    {% if print_payload.gimmes is defined and print_payload.gimmes.entries is defined %}
+      {% set gimme_entries = print_payload.gimmes.entries %}
+    {% elif puzzle.solution_payload.gimmes is defined and puzzle.solution_payload.gimmes.entries is defined %}
+      {% set gimme_entries = puzzle.solution_payload.gimmes.entries %}
+    {% endif %}
     <section class="print-crossword">
       <div class="print-crossword-grid" style="--grid-size: {{ print_payload.grid[0] | length if print_payload.grid else 1 }}">
         {% for row in print_payload.grid %}
+          {% set y = loop.index0 %}
           {% for cell in row %}
+            {% set cell_key = loop.index0 ~ ',' ~ y %}
             {% if cell.open %}
-              <span class="print-crossword-cell">
+              <span class="print-crossword-cell {% if cell_key in print_gimme_cells %}print-gimme-cell{% endif %}">
                 {% if cell.number %}<small>{{ cell.number }}</small>{% endif %}
+                {% if cell_key in print_gimme_cells %}<strong>{{ print_gimme_cells[cell_key] }}</strong>{% endif %}
               </span>
             {% else %}
               <span class="print-crossword-spacer"></span>
@@ -48,7 +68,16 @@
           <h2>Across</h2>
           <ol>
             {% for clue in print_payload.clues if clue.direction == "across" %}
-              <li value="{{ clue.number }}">{{ clue.clue }} <small>{{ clue.length }} letters</small></li>
+              {% set clue_is_gimme = namespace(value=false) %}
+              {% for entry in gimme_entries %}
+                {% if entry.number == clue.number and entry.direction == clue.direction %}
+                  {% set clue_is_gimme.value = true %}
+                {% endif %}
+              {% endfor %}
+              <li value="{{ clue.number }}">
+                {{ clue.clue }} <small>{{ clue.length }} letters</small>
+                {% if clue_is_gimme.value %}<small class="print-gimme-label">Gimme</small>{% endif %}
+              </li>
             {% endfor %}
           </ol>
         </section>
@@ -56,7 +85,16 @@
           <h2>Down</h2>
           <ol>
             {% for clue in print_payload.clues if clue.direction == "down" %}
-              <li value="{{ clue.number }}">{{ clue.clue }} <small>{{ clue.length }} letters</small></li>
+              {% set clue_is_gimme = namespace(value=false) %}
+              {% for entry in gimme_entries %}
+                {% if entry.number == clue.number and entry.direction == clue.direction %}
+                  {% set clue_is_gimme.value = true %}
+                {% endif %}
+              {% endfor %}
+              <li value="{{ clue.number }}">
+                {{ clue.clue }} <small>{{ clue.length }} letters</small>
+                {% if clue_is_gimme.value %}<small class="print-gimme-label">Gimme</small>{% endif %}
+              </li>
             {% endfor %}
           </ol>
         </section>

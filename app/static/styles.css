@@ -951,6 +951,16 @@ legend {
   font-size: 20px;
 }
 
+.print-gimme-cell {
+  background: #dff3ed;
+}
+
+.print-crossword-cell.print-gimme-cell strong {
+  display: block;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .print-word-list {
   display: flex;
   flex-wrap: wrap;
@@ -959,10 +969,31 @@ legend {
 }
 
 .print-word-list span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
   padding: 4px 7px;
   border: 1px solid var(--line);
   border-radius: 6px;
   font-weight: 750;
+}
+
+.print-gimme-word {
+  background: #dff3ed;
+  border-color: #8fd0be;
+}
+
+.print-gimme-label,
+.print-word-list small {
+  display: inline-flex;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border: 1px solid #8fd0be;
+  border-radius: 999px;
+  color: #1f6f62;
+  background: #dff3ed;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .print-crossword-grid {
