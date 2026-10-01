@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Print {{ puzzle.title }} - Puzzary{% endblock %}
+{% block content %}
+<section class="print-toolbar">
+  <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Back to puzzle</a>
+  <button type="button" class="button-link print-button" onclick="window.print()">Print</button>
+</section>
+
+<article class="print-sheet">
+  <header class="print-header">
+    <h1>{{ puzzle.title }}</h1>
+    <p>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</p>
+  </header>
+
+  {% if print_payload.kind == "word_search" %}
+    <section class="print-word-search">
+      <div class="print-word-grid" style="--grid-size: {{ print_payload.grid | length }}">
+        {% for row in print_payload.grid %}
+          {% for letter in row %}
+            <span>{{ letter }}</span>
+          {% endfor %}
+        {% endfor %}
+      </div>
+      <h2>Words</h2>
+      <div class="print-word-list">
+        {% for word in print_payload.words %}
+          <span>{{ word }}</span>
+        {% endfor %}
+      </div>
+    </section>
+  {% elif print_payload.kind == "crossword" %}
+    <section class="print-crossword">
+      <div class="print-crossword-grid" style="--grid-size: {{ print_payload.grid[0] | length if print_payload.grid else 1 }}">
+        {% for row in print_payload.grid %}
+          {% for cell in row %}
+            {% if cell.open %}
+              <span class="print-crossword-cell">
+                {% if cell.number %}<small>{{ cell.number }}</small>{% endif %}
+              </span>
+            {% else %}
+              <span class="print-crossword-spacer"></span>
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </div>
+      <div class="print-clues">
+        <section>
+          <h2>Across</h2>
+          <ol>
+            {% for clue in print_payload.clues if clue.direction == "across" %}
+              <li value="{{ clue.number }}">{{ clue.clue }} <small>{{ clue.length }} letters</small></li>
+            {% endfor %}
+          </ol>
+        </section>
+        <section>
+          <h2>Down</h2>
+          <ol>
+            {% for clue in print_payload.clues if clue.direction == "down" %}
+              <li value="{{ clue.number }}">{{ clue.clue }} <small>{{ clue.length }} letters</small></li>
+            {% endfor %}
+          </ol>
+        </section>
+      </div>
+    </section>
+  {% elif print_payload.kind == "word_pyramid" %}
+    <section class="print-word-pyramid">
+      {% for row in print_payload.rows %}
+        <div class="print-pyramid-row">
+          <div class="print-pyramid-cells" style="grid-template-columns: repeat({{ row.length }}, 30px)">
+            {% for index in range(row.length) %}
+              <span>{% if row.gimme and row.given %}{{ row.given[index] }}{% endif %}</span>
+            {% endfor %}
+          </div>
+          <p><strong>{{ row.number }}.</strong> {{ row.clue }} <small>{{ row.length }} letters</small></p>
+        </div>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="print-generic">
+      <p>{{ puzzle.prompt }}</p>
+      <pre>{{ print_payload | tojson(indent=2) }}</pre>
+    </section>
+  {% endif %}
+
+  <footer class="print-footer">
+    <span>Puzzary</span>
+    <span>{{ puzzle.id }}</span>
+  </footer>
+</article>
+{% endblock %}

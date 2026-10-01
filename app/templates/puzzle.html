@@ -6,7 +6,12 @@
     <h1>{{ puzzle.title }}</h1>
     <p class="muted">{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</p>
   </div>
-  <code>{{ puzzle.id }}</code>
+  <div class="puzzle-head-actions">
+    {% if puzzle_type_definition and puzzle_type_definition.supports_print and not puzzle_type_definition.digital_only %}
+      <a class="button-link" href="/puzzles/{{ puzzle.id }}/print">Print</a>
+    {% endif %}
+    <code>{{ puzzle.id }}</code>
+  </div>
 </section>
 
 <section class="puzzle-layout">

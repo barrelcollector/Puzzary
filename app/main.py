@@ -1467,6 +1467,29 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     )
 
 
+@app.get("/puzzles/{puzzle_id}/print", response_class=HTMLResponse)
+def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
+        raise HTTPException(status_code=404, detail="This puzzle does not support printing")
+    return templates.TemplateResponse(
+        "print.html",
+        {
+            "request": request,
+            "puzzle": puzzle,
+            "current_user": user,
+            "puzzle_type_definition": puzzle_type,
+            "print_payload": puzzle.print_payload or {},
+        },
+    )
+
+
 @app.post("/web/puzzles/{puzzle_id}/attempts")
 def web_attempt_puzzle(
     puzzle_id: str,
