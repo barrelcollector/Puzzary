@@ -956,10 +956,20 @@ legend {
 
 .print-gimme-cell {
   background-color: #b7e1d6 !important;
-  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(21, 21, 21, 0.16) 6px 7px);
-  box-shadow: inset 0 0 0 999px rgba(47, 125, 108, 0.08);
+  background-image: none;
   outline: 1px solid #2f7d6c;
   outline-offset: -2px;
+}
+
+.print-gimme-cell::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid #2f7d6c;
+  border-radius: 999px;
 }
 
 .print-crossword-cell.print-gimme-cell strong {
@@ -989,7 +999,7 @@ legend {
 
 .print-gimme-word {
   background-color: #b7e1d6;
-  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(21, 21, 21, 0.12) 6px 7px);
+  background-image: none;
   border-color: #8fd0be;
   outline: 1px solid #2f7d6c;
   outline-offset: -2px;
@@ -1172,11 +1182,19 @@ summary {
   }
 
   .print-gimme-cell {
-    background-color: #b7e1d6 !important;
-    background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0, 0, 0, 0.22) 6px 7px);
+    background: white !important;
     border-color: var(--accent);
-    outline: 1px solid var(--accent);
-    outline-offset: -2px;
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+  }
+
+  .print-gimme-cell::after {
+    right: 4px;
+    bottom: 4px;
+    width: 7px;
+    height: 7px;
+    border: 2px solid var(--accent);
+    background: white;
   }
 
   .print-gimme-word,
