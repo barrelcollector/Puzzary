@@ -12,6 +12,15 @@ GUARANTEED_CHAINS = [
     ["TIP", "PINT", "POINT", "PISTON", "OPTIONS", "STOOPING"],
 ]
 
+FALLBACK_CLUES = {
+    "TIP": ["A small piece of advice.", "Also the pointed end of something."],
+    "PINT": ["A liquid measure equal to two cups.", "Common size for milk, cream, or a pub pour."],
+    "POINT": ["A sharp end, exact location, or main idea.", "A dot on a map or score marker."],
+    "PISTON": ["A moving engine part inside a cylinder.", "It slides back and forth to transfer force."],
+    "OPTIONS": ["Available choices.", "Menu items or possible actions."],
+    "STOOPING": ["Bending the body forward and down.", "Lowering posture to reach something."],
+}
+
 
 def normalize_word(value: str) -> str:
     return "".join(ch for ch in str(value).upper() if ch.isalnum())
@@ -91,7 +100,10 @@ def fallback_source(theme: str, difficulty: str) -> list[dict]:
         {
             "word": normalize_word(word),
             "display": str(word).title(),
-            "clues": [f"Word from {theme.replace('_', ' ')}."],
+            "clues": FALLBACK_CLUES.get(
+                normalize_word(word),
+                [f"{str(word).title()} is connected to {theme.replace('_', ' ')}."],
+            ),
             "definition_id": None,
         }
         for word in words
