@@ -172,8 +172,14 @@ def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -
     raise ValueError("Word pyramid generation needs at least three words where each row adds one letter to the previous row.")
 
 
+def gimme_count_for_difficulty(difficulty: str, row_count: int) -> int:
+    requested = {"easy": 1, "medium": 1, "hard": 0}.get(difficulty, 0)
+    return min(requested, max(0, row_count - 1))
+
+
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
-    expected = [str(row["answer"]).upper() for row in solution_payload.get("rows", [])]
+    rows = solution_payload.get("rows", [])
+    expected = [str(row["answer"]).upper() for row in rows]
     supplied = [
         normalize_word(part)
         for part in answer.replace("\n", ",").replace(";", ",").split(",")
@@ -181,8 +187,22 @@ def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     ]
     if len(supplied) <= 1 and "," not in answer and "\n" not in answer and ";" not in answer:
         supplied = [normalize_word(part) for part in answer.split() if normalize_word(part)]
-    matched = sum(1 for index, value in enumerate(supplied) if index < len(expected) and value == expected[index])
-    return supplied[: len(expected)] == expected, len(expected), matched
+    supplied_index = 0
+    matched = 0
+    is_correct = True
+    for index, row in enumerate(rows):
+        if row.get("gimme"):
+            matched += 1
+            continue
+        value = supplied[supplied_index] if supplied_index < len(supplied) else ""
+        supplied_index += 1
+        if value == expected[index]:
+            matched += 1
+        else:
+            is_correct = False
+    if supplied_index < len(supplied):
+        is_correct = False
+    return is_correct, len(expected), matched
 
 
 def normalize_progress(payload: Any, solution_payload: dict) -> dict:
@@ -192,6 +212,9 @@ def normalize_progress(payload: Any, solution_payload: dict) -> dict:
     expected_rows = solution_payload.get("rows", [])
     normalized = {}
     for index, row in enumerate(expected_rows):
+        if row.get("gimme"):
+            normalized[str(index)] = str(row.get("answer", "")).upper()
+            continue
         value = normalize_word(answers.get(str(index), ""))
         if value:
             normalized[str(index)] = value[: len(str(row.get("answer", "")))]
@@ -205,7 +228,7 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     rows = solution_payload.get("rows", [])
     found = 0
     for index, row in enumerate(rows):
-        if normalize_word(answers.get(str(index), "")) == str(row.get("answer", "")).upper():
+        if row.get("gimme") or normalize_word(answers.get(str(index), "")) == str(row.get("answer", "")).upper():
             found += 1
     return found, len(rows)
 
@@ -223,10 +246,12 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
 
     rows = []
     solution_rows = []
+    gimme_count = gimme_count_for_difficulty(difficulty, len(chain))
     for index, entry in enumerate(chain):
         answer = normalize_word(entry.get("word", ""))
         clues = [str(clue).strip() for clue in entry.get("clues", []) if str(clue).strip()]
         primary = clues[0] if clues else f"{answer.title()} entry."
+        is_gimme = index < gimme_count
         row = {
             "index": index,
             "number": index + 1,
@@ -234,7 +259,10 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
             "clue": primary,
             "clues": clues or [primary],
             "definition_id": entry.get("definition_id"),
+            "gimme": is_gimme,
         }
+        if is_gimme:
+            row["given"] = answer
         rows.append(row)
         solution_rows.append({**row, "answer": answer})
 
@@ -253,7 +281,12 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
             "Each answer uses every letter from the row above, plus one new letter.",
             f"The shortest answer has {rows[0]['length']} letters.",
         ],
-        metadata={"generator": "local.word_pyramid.v1", "seed": generation_seed, "row_count": len(rows)},
+        metadata={
+            "generator": "local.word_pyramid.v1",
+            "seed": generation_seed,
+            "row_count": len(rows),
+            "gimmes": {"mode": "starting_rows", "count": gimme_count},
+        },
     )
 
 
@@ -270,5 +303,7 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),
+        supports_gimmes=True,
+        gimme_modes=("starting_rows",),
     )
 )

@@ -805,6 +805,12 @@ legend {
   z-index: 1;
 }
 
+.word-pyramid-cells input:disabled {
+  color: var(--ink);
+  background: #dff3ed;
+  opacity: 1;
+}
+
 .word-pyramid-row.correct .word-pyramid-cells input {
   background: #dff3ed;
 }
@@ -818,6 +824,18 @@ legend {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.gimme-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #8fd0be;
+  border-radius: 999px;
+  background: #dff3ed;
+  color: #1f6f62;
+  font-weight: 850;
 }
 
 .word-pyramid-row .reveal-pyramid-row,

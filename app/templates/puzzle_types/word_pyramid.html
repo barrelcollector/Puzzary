@@ -7,7 +7,7 @@
 >
   <div class="word-pyramid-rows">
     {% for row in puzzle.play_payload.rows %}
-      {% set saved_answer = progress_answers[row.index | string] | default('') %}
+      {% set saved_answer = row.given if row.gimme else progress_answers[row.index | string] | default('') %}
       <div class="word-pyramid-row" style="--row-length: {{ row.length }}">
         <div class="word-pyramid-answer" aria-label="Row {{ row.number }}, {{ row.length }} letters">
           <span class="word-pyramid-number">{{ row.number }}</span>
@@ -19,8 +19,10 @@
                 maxlength="1"
                 data-row="{{ row.index }}"
                 data-cell="{{ cell_index }}"
+                data-gimme="{{ 'true' if row.gimme else 'false' }}"
                 value="{{ saved_answer[cell_index] if saved_answer | length > cell_index else '' }}"
                 aria-label="Row {{ row.number }}, letter {{ cell_index + 1 }}"
+                {% if row.gimme %}disabled{% endif %}
               >
             {% endfor %}
           </div>
@@ -29,6 +31,7 @@
           <span>{{ row.clue }}</span>
           <span class="word-pyramid-row-actions">
             <small>{{ row.length }} letters</small>
+            {% if row.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
             {% if row.clues and row.clues | length > 1 %}
               <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
               <span class="pyramid-clue-steps" hidden>

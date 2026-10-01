@@ -137,6 +137,8 @@ register_puzzle_type(
         supports_web_play=True,
         digital_only=False,
         source_requirements=("word_bank",),
+        supports_gimmes=False,
+        gimme_modes=(),
     )
 )
 ```
@@ -149,6 +151,8 @@ Optional templates:
 If a registered type has no web template, Puzzary falls back to the puzzle prompt and answer submission form. If it has no solution template, admins see the raw solution payload.
 
 `word_entries` is the shared source format Puzzary passes to puzzle modules after applying archive, ban, and excluded-tag filters. Each item is a dict with `word` and `definition` keys; `definition` may be `None`.
+
+Puzzle modules can also support gimmes: pre-solved cells, words, rows, or regions included in the generated payload. A module that supports them should set `supports_gimmes=True`, describe its `gimme_modes`, persist the gimme data in payloads, render it distinctly, and count it as solved in progress/checking logic.
 
 ## AI Assistance Disclosure
 

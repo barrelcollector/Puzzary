@@ -82,6 +82,7 @@
   }
 
   function cleanInput(input) {
+    if (input.disabled) return;
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     setRowState(Number(input.dataset.row), "");
     queueSave();
@@ -131,6 +132,7 @@
   }
 
   inputs.forEach((input) => {
+    if (input.disabled) return;
     input.addEventListener("focus", () => input.select());
     input.addEventListener("input", () => {
       cleanInput(input);
@@ -161,6 +163,7 @@
   if (clearButton) {
     clearButton.addEventListener("click", () => {
       inputs.forEach((input) => {
+        if (input.disabled) return;
         input.value = "";
         setRowState(Number(input.dataset.row), "");
       });

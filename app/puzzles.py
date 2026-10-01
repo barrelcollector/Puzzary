@@ -32,6 +32,8 @@ class PuzzleType:
     supports_web_play: bool = True
     digital_only: bool = False
     source_requirements: tuple[str, ...] = ()
+    supports_gimmes: bool = False
+    gimme_modes: tuple[str, ...] = ()
 
 
 PUZZLE_TYPES: dict[str, PuzzleType] = {}
