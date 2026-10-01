@@ -2,7 +2,7 @@
 <div
   class="word-grid interactive"
   data-words="{{ puzzle.play_payload.words | join(',') }}"
-  data-found-words="{{ progress_found_words | default([]) | join(',') }}"
+  data-found-words="{{ ((progress_found_words | default([])) + (puzzle.solution_payload.gimmes.words | default([]))) | unique | join(',') }}"
   data-placements='{{ puzzle.solution_payload.placements | tojson }}'
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   style="--grid-size: {{ puzzle.play_payload.grid | length }}"
@@ -17,7 +17,10 @@
 <h2>Words</h2>
 <div class="word-list" id="word-list">
   {% for word in puzzle.play_payload.words %}
-    <span data-word="{{ word }}">{{ word }}</span>
+    <span data-word="{{ word }}">
+      {{ word }}
+      {% if word in (puzzle.solution_payload.gimmes.words | default([])) %}<small class="gimme-pill">Gimme</small>{% endif %}
+    </span>
   {% endfor %}
 </div>
 <p class="muted" id="word-search-status">Drag across a word to mark it found.</p>

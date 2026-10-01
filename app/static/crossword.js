@@ -172,6 +172,7 @@
   }
 
   function setCellValue(input, value) {
+    if (input.disabled) return;
     input.value = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     input.closest(".crossword-cell").classList.remove("correct", "incorrect");
     queueSave();
@@ -234,6 +235,7 @@
   if (clearButton) {
     clearButton.addEventListener("click", () => {
       inputs.forEach((input) => {
+        if (input.disabled) return;
         input.value = "";
         input.closest(".crossword-cell").classList.remove("correct", "incorrect");
       });

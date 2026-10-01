@@ -32,9 +32,14 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
     return words[:count]
 
 
+def gimme_words_for_difficulty(words: list[str], difficulty: str) -> list[str]:
+    count = {"easy": 1, "medium": 1, "hard": 0}.get(difficulty, 0)
+    return words[: min(count, max(0, len(words) - 1))]
+
+
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     expected = set(solution_payload["words"])
-    supplied = normalize_answer(answer)
+    supplied = normalize_answer(answer) | {str(word).upper() for word in solution_payload.get("gimmes", {}).get("words", [])}
     matched = len(expected & supplied)
     return expected <= supplied, len(expected), matched
 
@@ -43,6 +48,7 @@ def normalize_progress(payload: Any, solution_payload: dict) -> dict:
     expected = {str(word).upper() for word in solution_payload.get("words", [])}
     raw_words = getattr(payload, "found_words", []) if payload is not None else []
     supplied = {str(word).strip().upper() for word in raw_words if str(word).strip()}
+    supplied |= {str(word).upper() for word in solution_payload.get("gimmes", {}).get("words", [])}
     return {"found_words": sorted(expected & supplied)}
 
 
@@ -51,7 +57,10 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     words = progress_payload.get("found_words", [])
     if not isinstance(words, list):
         words = []
-    return len(words), expected_count
+    found = {str(word).upper() for word in words}
+    found |= {str(word).upper() for word in solution_payload.get("gimmes", {}).get("words", [])}
+    expected = {str(word).upper() for word in solution_payload.get("words", [])}
+    return len(expected & found), expected_count
 
 
 def contains_blocked_word(grid: list[list[str]], blocked_words: set[str]) -> bool:
@@ -135,16 +144,19 @@ def generate(theme: str, difficulty: str, source_data: list[str] | dict | None =
             raise ValueError(f"Unable to place word: {word}")
 
     grid = fill_grid(grid, rng, blocked_words)
+    gimme_words = gimme_words_for_difficulty(words, difficulty)
 
     prompt = "Find all listed words."
     print_payload = {
         "kind": "word_search",
         "grid": ["".join(row) for row in grid],
         "words": words,
+        "gimmes": {"mode": "found_words", "words": gimme_words},
     }
     solution_payload = {
         "words": words,
         "placements": placements,
+        "gimmes": {"mode": "found_words", "words": gimme_words},
     }
     return GeneratedPuzzle(
         title=f"{theme.replace('_', ' ').title()} Word Search",
@@ -162,6 +174,7 @@ def generate(theme: str, difficulty: str, source_data: list[str] | dict | None =
             "grid_size": size,
             "blocked_word_count": len(blocked_words),
             "seed": generation_seed,
+            "gimmes": {"mode": "found_words", "count": len(gimme_words)},
         },
     )
 
@@ -179,5 +192,7 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank",),
+        supports_gimmes=True,
+        gimme_modes=("found_words",),
     )
 )

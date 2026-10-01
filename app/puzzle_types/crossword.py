@@ -123,9 +123,33 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
     return entries or None
 
 
+def gimme_entry_count_for_difficulty(entry_count: int, difficulty: str) -> int:
+    count = {"easy": 1, "medium": 1, "hard": 0}.get(difficulty, 0)
+    return min(count, max(0, entry_count - 1))
+
+
+def gimme_cells_from_entries(entries: list[dict]) -> dict[str, str]:
+    cells = {}
+    for entry in entries:
+        if not entry.get("gimme"):
+            continue
+        dx = 1 if entry.get("direction") == "across" else 0
+        dy = 1 if entry.get("direction") == "down" else 0
+        answer = str(entry.get("answer", "")).upper()
+        for index, letter in enumerate(answer):
+            x = int(entry.get("x", 0)) + dx * index
+            y = int(entry.get("y", 0)) + dy * index
+            cells[f"{x},{y}"] = letter
+    return cells
+
+
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     expected = {str(entry["answer"]).upper() for entry in solution_payload.get("entries", [])}
-    supplied = normalize_answer(answer)
+    supplied = normalize_answer(answer) | {
+        str(entry.get("answer", "")).upper()
+        for entry in solution_payload.get("entries", [])
+        if entry.get("gimme")
+    }
     matched = len(expected & supplied)
     return expected <= supplied, len(expected), matched
 
@@ -134,12 +158,17 @@ def normalize_progress(payload: Any, solution_payload: dict) -> dict:
     answers = getattr(payload, "answers", {}) if payload is not None else {}
     if not isinstance(answers, dict):
         answers = {}
+    gimme_cells = solution_payload.get("gimmes", {}).get("cells", {})
+    if not isinstance(gimme_cells, dict):
+        gimme_cells = {}
+    normalized = {
+        str(key): str(value).strip().upper()[:1]
+        for key, value in answers.items()
+        if str(value).strip()
+    }
+    normalized.update({str(key): str(value).strip().upper()[:1] for key, value in gimme_cells.items() if str(value).strip()})
     return {
-        "answers": {
-            str(key): str(value).strip().upper()[:1]
-            for key, value in answers.items()
-            if str(value).strip()
-        }
+        "answers": normalized
     }
 
 
@@ -147,6 +176,10 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     answers = progress_payload.get("answers", {})
     if not isinstance(answers, dict):
         answers = {}
+    gimme_cells = solution_payload.get("gimmes", {}).get("cells", {})
+    if not isinstance(gimme_cells, dict):
+        gimme_cells = {}
+    answers = {**answers, **gimme_cells}
     expected_count = sum(1 for row in solution_payload.get("grid", []) for cell in row if cell)
     found_count = 0
     for key, value in answers.items():
@@ -320,6 +353,14 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
         }
         for item in sorted(placements, key=lambda item: (item["direction"], item["number"]))
     ]
+    gimme_count = gimme_entry_count_for_difficulty(len(clue_entries), difficulty)
+    gimme_ids = {
+        f"{entry['number']}:{entry['direction']}"
+        for entry in sorted(clue_entries, key=lambda item: (item["number"], item["direction"]))[:gimme_count]
+    }
+    for entry in clue_entries:
+        entry["gimme"] = f"{entry['number']}:{entry['direction']}" in gimme_ids
+    gimme_cells = gimme_cells_from_entries(clue_entries)
     play_cells = []
     print_cells = []
     for y, row in enumerate(cropped):
@@ -347,6 +388,19 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
     solution_payload = {
         "entries": clue_entries,
         "grid": solution_grid,
+        "gimmes": {
+            "mode": "entries",
+            "entries": [
+                {
+                    "number": entry["number"],
+                    "direction": entry["direction"],
+                    "answer": entry["answer"],
+                }
+                for entry in clue_entries
+                if entry.get("gimme")
+            ],
+            "cells": gimme_cells,
+        },
     }
     return GeneratedPuzzle(
         title=f"{theme.replace('_', ' ').title()} Crossword",
@@ -359,7 +413,12 @@ def generate(theme: str, difficulty: str, source_data: list[dict] | None = None,
             "Use intersecting letters to narrow down uncertain answers.",
             f"The longest answer has {max(len(item['answer']) for item in clue_entries)} letters.",
         ],
-        metadata={"generator": "local.crossword.v1", "grid_size": len(play_cells), "seed": generation_seed},
+        metadata={
+            "generator": "local.crossword.v1",
+            "grid_size": len(play_cells),
+            "seed": generation_seed,
+            "gimmes": {"mode": "entries", "count": gimme_count},
+        },
     )
 
 
@@ -376,5 +435,7 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),
+        supports_gimmes=True,
+        gimme_modes=("entries",),
     )
 )

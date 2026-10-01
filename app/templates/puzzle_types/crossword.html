@@ -1,4 +1,5 @@
 <p>{{ puzzle.prompt }}</p>
+{% set gimme_cells = puzzle.solution_payload.gimmes.cells | default({}) %}
 <div
   class="crossword-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
@@ -14,10 +15,20 @@
       {% set y = loop.index0 %}
       {% for cell in row %}
         {% set x = loop.index0 %}
+        {% set cell_key = x ~ ',' ~ y %}
         {% if cell.letter %}
           <label class="crossword-cell" data-x="{{ x }}" data-y="{{ y }}">
             {% if cell.number %}<span>{{ cell.number }}</span>{% endif %}
-            <input aria-label="Cell {{ x + 1 }}, {{ y + 1 }}" maxlength="1" autocomplete="off" inputmode="text" data-key="{{ x }},{{ y }}" value="{{ progress_answers[x ~ ',' ~ y] | default('') }}">
+            <input
+              aria-label="Cell {{ x + 1 }}, {{ y + 1 }}"
+              maxlength="1"
+              autocomplete="off"
+              inputmode="text"
+              data-key="{{ cell_key }}"
+              data-gimme="{{ 'true' if cell_key in gimme_cells else 'false' }}"
+              value="{{ gimme_cells[cell_key] | default(progress_answers[cell_key] | default('')) }}"
+              {% if cell_key in gimme_cells %}disabled{% endif %}
+            >
           </label>
         {% else %}
           <span class="crossword-spacer" aria-hidden="true"></span>
@@ -47,7 +58,8 @@
             </ul>
           {% endif %}
           <small>{{ clue.length }} letters</small>
-          <button type="button" class="ghost-button reveal-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">Reveal word</button>
+          {% if clue.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
+          <button type="button" class="ghost-button reveal-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}" {% if clue.gimme %}disabled{% endif %}>Reveal word</button>
         </li>
       {% endfor %}
     </ol>
@@ -67,7 +79,8 @@
             </ul>
           {% endif %}
           <small>{{ clue.length }} letters</small>
-          <button type="button" class="ghost-button reveal-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">Reveal word</button>
+          {% if clue.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
+          <button type="button" class="ghost-button reveal-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}" {% if clue.gimme %}disabled{% endif %}>Reveal word</button>
         </li>
       {% endfor %}
     </ol>

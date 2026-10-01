@@ -17,6 +17,7 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Canonical dictionary words with reusable properties and tags
 - Word banks that reference canonical dictionary words without duplicating them
 - Word-search puzzle generator
+- Crossword puzzle generator
 - Word-pyramid puzzle generator
 - Puzzle hints
 - Answer checking
@@ -152,7 +153,7 @@ If a registered type has no web template, Puzzary falls back to the puzzle promp
 
 `word_entries` is the shared source format Puzzary passes to puzzle modules after applying archive, ban, and excluded-tag filters. Each item is a dict with `word` and `definition` keys; `definition` may be `None`.
 
-Puzzle modules can also support gimmes: pre-solved cells, words, rows, or regions included in the generated payload. A module that supports them should set `supports_gimmes=True`, describe its `gimme_modes`, persist the gimme data in payloads, render it distinctly, and count it as solved in progress/checking logic.
+Puzzle modules can also support gimmes: pre-solved cells, words, rows, or regions included in the generated payload. A module that supports them should set `supports_gimmes=True`, describe its `gimme_modes`, persist the gimme data in payloads, render it distinctly, and count it as solved in progress/checking logic. The current examples are pre-found Word Search words, pre-filled Crossword entries, and starting Word Pyramid rows.
 
 ## AI Assistance Disclosure
 
