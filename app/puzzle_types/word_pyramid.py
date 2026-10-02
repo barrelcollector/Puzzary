@@ -233,7 +233,13 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return found, len(rows)
 
 
-def generate(theme: str, difficulty: str, source_data: list[dict] | None = None, seed: str | None = None) -> GeneratedPuzzle:
+def generate(
+    theme: str,
+    difficulty: str,
+    source_data: list[dict] | None = None,
+    seed: str | None = None,
+    _generation_options: dict[str, Any] | None = None,
+) -> GeneratedPuzzle:
     source = source_data if source_data is not None else fallback_source(theme, difficulty)
     generation_seed = seed or f"word_pyramid:{theme}:{difficulty}:{','.join(str(item.get('word', '')) for item in source)}"
     rng = random.Random(generation_seed)

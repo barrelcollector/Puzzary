@@ -2,23 +2,28 @@
 {% block title %}Puzzary{% endblock %}
 {% block content %}
 <section class="toolbar">
-  <form class="panel" method="post" action="/web/puzzles/generate">
+  <script type="application/json" id="generation-schemas">{{ generation_schemas | tojson }}</script>
+  <form class="panel generation-form" method="post" action="/web/puzzles/generate" data-generation-form>
     <h1>Generate Puzzle</h1>
     <label>
       Type
-      <select name="puzzle_type">
+      <select name="puzzle_type" data-puzzle-type>
         {% for puzzle_type in puzzle_types %}
           <option value="{{ puzzle_type.slug }}">{{ puzzle_type.label }}</option>
         {% endfor %}
       </select>
     </label>
-    <label>
+    <label data-source-group="word_bank">
       Word bank
       <select name="theme">
         {% for bank in word_banks %}
           <option value="{{ bank.slug }}">{{ bank.name }}</option>
         {% endfor %}
       </select>
+    </label>
+    <label data-source-group="theme">
+      Puzzle theme
+      <input name="theme" value="daily_stripe" placeholder="Daily Stripe">
     </label>
     <label>
       Difficulty
@@ -28,6 +33,7 @@
         <option value="hard">Hard</option>
       </select>
     </label>
+    <div data-generation-fields></div>
     <button type="submit">Generate</button>
   </form>
 
@@ -68,4 +74,7 @@
     <p class="muted">No puzzles yet. Generate the first one above.</p>
   {% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+  <script src="/static/generation-form.js?v=1"></script>
 {% endblock %}

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Puzzary{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=18">
+  <link rel="stylesheet" href="/static/styles.css?v=19">
 </head>
 <body>
   {% if not hide_app_chrome %}
@@ -26,5 +26,6 @@
   <main class="page">
     {% block content %}{% endblock %}
   </main>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

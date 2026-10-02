@@ -99,7 +99,13 @@ def fill_grid(base_grid: list[list[str]], rng: random.Random, blocked_words: set
     raise ValueError("Unable to fill word search without forming a blocked word.")
 
 
-def generate(theme: str, difficulty: str, source_data: list[str] | dict | None = None, seed: str | None = None) -> GeneratedPuzzle:
+def generate(
+    theme: str,
+    difficulty: str,
+    source_data: list[str] | dict | None = None,
+    seed: str | None = None,
+    _generation_options: dict[str, Any] | None = None,
+) -> GeneratedPuzzle:
     blocked_source = []
     if isinstance(source_data, dict):
         raw_words = source_data.get("words")

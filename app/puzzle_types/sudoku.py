@@ -103,7 +103,13 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return matched, len(expected)
 
 
-def generate(theme: str, difficulty: str, _source_data: Any = None, seed: str | None = None) -> GeneratedPuzzle:
+def generate(
+    theme: str,
+    difficulty: str,
+    _source_data: Any = None,
+    seed: str | None = None,
+    _generation_options: dict[str, Any] | None = None,
+) -> GeneratedPuzzle:
     generation_seed = seed or f"sudoku:{theme}:{difficulty}"
     rng = random.Random(generation_seed)
     solution = shuffled_solution(rng)

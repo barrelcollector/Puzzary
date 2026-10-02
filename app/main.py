@@ -118,6 +118,47 @@ def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
     )
 
 
+def serialize_generation_field(field) -> dict:
+    return {
+        "name": field.name,
+        "label": field.label,
+        "field_type": field.field_type,
+        "default": field.default,
+        "required": field.required,
+        "help_text": field.help_text,
+        "options": list(field.options),
+        "minimum": field.minimum,
+        "maximum": field.maximum,
+    }
+
+
+def puzzle_type_generation_schemas() -> dict[str, dict]:
+    schemas = {}
+    for puzzle_type in list_puzzle_types():
+        needs_word_bank = "word_bank" in puzzle_type.source_requirements
+        schemas[puzzle_type.slug] = {
+            "slug": puzzle_type.slug,
+            "label": puzzle_type.label,
+            "description": puzzle_type.description,
+            "needs_word_bank": needs_word_bank,
+            "source_requirements": list(puzzle_type.source_requirements),
+            "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
+        }
+    return schemas
+
+
+def generation_options_from_form(form) -> dict[str, str]:
+    options = {}
+    for key, value in form.multi_items():
+        if not key.startswith("gen_"):
+            continue
+        option_key = key.removeprefix("gen_")
+        value = str(value).strip()
+        if value:
+            options[option_key] = value
+    return options
+
+
 def printable_gimme_cells(puzzle: Puzzle) -> dict[str, str]:
     print_payload = puzzle.print_payload if isinstance(puzzle.print_payload, dict) else {}
     solution_payload = puzzle.solution_payload if isinstance(puzzle.solution_payload, dict) else {}
@@ -639,12 +680,13 @@ def library(request: Request, db: Session = Depends(get_db)):
             "progress_by_puzzle": progress_by_puzzle,
             "word_banks": word_banks,
             "puzzle_types": list_puzzle_types(),
+            "generation_schemas": puzzle_type_generation_schemas(),
         },
     )
 
 
 @app.post("/web/puzzles/generate")
-def web_generate_puzzle(
+async def web_generate_puzzle(
     request: Request,
     puzzle_type: str = Form("word_search"),
     theme: str = Form("daily_stripe"),
@@ -654,7 +696,16 @@ def web_generate_puzzle(
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    puzzle = create_puzzle(PuzzleGenerateRequest(puzzle_type=puzzle_type, theme=theme, difficulty=difficulty), db)
+    form = await request.form()
+    puzzle = create_puzzle(
+        PuzzleGenerateRequest(
+            puzzle_type=puzzle_type,
+            theme=theme,
+            difficulty=difficulty,
+            generation_options=generation_options_from_form(form),
+        ),
+        db,
+    )
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
 
@@ -717,6 +768,7 @@ def admin_context(
         "selected_word_bank": selected_word_bank,
         "selected_tag": selected_tag,
         "puzzle_types": list_puzzle_types(),
+        "generation_schemas": puzzle_type_generation_schemas(),
     }
 
 
@@ -875,10 +927,11 @@ def admin_update_puzzle_metadata(
 
 
 @app.post("/admin/generate")
-def admin_generate_puzzle(
+async def admin_generate_puzzle(
     request: Request,
     puzzle_type: str = Form("word_search"),
-    bank_id: int = Form(...),
+    bank_id: int = Form(0),
+    theme: str = Form(""),
     difficulty: str = Form("easy"),
     seed: str = Form(""),
     category_id: int = Form(0),
@@ -889,23 +942,30 @@ def admin_generate_puzzle(
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    bank = db.get(WordBank, bank_id)
-    if bank is None or bank.archived_at is not None:
+    puzzle_type_config = get_puzzle_type(puzzle_type)
+    if puzzle_type_config is None:
+        raise HTTPException(status_code=400, detail="Unsupported puzzle type")
+    needs_word_bank = "word_bank" in puzzle_type_config.source_requirements
+    bank = db.get(WordBank, bank_id) if needs_word_bank and bank_id else None
+    if needs_word_bank and (bank is None or bank.archived_at is not None):
         raise HTTPException(status_code=404, detail="Word bank not found")
+    generation_theme = bank.slug if bank is not None else (slugify(theme) if theme.strip() else puzzle_type_config.label)
+    form = await request.form()
     puzzle = create_puzzle(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
-            theme=bank.slug,
+            theme=generation_theme,
             difficulty=difficulty,
             excluded_tag_ids=excluded_tag_ids,
             seed=seed or None,
+            generation_options=generation_options_from_form(form),
         ),
         db,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle is not None:
-        saved_puzzle.category_id = category_id or bank.category_id
-        saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else list(bank.tags)
+        saved_puzzle.category_id = category_id or (bank.category_id if bank is not None else None)
+        saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else (list(bank.tags) if bank is not None else [])
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -1811,7 +1871,10 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
 
-    word_bank = word_bank_for_slug(db, payload.theme)
+    needs_word_bank = "word_bank" in puzzle_type.source_requirements
+    word_bank = word_bank_for_slug(db, payload.theme) if needs_word_bank else None
+    if needs_word_bank and word_bank is None:
+        raise HTTPException(status_code=400, detail="This puzzle type requires a word bank source")
     excluded_tag_ids = set(payload.excluded_tag_ids)
     excluded_tags = tags_for_ids(db, payload.excluded_tag_ids)
     source_entries = word_bank_entries(db, word_bank, excluded_tag_ids) if word_bank is not None else []
@@ -1824,7 +1887,7 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
             "blocked_words": blocked_words_for_generation(db, excluded_tag_ids),
         }
     generation_seed = normalize_seed(payload.seed)
-    generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data, generation_seed)
+    generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data, generation_seed, payload.generation_options)
     generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
     generated.metadata["excluded_tag_slugs"] = [tag.slug for tag in excluded_tags]
     generated.metadata["seed"] = generation_seed

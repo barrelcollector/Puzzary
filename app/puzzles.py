@@ -8,6 +8,19 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class GenerationField:
+    name: str
+    label: str
+    field_type: str = "text"
+    default: Any = ""
+    required: bool = False
+    help_text: str = ""
+    options: tuple[dict[str, str], ...] = ()
+    minimum: int | None = None
+    maximum: int | None = None
+
+
+@dataclass(frozen=True)
 class GeneratedPuzzle:
     title: str
     prompt: str
@@ -22,7 +35,7 @@ class GeneratedPuzzle:
 class PuzzleType:
     slug: str
     label: str
-    generator: Callable[[str, str, Any, str | None], GeneratedPuzzle]
+    generator: Callable[[str, str, Any, str | None, dict[str, Any] | None], GeneratedPuzzle]
     source_builder: Callable[[Any, str, set[int] | None], Any]
     answer_checker: Callable[[str, dict], tuple[bool, int, int]]
     progress_normalizer: Callable[[Any, dict], dict]
@@ -34,6 +47,7 @@ class PuzzleType:
     source_requirements: tuple[str, ...] = ()
     supports_gimmes: bool = False
     gimme_modes: tuple[str, ...] = ()
+    generation_fields: tuple[GenerationField, ...] = ()
 
 
 PUZZLE_TYPES: dict[str, PuzzleType] = {}

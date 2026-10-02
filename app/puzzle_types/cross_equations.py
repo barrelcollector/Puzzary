@@ -5,7 +5,7 @@ import random
 from itertools import product
 from typing import Any
 
-from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, register_puzzle_type
 
 
 DigitGrid = list[list[int]]
@@ -35,7 +35,13 @@ def apply_operator(left: int, right: int, operator: str) -> int | None:
     return value if 1 <= value <= 9 else None
 
 
-def allowed_operators(difficulty: str) -> list[str]:
+def allowed_operators(difficulty: str, operator_set: str = "") -> list[str]:
+    if operator_set == "add_subtract":
+        return ["+", "-"]
+    if operator_set == "add_subtract_multiply":
+        return ["+", "-", "x"]
+    if operator_set == "all":
+        return ["+", "-", "x", "/"]
     if difficulty == "hard":
         return ["+", "-", "x", "/"]
     if difficulty == "medium":
@@ -43,8 +49,8 @@ def allowed_operators(difficulty: str) -> list[str]:
     return ["+", "-"]
 
 
-def find_solution(rng: random.Random, difficulty: str) -> tuple[DigitGrid, OpGrid]:
-    operators = allowed_operators(difficulty)
+def find_solution(rng: random.Random, difficulty: str, operator_set: str = "") -> tuple[DigitGrid, OpGrid]:
+    operators = allowed_operators(difficulty, operator_set)
     fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
     fallback_ops = [["+", "+", "+"], ["+", "", "+"], ["+", "+", "+"]]
 
@@ -105,13 +111,18 @@ def count_solutions(ops: OpGrid, givens: dict[str, str], limit: int = 2) -> int:
     return found
 
 
-def find_unique_puzzle(rng: random.Random, difficulty: str) -> tuple[DigitGrid, OpGrid, dict[str, str]]:
+def find_unique_puzzle(
+    rng: random.Random,
+    difficulty: str,
+    operator_set: str = "",
+    requested_given_count: int | None = None,
+) -> tuple[DigitGrid, OpGrid, dict[str, str]]:
     fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
     fallback_ops = [["+", "+", "+"], ["+", "", "+"], ["+", "+", "+"]]
 
     for _attempt in range(12000):
-        solution, ops = find_solution(rng, difficulty)
-        givens = given_cells(solution, difficulty, rng)
+        solution, ops = find_solution(rng, difficulty, operator_set)
+        givens = given_cells(solution, difficulty, rng, requested_given_count)
         if count_solutions(ops, givens) == 1:
             return solution, ops, givens
 
@@ -125,8 +136,14 @@ def find_unique_puzzle(rng: random.Random, difficulty: str) -> tuple[DigitGrid, 
     return fallback_digits, fallback_ops, fallback_givens
 
 
-def given_cells(solution: DigitGrid, difficulty: str, rng: random.Random) -> dict[str, str]:
-    given_count = {"easy": 4, "medium": 3, "hard": 2}.get(difficulty, 3)
+def given_cells(
+    solution: DigitGrid,
+    difficulty: str,
+    rng: random.Random,
+    requested_count: int | None = None,
+) -> dict[str, str]:
+    given_count = requested_count or {"easy": 4, "medium": 3, "hard": 2}.get(difficulty, 3)
+    given_count = max(2, min(8, given_count))
     coords = DIGIT_COORDS[:]
     rng.shuffle(coords)
     return {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in coords[:given_count]}
@@ -254,10 +271,28 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return matched, len(expected)
 
 
-def generate(theme: str, difficulty: str, _source_data: Any = None, seed: str | None = None) -> GeneratedPuzzle:
+def integer_option(options: dict[str, Any], key: str) -> int | None:
+    try:
+        return int(str(options.get(key, "")).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def generate(
+    theme: str,
+    difficulty: str,
+    _source_data: Any = None,
+    seed: str | None = None,
+    generation_options: dict[str, Any] | None = None,
+) -> GeneratedPuzzle:
     generation_seed = seed or f"cross_equations:{theme}:{difficulty}"
     rng = random.Random(generation_seed)
-    solution, ops, givens = find_unique_puzzle(rng, difficulty)
+    generation_options = generation_options or {}
+    operator_set = str(generation_options.get("operator_set") or "").strip()
+    if operator_set == "difficulty_default":
+        operator_set = ""
+    given_count = integer_option(generation_options, "given_count")
+    solution, ops, givens = find_unique_puzzle(rng, difficulty, operator_set, given_count)
     answer_map = {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in DIGIT_COORDS}
     equation_list = equations(solution, ops)
     payload = {
@@ -291,6 +326,10 @@ def generate(theme: str, difficulty: str, _source_data: Any = None, seed: str | 
             "givens": len(givens),
             "blanks": blank_count,
             "operators": sorted({operator for row in ops for operator in row if operator}),
+            "generation_options": {
+                "operator_set": operator_set or "difficulty_default",
+                "given_count": len(givens),
+            },
         },
     )
 
@@ -307,5 +346,29 @@ register_puzzle_type(
         description="A crossing arithmetic grid where rows and columns share number cells.",
         supports_print=True,
         supports_web_play=True,
+        generation_fields=(
+            GenerationField(
+                name="operator_set",
+                label="Operators",
+                field_type="select",
+                default="difficulty_default",
+                help_text="Choose which math operators can appear in the grid.",
+                options=(
+                    {"value": "difficulty_default", "label": "Use difficulty default"},
+                    {"value": "add_subtract", "label": "Add and subtract"},
+                    {"value": "add_subtract_multiply", "label": "Add, subtract, multiply"},
+                    {"value": "all", "label": "Add, subtract, multiply, divide"},
+                ),
+            ),
+            GenerationField(
+                name="given_count",
+                label="Starter numbers",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose; valid range is 2 to 8.",
+                minimum=2,
+                maximum=8,
+            ),
+        ),
     )
 )

@@ -112,25 +112,30 @@
       <section class="puzzle-head">
         <div>
           <h1>Generate</h1>
-          <p class="muted">Create puzzles from reusable word banks.</p>
+          <p class="muted">Create puzzles using the setup fields declared by each puzzle module.</p>
         </div>
       </section>
-      <form class="panel narrow-panel" method="post" action="/admin/generate">
+      <script type="application/json" id="generation-schemas">{{ generation_schemas | tojson }}</script>
+      <form class="panel narrow-panel generation-form" method="post" action="/admin/generate" data-generation-form>
         <label>
           Puzzle type
-          <select name="puzzle_type">
+          <select name="puzzle_type" data-puzzle-type>
             {% for puzzle_type in puzzle_types %}
               <option value="{{ puzzle_type.slug }}">{{ puzzle_type.label }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>
+        <label data-source-group="word_bank">
           Word bank
-          <select name="bank_id" required>
+          <select name="bank_id">
             {% for bank in word_banks %}
               <option value="{{ bank.id }}">{{ bank.name }}</option>
             {% endfor %}
           </select>
+        </label>
+        <label data-source-group="theme">
+          Puzzle theme
+          <input name="theme" value="daily_stripe" placeholder="Daily Stripe">
         </label>
         <label>
           Difficulty
@@ -145,6 +150,7 @@
           <input name="seed" placeholder="Blank makes a new layout">
         </label>
         <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
+        <div data-generation-fields></div>
         <label>
           Category
           <select name="category_id">
@@ -164,7 +170,7 @@
             {% endfor %}
           </div>
         </fieldset>
-        <fieldset>
+        <fieldset data-source-group="word_bank">
           <legend>Exclude words with tags</legend>
           <div class="check-list">
             {% for tag in assignable_tags %}
@@ -751,4 +757,7 @@
     {% endif %}
   </div>
 </section>
+{% endblock %}
+{% block scripts %}
+  <script src="/static/generation-form.js?v=1"></script>
 {% endblock %}

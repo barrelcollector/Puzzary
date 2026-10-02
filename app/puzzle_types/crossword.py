@@ -195,7 +195,13 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return found_count, expected_count
 
 
-def generate(theme: str, difficulty: str, source_data: list[dict] | None = None, seed: str | None = None) -> GeneratedPuzzle:
+def generate(
+    theme: str,
+    difficulty: str,
+    source_data: list[dict] | None = None,
+    seed: str | None = None,
+    _generation_options: dict[str, Any] | None = None,
+) -> GeneratedPuzzle:
     raw_entries = source_data if source_data is not None else [
         {"word": word, "clue": f"Word from {theme.replace('_', ' ')}."}
         for word in words_for_theme(theme, difficulty)

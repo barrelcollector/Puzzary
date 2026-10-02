@@ -13,6 +13,7 @@ class PuzzleGenerateRequest(BaseModel):
     difficulty: str = "easy"
     excluded_tag_ids: list[int] = Field(default_factory=list)
     seed: str | None = None
+    generation_options: dict = Field(default_factory=dict)
 
 
 class PuzzleAttemptCreate(BaseModel):
