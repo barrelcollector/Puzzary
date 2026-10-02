@@ -119,6 +119,23 @@
         {% endfor %}
       </div>
     </section>
+  {% elif print_payload.kind == "cross_equations" %}
+    <section class="print-cross-equations">
+      <div class="print-cross-equations-grid">
+        {% for row in print_payload.cells %}
+          {% for cell in row %}
+            {% if cell.type == "number" %}
+              <span class="cross-equations-cell number-cell {% if cell.given %}given{% endif %}">{{ cell.value if cell.given else "" }}</span>
+            {% elif cell.type == "symbol" %}
+              <span class="cross-equations-cell symbol-cell">{{ cell.value }}</span>
+            {% else %}
+              <span class="cross-equations-cell spacer-cell"></span>
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+      </div>
+      <p>{{ puzzle.prompt }}</p>
+    </section>
   {% else %}
     <section class="print-generic">
       <p>{{ puzzle.prompt }}</p>

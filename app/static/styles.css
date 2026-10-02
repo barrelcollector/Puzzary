@@ -785,6 +785,113 @@ legend {
   background: #f4d1ca;
 }
 
+.cross-equations-play {
+  display: grid;
+  gap: 14px;
+}
+
+.cross-equations-grid,
+.print-cross-equations-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 52px));
+  width: fit-content;
+  max-width: 100%;
+  margin: 18px 0;
+  border: 2px solid var(--ink);
+  background: white;
+}
+
+.cross-equations-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  margin: 0;
+  gap: 0;
+  background: white;
+  border: 1px solid var(--ink);
+  border-right-width: 0;
+  border-bottom-width: 0;
+  font-weight: 850;
+}
+
+.cross-equations-cell:nth-child(5n) {
+  border-right-width: 1px;
+}
+
+.cross-equations-cell:nth-child(n + 21) {
+  border-bottom-width: 1px;
+}
+
+.cross-equations-cell.number-cell {
+  background: #fbfbf8;
+}
+
+.cross-equations-cell.number-cell.given,
+.print-cross-equations-grid .number-cell.given {
+  background: #eeeeea;
+}
+
+.cross-equations-cell.symbol-cell {
+  color: var(--muted);
+  background: white;
+  font-size: 22px;
+}
+
+.cross-equations-cell.spacer-cell {
+  background: transparent;
+  border-color: transparent;
+}
+
+.cross-equations-cell input {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  font-size: clamp(18px, 4vw, 26px);
+  font-weight: 850;
+  background: transparent;
+}
+
+.cross-equations-cell input:focus {
+  outline: 2px solid #3c8f7a;
+  outline-offset: -2px;
+}
+
+.cross-equations-cell input:disabled {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.cross-equations-cell.correct {
+  background: #dff3ed;
+}
+
+.cross-equations-cell.incorrect {
+  background: #f4d1ca;
+}
+
+.equation-list div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.equation-list span {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fbfbf8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .clue-board {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
