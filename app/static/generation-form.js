@@ -40,6 +40,7 @@
     }
     control.name = `gen_${field.name}`;
     control.required = Boolean(field.required);
+    control.dataset.summaryLabel = field.label;
     return control;
   }
 
@@ -47,7 +48,15 @@
     const target = form.querySelector("[data-generation-fields]");
     if (!target) return;
     target.innerHTML = "";
-    (schema.generation_fields || []).forEach((field) => {
+    const fields = schema.generation_fields || [];
+    if (fields.length === 0) {
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = "This puzzle type has no extra setup options yet.";
+      target.appendChild(note);
+      return;
+    }
+    fields.forEach((field) => {
       const label = document.createElement("label");
       label.textContent = field.label;
       label.appendChild(fieldControl(field));
@@ -61,6 +70,81 @@
     });
   }
 
+  function selectedText(control) {
+    if (!control) return "";
+    if (control.tagName === "SELECT") {
+      return control.selectedOptions.length ? control.selectedOptions[0].textContent.trim() : "";
+    }
+    return control.value.trim();
+  }
+
+  function checkedLabels(form, name) {
+    return Array.from(form.querySelectorAll(`input[name="${name}"]:checked:not(:disabled)`))
+      .map((input) => input.closest("label") ? input.closest("label").textContent.trim() : input.value);
+  }
+
+  function addSummary(summary, label, value) {
+    if (!summary || !value) return;
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const detail = document.createElement("dd");
+    detail.textContent = value;
+    summary.append(term, detail);
+  }
+
+  function renderSummary(form) {
+    const summary = form.querySelector("[data-generation-summary]");
+    if (!summary) return;
+    summary.innerHTML = "";
+    const typeSelect = form.querySelector("[data-puzzle-type]");
+    const schema = schemas[typeSelect ? typeSelect.value : ""] || {};
+    const needsWordBank = Boolean(schema.needs_word_bank);
+    addSummary(summary, "Puzzle type", selectedText(typeSelect));
+    addSummary(
+      summary,
+      needsWordBank ? "Word bank" : "Puzzle theme",
+      selectedText(form.querySelector(needsWordBank ? '[name="bank_id"], select[name="theme"]' : '[name="theme"]:not(:disabled)')),
+    );
+    addSummary(summary, "Difficulty", selectedText(form.querySelector('select[name="difficulty"]')));
+    addSummary(summary, "Seed", selectedText(form.querySelector('input[name="seed"]')) || "Fresh random layout");
+    form.querySelectorAll('[name^="gen_"]:not(:disabled)').forEach((control) => {
+      addSummary(summary, control.dataset.summaryLabel || control.name.replace(/^gen_/, ""), selectedText(control) || "Default");
+    });
+    addSummary(summary, "Category", selectedText(form.querySelector('select[name="category_id"]')));
+    addSummary(summary, "Tags", checkedLabels(form, "tag_ids").join(", "));
+    addSummary(summary, "Excluded word tags", checkedLabels(form, "excluded_tag_ids").join(", "));
+  }
+
+  function validateStep(step) {
+    const controls = Array.from(step.querySelectorAll("input, select, textarea")).filter((control) => !control.disabled);
+    for (const control of controls) {
+      if (!control.checkValidity()) {
+        control.reportValidity();
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function showStep(form, index) {
+    const steps = Array.from(form.querySelectorAll("[data-wizard-step]"));
+    const indicators = Array.from(form.querySelectorAll("[data-step-indicator]"));
+    const safeIndex = Math.max(0, Math.min(index, steps.length - 1));
+    steps.forEach((step, stepIndex) => step.classList.toggle("is-hidden", stepIndex !== safeIndex));
+    indicators.forEach((indicator, stepIndex) => {
+      indicator.classList.toggle("active", stepIndex === safeIndex);
+      indicator.classList.toggle("complete", stepIndex < safeIndex);
+    });
+    form.dataset.currentStep = String(safeIndex);
+    const backButton = form.querySelector("[data-wizard-back]");
+    const nextButton = form.querySelector("[data-wizard-next]");
+    const submitButton = form.querySelector("[data-wizard-submit]");
+    if (backButton) backButton.disabled = safeIndex === 0;
+    if (nextButton) nextButton.classList.toggle("is-hidden", safeIndex === steps.length - 1);
+    if (submitButton) submitButton.classList.toggle("is-hidden", safeIndex !== steps.length - 1);
+    if (safeIndex === steps.length - 1) renderSummary(form);
+  }
+
   function updateForm(form) {
     const typeSelect = form.querySelector("[data-puzzle-type]");
     const schema = schemas[typeSelect ? typeSelect.value : ""] || {};
@@ -68,6 +152,7 @@
     form.querySelectorAll('[data-source-group="word_bank"]').forEach((group) => setGroupVisible(group, needsWordBank));
     form.querySelectorAll('[data-source-group="theme"]').forEach((group) => setGroupVisible(group, !needsWordBank));
     renderFields(form, schema);
+    renderSummary(form);
   }
 
   forms.forEach((form) => {
@@ -75,7 +160,32 @@
       input.setAttribute("data-required-when-visible", "true");
     });
     updateForm(form);
+    showStep(form, 0);
+
     const typeSelect = form.querySelector("[data-puzzle-type]");
-    if (typeSelect) typeSelect.addEventListener("change", () => updateForm(form));
+    if (typeSelect) {
+      typeSelect.addEventListener("change", () => {
+        updateForm(form);
+        showStep(form, Number(form.dataset.currentStep || 0));
+      });
+    }
+
+    const nextButton = form.querySelector("[data-wizard-next]");
+    if (nextButton) {
+      nextButton.addEventListener("click", () => {
+        const steps = Array.from(form.querySelectorAll("[data-wizard-step]"));
+        const currentStep = Number(form.dataset.currentStep || 0);
+        if (!validateStep(steps[currentStep])) return;
+        showStep(form, currentStep + 1);
+      });
+    }
+
+    const backButton = form.querySelector("[data-wizard-back]");
+    if (backButton) {
+      backButton.addEventListener("click", () => showStep(form, Number(form.dataset.currentStep || 0) - 1));
+    }
+
+    form.addEventListener("input", () => renderSummary(form));
+    form.addEventListener("change", () => renderSummary(form));
   });
 })();

@@ -116,72 +116,108 @@
         </div>
       </section>
       <script type="application/json" id="generation-schemas">{{ generation_schemas | tojson }}</script>
-      <form class="panel narrow-panel generation-form" method="post" action="/admin/generate" data-generation-form>
-        <label>
-          Puzzle type
-          <select name="puzzle_type" data-puzzle-type>
-            {% for puzzle_type in puzzle_types %}
-              <option value="{{ puzzle_type.slug }}">{{ puzzle_type.label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label data-source-group="word_bank">
-          Word bank
-          <select name="bank_id">
-            {% for bank in word_banks %}
-              <option value="{{ bank.id }}">{{ bank.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label data-source-group="theme">
-          Puzzle theme
-          <input name="theme" value="daily_stripe" placeholder="Daily Stripe">
-        </label>
-        <label>
-          Difficulty
-          <select name="difficulty">
-            <option value="easy">Easy</option>
-            <option value="medium">Medium</option>
-            <option value="hard">Hard</option>
-          </select>
-        </label>
-        <label>
-          Seed
-          <input name="seed" placeholder="Blank makes a new layout">
-        </label>
-        <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
-        <div data-generation-fields></div>
-        <label>
-          Category
-          <select name="category_id">
-            <option value="0">Use source category</option>
-            {% for category in categories %}
-              <option value="{{ category.id }}">{{ category.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <fieldset>
-          <legend>Tags</legend>
-          <div class="check-list">
-            {% for tag in assignable_tags %}
-              <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
-            {% else %}
-              <small>No tags yet.</small>
-            {% endfor %}
-          </div>
-        </fieldset>
-        <fieldset data-source-group="word_bank">
-          <legend>Exclude words with tags</legend>
-          <div class="check-list">
-            {% for tag in assignable_tags %}
-              <label><input type="checkbox" name="excluded_tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
-            {% else %}
-              <small>No tags yet.</small>
-            {% endfor %}
-          </div>
-          <p class="muted">Archived and banned words are always skipped.</p>
-        </fieldset>
-        <button type="submit">Generate Puzzle</button>
+      <form class="panel narrow-panel generation-form generation-wizard" method="post" action="/admin/generate" data-generation-form data-generation-wizard>
+        <div class="wizard-steps" aria-label="Generate puzzle steps">
+          <span class="active" data-step-indicator="0">Type</span>
+          <span data-step-indicator="1">Source</span>
+          <span data-step-indicator="2">Options</span>
+          <span data-step-indicator="3">Publish</span>
+          <span data-step-indicator="4">Review</span>
+        </div>
+
+        <section class="wizard-panel" data-wizard-step>
+          <h2>Choose Puzzle Type</h2>
+          <p class="muted">The selected module decides what setup fields appear next.</p>
+          <label>
+            Puzzle type
+            <select name="puzzle_type" data-puzzle-type>
+              {% for puzzle_type in puzzle_types %}
+                <option value="{{ puzzle_type.slug }}">{{ puzzle_type.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </section>
+
+        <section class="wizard-panel is-hidden" data-wizard-step>
+          <h2>Choose Source</h2>
+          <p class="muted" data-source-group="word_bank">Pick the word bank this puzzle should draw from.</p>
+          <p class="muted" data-source-group="theme">This puzzle type does not need a word bank.</p>
+          <label data-source-group="word_bank">
+            Word bank
+            <select name="bank_id">
+              {% for bank in word_banks %}
+                <option value="{{ bank.id }}">{{ bank.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label data-source-group="theme">
+            Puzzle theme
+            <input name="theme" value="daily_stripe" placeholder="Daily Stripe">
+          </label>
+          <fieldset data-source-group="word_bank">
+            <legend>Exclude words with tags</legend>
+            <div class="check-list">
+              {% for tag in assignable_tags %}
+                <label><input type="checkbox" name="excluded_tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+            <p class="muted">Archived and banned words are always skipped.</p>
+          </fieldset>
+        </section>
+
+        <section class="wizard-panel is-hidden" data-wizard-step>
+          <h2>Puzzle Options</h2>
+          <label>
+            Difficulty
+            <select name="difficulty">
+              <option value="easy">Easy</option>
+              <option value="medium">Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+          </label>
+          <label>
+            Seed
+            <input name="seed" placeholder="Blank makes a new layout">
+          </label>
+          <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
+          <div data-generation-fields></div>
+        </section>
+
+        <section class="wizard-panel is-hidden" data-wizard-step>
+          <h2>Organize & Publish</h2>
+          <label>
+            Category
+            <select name="category_id">
+              <option value="0">Use source category</option>
+              {% for category in categories %}
+                <option value="{{ category.id }}">{{ category.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <fieldset>
+            <legend>Tags</legend>
+            <div class="check-list">
+              {% for tag in assignable_tags %}
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </section>
+
+        <section class="wizard-panel is-hidden" data-wizard-step>
+          <h2>Review & Generate</h2>
+          <dl class="wizard-summary" data-generation-summary></dl>
+        </section>
+
+        <div class="wizard-actions">
+          <button type="button" class="ghost-button" data-wizard-back>Back</button>
+          <button type="button" data-wizard-next>Next</button>
+          <button type="submit" data-wizard-submit>Generate Puzzle</button>
+        </div>
       </form>
     {% endif %}
 
@@ -759,5 +795,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=1"></script>
+  <script src="/static/generation-form.js?v=2"></script>
 {% endblock %}
