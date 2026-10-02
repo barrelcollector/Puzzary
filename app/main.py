@@ -1850,6 +1850,17 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     return serialize_puzzle(puzzle)
 
 
+@app.get("/api/puzzles/latest", response_model=PuzzleSummary)
+def get_latest_puzzle(printable: bool = False, db: Session = Depends(get_db)) -> PuzzleSummary:
+    puzzles = db.scalars(select(Puzzle).where(Puzzle.archived_at.is_(None)).order_by(desc(Puzzle.created_at))).all()
+    for puzzle in puzzles:
+        puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+        if printable and (puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only):
+            continue
+        return serialize_puzzle(puzzle)
+    raise HTTPException(status_code=404, detail="No printable puzzle found" if printable else "No puzzle found")
+
+
 @app.get("/api/puzzles/{puzzle_id}", response_model=PuzzleSummary)
 def get_puzzle(puzzle_id: str, db: Session = Depends(get_db)) -> PuzzleSummary:
     puzzle = db.get(Puzzle, puzzle_id)
