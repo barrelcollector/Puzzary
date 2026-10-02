@@ -658,7 +658,6 @@ def library(request: Request, db: Session = Depends(get_db)):
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(50)).all()
     puzzles = [puzzle for puzzle in puzzles if puzzle.archived_at is None]
     users = db.scalars(select(User).order_by(User.display_name)).all()
-    word_banks = word_bank_options(db)
     progress_rows = db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id)).all()
     progress_by_puzzle = {
         puzzle.id: {"found": 0, "total": progress_response(puzzle, user, None).expected_count}
@@ -678,7 +677,21 @@ def library(request: Request, db: Session = Depends(get_db)):
             "users": users,
             "current_user": user,
             "progress_by_puzzle": progress_by_puzzle,
-            "word_banks": word_banks,
+        },
+    )
+
+
+@app.get("/generate", response_class=HTMLResponse)
+def generate_page(request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    return templates.TemplateResponse(
+        "generate.html",
+        {
+            "request": request,
+            "current_user": user,
+            "word_banks": word_bank_options(db),
             "puzzle_types": list_puzzle_types(),
             "generation_schemas": puzzle_type_generation_schemas(),
         },

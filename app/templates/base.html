@@ -13,6 +13,7 @@
       <span class="tagline">A puzzle library for Daily Stripe</span>
       <span class="topbar-spacer"></span>
       {% if current_user %}
+        <a class="nav-link" href="/generate">Generate</a>
         {% if current_user.is_admin %}
           <a class="nav-link" href="/admin">Admin</a>
         {% endif %}
