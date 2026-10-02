@@ -1546,6 +1546,7 @@ def render_puzzle_print_page(
             "print_gimme_cells": printable_gimme_cells(puzzle),
             "print_gimme_words": printable_gimme_words(puzzle),
             "show_print_toolbar": show_toolbar,
+            "hide_app_chrome": not show_toolbar,
         },
     )
 

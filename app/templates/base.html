@@ -7,20 +7,22 @@
   <link rel="stylesheet" href="/static/styles.css?v=14">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="/library">Puzzary</a>
-    <span class="tagline">A puzzle library for Daily Stripe</span>
-    <span class="topbar-spacer"></span>
-    {% if current_user %}
-      {% if current_user.is_admin %}
-        <a class="nav-link" href="/admin">Admin</a>
+  {% if not hide_app_chrome %}
+    <header class="topbar">
+      <a class="brand" href="/library">Puzzary</a>
+      <span class="tagline">A puzzle library for Daily Stripe</span>
+      <span class="topbar-spacer"></span>
+      {% if current_user %}
+        {% if current_user.is_admin %}
+          <a class="nav-link" href="/admin">Admin</a>
+        {% endif %}
+        <span class="user-pill">{{ current_user.display_name }}</span>
+        <form method="post" action="/logout" class="logout-form">
+          <button type="submit" class="ghost-button">Log out</button>
+        </form>
       {% endif %}
-      <span class="user-pill">{{ current_user.display_name }}</span>
-      <form method="post" action="/logout" class="logout-form">
-        <button type="submit" class="ghost-button">Log out</button>
-      </form>
-    {% endif %}
-  </header>
+    </header>
+  {% endif %}
   <main class="page">
     {% block content %}{% endblock %}
   </main>
