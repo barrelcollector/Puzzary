@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+from itertools import product
 from typing import Any
 
 from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
@@ -70,6 +71,58 @@ def find_solution(rng: random.Random, difficulty: str) -> tuple[DigitGrid, OpGri
         )
 
     return fallback_digits, fallback_ops
+
+
+def derive_solution(a: int, b: int, d: int, e: int, ops: OpGrid) -> DigitGrid | None:
+    c = apply_operator(a, b, ops[0][0])
+    f = apply_operator(d, e, ops[0][1])
+    g = apply_operator(a, d, ops[1][0])
+    h = apply_operator(b, e, ops[1][1])
+    if None in (c, f, g, h):
+        return None
+
+    i_from_row = apply_operator(g, h, ops[0][2])
+    i_from_col = apply_operator(c, f, ops[1][2])
+    if i_from_row is None or i_from_row != i_from_col:
+        return None
+
+    return [[a, b, c], [d, e, f], [g, h, i_from_row]]
+
+
+def solution_matches_givens(solution: DigitGrid, givens: dict[str, str]) -> bool:
+    return all(str(solution[int(y) // 2][int(x) // 2]) == str(value) for key, value in givens.items() for x, y in [key.split(",", 1)])
+
+
+def count_solutions(ops: OpGrid, givens: dict[str, str], limit: int = 2) -> int:
+    found = 0
+    for a, b, d, e in product(range(1, 10), repeat=4):
+        solution = derive_solution(a, b, d, e, ops)
+        if solution is None or not solution_matches_givens(solution, givens):
+            continue
+        found += 1
+        if found >= limit:
+            return found
+    return found
+
+
+def find_unique_puzzle(rng: random.Random, difficulty: str) -> tuple[DigitGrid, OpGrid, dict[str, str]]:
+    fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
+    fallback_ops = [["+", "+", "+"], ["+", "", "+"], ["+", "+", "+"]]
+
+    for _attempt in range(12000):
+        solution, ops = find_solution(rng, difficulty)
+        givens = given_cells(solution, difficulty, rng)
+        if count_solutions(ops, givens) == 1:
+            return solution, ops, givens
+
+    fallback_givens = {
+        "0,0": "1",
+        "2,0": "2",
+        "0,2": "3",
+        "2,2": "1",
+        "4,2": "4",
+    }
+    return fallback_digits, fallback_ops, fallback_givens
 
 
 def given_cells(solution: DigitGrid, difficulty: str, rng: random.Random) -> dict[str, str]:
@@ -204,8 +257,7 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
 def generate(theme: str, difficulty: str, _source_data: Any = None, seed: str | None = None) -> GeneratedPuzzle:
     generation_seed = seed or f"cross_equations:{theme}:{difficulty}"
     rng = random.Random(generation_seed)
-    solution, ops = find_solution(rng, difficulty)
-    givens = given_cells(solution, difficulty, rng)
+    solution, ops, givens = find_unique_puzzle(rng, difficulty)
     answer_map = {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in DIGIT_COORDS}
     equation_list = equations(solution, ops)
     payload = {
