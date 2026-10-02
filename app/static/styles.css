@@ -698,6 +698,84 @@ legend {
   background: #f4d1ca;
 }
 
+.sudoku-play {
+  display: grid;
+  gap: 14px;
+}
+
+.sudoku-grid,
+.print-sudoku-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 44px));
+  width: fit-content;
+  max-width: 100%;
+  margin: 18px 0;
+  border: 2px solid var(--ink);
+  background: var(--ink);
+  gap: 0;
+}
+
+.sudoku-cell,
+.print-sudoku-grid span {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  background: white;
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.sudoku-cell:nth-child(3n),
+.print-sudoku-grid span:nth-child(3n) {
+  border-right: 2px solid var(--ink);
+}
+
+.sudoku-cell:nth-child(9n),
+.print-sudoku-grid span:nth-child(9n) {
+  border-right: 0;
+}
+
+.sudoku-cell:nth-child(n + 19):nth-child(-n + 27),
+.sudoku-cell:nth-child(n + 46):nth-child(-n + 54),
+.print-sudoku-grid span:nth-child(n + 19):nth-child(-n + 27),
+.print-sudoku-grid span:nth-child(n + 46):nth-child(-n + 54) {
+  border-bottom: 2px solid var(--ink);
+}
+
+.sudoku-cell input {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  font-size: clamp(18px, 4vw, 26px);
+  font-weight: 800;
+  background: transparent;
+}
+
+.sudoku-cell input:focus {
+  outline: 2px solid #3c8f7a;
+  outline-offset: -2px;
+}
+
+.sudoku-cell input:disabled,
+.print-sudoku-grid span.given {
+  color: var(--ink);
+  background: #eeeeea;
+  opacity: 1;
+  font-weight: 900;
+}
+
+.sudoku-cell.correct {
+  background: #dff3ed;
+}
+
+.sudoku-cell.incorrect {
+  background: #f4d1ca;
+}
+
 .clue-board {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

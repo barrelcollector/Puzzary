@@ -1,0 +1,34 @@
+<p>{{ puzzle.prompt }}</p>
+<div
+  class="sudoku-play"
+  data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
+  data-answers='{{ progress_answers | tojson }}'
+  data-solution='{{ puzzle.solution_payload.grid | tojson }}'
+>
+  <div class="sudoku-grid">
+    {% for row in puzzle.play_payload.grid %}
+      {% set y = loop.index0 %}
+      {% for value in row %}
+        {% set x = loop.index0 %}
+        {% set cell_key = x ~ ',' ~ y %}
+        <label class="sudoku-cell" data-x="{{ x }}" data-y="{{ y }}">
+          <input
+            aria-label="Row {{ y + 1 }}, column {{ x + 1 }}"
+            inputmode="numeric"
+            pattern="[1-9]"
+            maxlength="1"
+            autocomplete="off"
+            data-key="{{ cell_key }}"
+            value="{{ value if value else progress_answers[cell_key] | default('') }}"
+            {% if value %}disabled{% endif %}
+          >
+        </label>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <p class="muted" id="sudoku-status">Fill the grid with digits 1 through 9.</p>
+  <div class="action-row">
+    <button type="button" class="ghost-button" id="sudoku-check">Check</button>
+    <button type="button" class="ghost-button" id="sudoku-clear">Clear Grid</button>
+  </div>
+</div>

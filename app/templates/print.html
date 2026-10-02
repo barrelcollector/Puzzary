@@ -109,6 +109,16 @@
         </div>
       {% endfor %}
     </section>
+  {% elif print_payload.kind == "sudoku" %}
+    <section class="print-sudoku">
+      <div class="print-sudoku-grid">
+        {% for row in print_payload.grid %}
+          {% for value in row %}
+            <span class="{% if value %}given{% endif %}">{{ value if value else "" }}</span>
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </section>
   {% else %}
     <section class="print-generic">
       <p>{{ puzzle.prompt }}</p>
