@@ -810,22 +810,13 @@ legend {
   margin: 0;
   gap: 0;
   background: white;
-  border: 1px solid var(--ink);
-  border-right-width: 0;
-  border-bottom-width: 0;
+  border: 0;
   font-weight: 850;
-}
-
-.cross-equations-cell:nth-child(5n) {
-  border-right-width: 1px;
-}
-
-.cross-equations-cell:nth-child(n + 21) {
-  border-bottom-width: 1px;
 }
 
 .cross-equations-cell.number-cell {
   background: #fbfbf8;
+  border: 1px solid var(--ink);
 }
 
 .cross-equations-cell.number-cell.given,
