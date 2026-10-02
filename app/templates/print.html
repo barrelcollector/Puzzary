@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Print {{ puzzle.title }} - Puzzary{% endblock %}
 {% block content %}
-<section class="print-toolbar">
-  <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Back to puzzle</a>
-  <button type="button" class="button-link print-button" onclick="window.print()">Print</button>
-</section>
+{% if show_print_toolbar %}
+  <section class="print-toolbar">
+    <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Back to puzzle</a>
+    <button type="button" class="button-link print-button" onclick="window.print()">Print</button>
+  </section>
+{% endif %}
 
 <article class="print-sheet">
   <header class="print-header">

@@ -1514,6 +1514,21 @@ def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(ge
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    return render_puzzle_print_page(puzzle_id, request, db, user, show_toolbar=True)
+
+
+@app.get("/puzzles/{puzzle_id}/print/render", response_class=HTMLResponse)
+def puzzle_print_render_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    return render_puzzle_print_page(puzzle_id, request, db, None, show_toolbar=False)
+
+
+def render_puzzle_print_page(
+    puzzle_id: str,
+    request: Request,
+    db: Session,
+    user: User | None,
+    show_toolbar: bool,
+) -> HTMLResponse:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -1530,6 +1545,7 @@ def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(ge
             "print_payload": puzzle.print_payload or {},
             "print_gimme_cells": printable_gimme_cells(puzzle),
             "print_gimme_words": printable_gimme_words(puzzle),
+            "show_print_toolbar": show_toolbar,
         },
     )
 
