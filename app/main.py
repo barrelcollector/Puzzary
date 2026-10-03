@@ -118,8 +118,17 @@ def local_datetime_label(value: datetime | None) -> str:
     return value.astimezone(app_timezone()).strftime("%Y-%m-%d %I:%M %p %Z")
 
 
+def default_auto_archive_at() -> datetime:
+    return utcnow() + timedelta(hours=24)
+
+
+def default_auto_archive_value() -> str:
+    return local_datetime_value(default_auto_archive_at())
+
+
 templates.env.globals["local_datetime_value"] = local_datetime_value
 templates.env.globals["local_datetime_label"] = local_datetime_label
+templates.env.globals["default_auto_archive_value"] = default_auto_archive_value
 templates.env.globals["puzzary_timezone"] = PUZZARY_TIMEZONE
 
 
@@ -2538,6 +2547,7 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session) -> PuzzleS
         play_payload=generated.play_payload,
         solution_payload=generated.solution_payload,
         puzzle_metadata=generated.metadata,
+        auto_archive_at=default_auto_archive_at(),
     )
     db.add(puzzle)
     db.flush()

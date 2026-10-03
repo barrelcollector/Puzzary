@@ -147,6 +147,7 @@
     addSummary(summary, "Category", selectedText(form.querySelector('select[name="category_id"]')));
     addSummary(summary, "Tags", checkedLabels(form, "tag_ids").join(", "));
     addSummary(summary, "Excluded word tags", checkedLabels(form, "excluded_tag_ids").join(", "));
+    addSummary(summary, "Auto-archive", selectedText(form.querySelector('input[name="auto_archive_at"]')) || "No automatic archive");
   }
 
   function validateStep(step) {
