@@ -64,28 +64,45 @@ http://localhost:8790/admin/users
 
 Admins can create users, assign the Admin role, activate/deactivate accounts, reset passwords with one-time setup links, and revoke active sessions. Puzzary prevents demoting or deactivating the last active administrator.
 
-Existing installations are migrated in place. The oldest existing user becomes an admin if no admin exists. If the first admin does not have a password yet, Puzzary writes a one-time setup link to:
+Fresh installations and existing databases always have a default admin account:
 
 ```text
-/data/bootstrap-admin-setup.txt
+username: admin
+password: admin
 ```
 
-That setup link expires after 24 hours. If it expires, an existing admin can issue a new reset link from the Users admin page.
+Change that password after first login. Existing installations are migrated in place; the oldest existing user still becomes an admin if no admin exists.
+
+Admins can issue per-account API tokens from the Users page. Tokens are shown once, then stored only as hashes.
 
 ## API
+
+API requests require a token for an active user account. Send it as either:
+
+```text
+Authorization: Bearer pzy_...
+```
+
+or:
+
+```text
+X-Puzzary-Api-Token: pzy_...
+```
 
 Generate a puzzle:
 
 ```bash
 curl -X POST http://localhost:8790/api/puzzles/generate \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
   --data '{"puzzle_type":"word_search","theme":"daily_stripe","difficulty":"easy"}'
 ```
 
 Get a puzzle:
 
 ```bash
-curl http://localhost:8790/api/puzzles/{puzzle_id}
+curl http://localhost:8790/api/puzzles/{puzzle_id} \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN"
 ```
 
 Submit an answer:
@@ -93,7 +110,8 @@ Submit an answer:
 ```bash
 curl -X POST http://localhost:8790/api/puzzles/{puzzle_id}/attempts \
   -H "Content-Type: application/json" \
-  --data '{"user_id":1,"answer":"MERIDIAN,PUZZLE,ZEBRA,PRINT,CLUE"}'
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{"answer":"MERIDIAN,PUZZLE,ZEBRA,PRINT,CLUE"}'
 ```
 
 Save logged-in word-search progress:
@@ -101,6 +119,7 @@ Save logged-in word-search progress:
 ```bash
 curl -X POST http://localhost:8790/api/puzzles/{puzzle_id}/progress \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
   --data '{"found_words":["MERIDIAN","PUZZLE"]}'
 ```
 

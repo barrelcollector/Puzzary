@@ -78,6 +78,13 @@ def ensure_schema() -> None:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_reset_token_hash ON users (reset_token_hash)"))
         if "reset_token_expires_at" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN reset_token_expires_at TIMESTAMP WITH TIME ZONE"))
+        if "api_token_hash" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN api_token_hash VARCHAR(255)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_api_token_hash ON users (api_token_hash)"))
+        if "api_token_prefix" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN api_token_prefix VARCHAR(12) NOT NULL DEFAULT ''"))
+        if "api_token_last_used_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN api_token_last_used_at TIMESTAMP WITH TIME ZONE"))
         if "session_version" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1"))
         if "last_login_at" not in user_columns:

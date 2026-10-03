@@ -813,6 +813,13 @@
           <input readonly value="{{ request.url_for('password_setup_page') }}?token={{ request.query_params.get('setup_token') }}">
         </section>
       {% endif %}
+      {% if request.query_params.get("api_token") %}
+        <section class="panel">
+          <h2>API token</h2>
+          <p class="muted">Copy this token for {{ request.query_params.get("api_user") }} now. Puzzary only shows it once.</p>
+          <input readonly value="{{ request.query_params.get('api_token') }}">
+        </section>
+      {% endif %}
 
       <section class="admin-grid two">
         <form class="panel" method="post" action="/admin/users">
@@ -849,6 +856,15 @@
                 </span>
                 <small>Last login: {{ managed_user.last_login_at or "Never" }}</small>
               </div>
+              <p class="muted">
+                API token:
+                {% if managed_user.api_token_prefix %}
+                  {{ managed_user.api_token_prefix }}...
+                  {% if managed_user.api_token_last_used_at %}/ last used {{ managed_user.api_token_last_used_at }}{% endif %}
+                {% else %}
+                  None
+                {% endif %}
+              </p>
               <label>
                 Display name
                 <input name="display_name" value="{{ managed_user.display_name }}" required>
@@ -865,6 +881,7 @@
                 <button type="submit">Save</button>
                 <button type="submit" formaction="/admin/users/{{ managed_user.id }}/reset-password" formnovalidate class="ghost-button">Reset password</button>
                 <button type="submit" formaction="/admin/users/{{ managed_user.id }}/revoke-sessions" formnovalidate class="ghost-button">Revoke sessions</button>
+                <button type="submit" formaction="/admin/users/{{ managed_user.id }}/api-token" formnovalidate class="ghost-button">Regenerate API token</button>
               </div>
             </form>
           {% else %}

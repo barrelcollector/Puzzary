@@ -413,6 +413,10 @@ def hash_secret(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def new_api_token() -> str:
+    return f"pzy_{secrets.token_urlsafe(32)}"
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), PASSWORD_ITERATIONS)
@@ -450,6 +454,22 @@ def issue_password_setup_token(db: Session, user: User) -> str:
     user.session_version = (user.session_version or 1) + 1
     db.commit()
     return token
+
+
+def issue_api_token(db: Session, user: User) -> str:
+    token = new_api_token()
+    user.api_token_hash = hash_secret(token)
+    user.api_token_prefix = token[:10]
+    user.api_token_last_used_at = None
+    db.commit()
+    return token
+
+
+def api_token_from_request(request: Request) -> str:
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    return request.headers.get("x-puzzary-api-token", "").strip()
 
 
 def setup_url(token: str) -> str:
@@ -502,6 +522,24 @@ def find_login_user(db: Session, username: str) -> User | None:
     )
 
 
+def api_user_from_token(request: Request, db: Session) -> User | None:
+    token = api_token_from_request(request)
+    if not token:
+        return None
+    user = db.scalar(select(User).where(User.api_token_hash == hash_secret(token), User.is_active == True))  # noqa: E712
+    if user is not None:
+        user.api_token_last_used_at = utcnow()
+        db.commit()
+    return user
+
+
+def require_api_user(request: Request, db: Session) -> User:
+    user = api_user_from_token(request, db) or current_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="API token required")
+    return user
+
+
 def active_admin_count(db: Session, excluding_user_id: int | None = None) -> int:
     users = db.scalars(select(User).where(User.is_admin == True, User.is_active == True)).all()  # noqa: E712
     return sum(1 for user in users if user.id != excluding_user_id)
@@ -552,7 +590,35 @@ def create_user_record(
     return user, setup_token
 
 
+def ensure_default_admin_account(db: Session) -> User:
+    admin = db.scalar(select(User).where(User.display_name == "admin"))
+    if admin is None:
+        admin = User(display_name="admin", is_admin=True, is_active=True, password_hash=hash_password("admin"))
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+        return admin
+    changed = False
+    if not admin.is_admin:
+        admin.is_admin = True
+        changed = True
+    if not admin.is_active:
+        admin.is_active = True
+        changed = True
+    if not admin.password_hash:
+        admin.password_hash = hash_password("admin")
+        admin.must_change_password = False
+        admin.reset_token_hash = None
+        admin.reset_token_expires_at = None
+        changed = True
+    if changed:
+        db.commit()
+        db.refresh(admin)
+    return admin
+
+
 def ensure_admin_user(db: Session) -> None:
+    ensure_default_admin_account(db)
     has_admin = db.scalar(select(User).where(User.is_admin == True))  # noqa: E712
     first_user = db.scalar(select(User).order_by(User.created_at, User.id))
     if first_user is None:
@@ -782,9 +848,7 @@ def require_admin_user(request: Request, db: Session) -> User | RedirectResponse
 
 
 def require_admin_api(request: Request, db: Session) -> User:
-    user = current_user(request, db)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Login required")
+    user = require_api_user(request, db)
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
@@ -1052,7 +1116,7 @@ async def web_generate_puzzle(
     generation_theme = word_bank_source_theme(selected_banks, theme) if needs_word_bank else (
         theme if (puzzle_type_config is None or puzzle_type_config.theme_mode != "none") else ""
     )
-    puzzle = create_puzzle(
+    puzzle = create_puzzle_record(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
             theme=generation_theme,
@@ -1326,6 +1390,21 @@ def admin_revoke_user_sessions(user_id: int, request: Request, db: Session = Dep
     return RedirectResponse(url="/admin/users?message=Sessions%20revoked.", status_code=303)
 
 
+@app.post("/admin/users/{user_id}/api-token")
+def admin_issue_user_api_token(user_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin_user(request, db)
+    if isinstance(admin, RedirectResponse):
+        return admin
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = issue_api_token(db, user)
+    return RedirectResponse(
+        url=f"/admin/users?api_user={quote(user.display_name)}&api_token={quote(token)}",
+        status_code=303,
+    )
+
+
 @app.post("/admin/puzzles/{puzzle_id}/archive")
 def admin_archive_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
     user = require_admin_user(request, db)
@@ -1413,7 +1492,7 @@ async def admin_generate_puzzle(
     elif puzzle_type_config.theme_mode != "none":
         generation_theme = slugify(theme) if theme.strip() else puzzle_type_config.label
     form = await request.form()
-    puzzle = create_puzzle(
+    puzzle = create_puzzle_record(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
             theme=generation_theme,
@@ -2086,7 +2165,7 @@ def web_attempt_puzzle(
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    submit_attempt(puzzle_id, PuzzleAttemptCreate(answer=answer, user_id=user.id), db)
+    submit_puzzle_attempt(puzzle_id, answer, user.id, db)
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
 
@@ -2330,8 +2409,7 @@ def api_delete_dictionary_definition(
     return {"deleted": True, "id": definition_id}
 
 
-@app.post("/api/puzzles/generate", response_model=PuzzleSummary)
-def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db)) -> PuzzleSummary:
+def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session) -> PuzzleSummary:
     puzzle_type = get_puzzle_type(payload.puzzle_type)
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
@@ -2390,8 +2468,15 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
     return serialize_puzzle(puzzle)
 
 
+@app.post("/api/puzzles/generate", response_model=PuzzleSummary)
+def create_puzzle(payload: PuzzleGenerateRequest, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
+    require_admin_api(request, db)
+    return create_puzzle_record(payload, db)
+
+
 @app.get("/api/puzzles/latest", response_model=PuzzleSummary)
-def get_latest_puzzle(printable: bool = False, db: Session = Depends(get_db)) -> PuzzleSummary:
+def get_latest_puzzle(request: Request, printable: bool = False, db: Session = Depends(get_db)) -> PuzzleSummary:
+    require_api_user(request, db)
     puzzles = db.scalars(select(Puzzle).where(Puzzle.archived_at.is_(None)).order_by(desc(Puzzle.created_at))).all()
     for puzzle in puzzles:
         puzzle_type = get_puzzle_type(puzzle.puzzle_type)
@@ -2402,7 +2487,8 @@ def get_latest_puzzle(printable: bool = False, db: Session = Depends(get_db)) ->
 
 
 @app.get("/api/puzzles/{puzzle_id}", response_model=PuzzleSummary)
-def get_puzzle(puzzle_id: str, db: Session = Depends(get_db)) -> PuzzleSummary:
+def get_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
+    require_api_user(request, db)
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -2411,9 +2497,7 @@ def get_puzzle(puzzle_id: str, db: Session = Depends(get_db)) -> PuzzleSummary:
 
 @app.get("/api/puzzles/{puzzle_id}/progress", response_model=PuzzleProgressResponse)
 def get_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleProgressResponse:
-    user = current_user(request, db)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Login required")
+    user = require_api_user(request, db)
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -2428,9 +2512,7 @@ def save_progress(
     request: Request,
     db: Session = Depends(get_db),
 ) -> PuzzleProgressResponse:
-    user = current_user(request, db)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Login required")
+    user = require_api_user(request, db)
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -2450,9 +2532,7 @@ def save_progress(
 
 @app.post("/api/puzzles/{puzzle_id}/reset", response_model=PuzzleProgressResponse)
 def reset_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleProgressResponse:
-    user = current_user(request, db)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Login required")
+    user = require_api_user(request, db)
     puzzle = reset_user_puzzle(puzzle_id, user.id, db)
     return progress_response(puzzle, user, None)
 
@@ -2461,7 +2541,19 @@ def reset_progress(puzzle_id: str, request: Request, db: Session = Depends(get_d
 def submit_attempt(
     puzzle_id: str,
     payload: PuzzleAttemptCreate,
+    request: Request,
     db: Session = Depends(get_db),
+) -> PuzzleAttemptResponse:
+    user = require_api_user(request, db)
+    user_id = payload.user_id if user.is_admin and payload.user_id is not None else user.id
+    return submit_puzzle_attempt(puzzle_id, payload.answer, user_id, db)
+
+
+def submit_puzzle_attempt(
+    puzzle_id: str,
+    answer: str,
+    user_id: int | None,
+    db: Session,
 ) -> PuzzleAttemptResponse:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
@@ -2475,8 +2567,8 @@ def submit_attempt(
     db.add(
         PuzzleAttempt(
             puzzle_id=puzzle_id,
-            user_id=payload.user_id,
-            answer=payload.answer,
+            user_id=user_id,
+            answer=answer,
             is_correct=is_correct,
             attempt_metadata={"matched_count": matched_count, "expected_count": expected_count},
         )
@@ -2493,12 +2585,15 @@ def submit_attempt(
 @app.post("/api/puzzles/{puzzle_id}/photos")
 def upload_photo(
     puzzle_id: str,
+    request: Request,
     user_id: int | None = Form(None),
     notes: str = Form(""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict[str, str | int]:
-    return save_photo(puzzle_id, file, notes, user_id, db)
+    user = require_api_user(request, db)
+    photo_user_id = user_id if user.is_admin and user_id is not None else user.id
+    return save_photo(puzzle_id, file, notes, photo_user_id, db)
 
 
 def reset_user_puzzle(puzzle_id: str, user_id: int, db: Session) -> Puzzle:
