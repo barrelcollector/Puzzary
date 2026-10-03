@@ -16,7 +16,7 @@
 
   {% if print_payload.kind == "word_search" %}
     <section class="print-word-search">
-      <div class="print-word-grid {% if print_payload.settings.print_style | default('boxed') == 'compact' %}compact{% endif %}" style="--grid-size: {{ print_payload.grid | length }}; --word-grid-font: {% if print_payload.grid | length >= 22 %}16px{% elif print_payload.grid | length >= 18 %}18px{% else %}20px{% endif %}">
+      <div class="print-word-grid {% if print_payload.settings.print_style | default('boxed') == 'compact' %}compact{% endif %}" style="--grid-size: {{ print_payload.grid | length }}; --word-grid-cell: {% if print_payload.grid | length >= 22 %}20px{% elif print_payload.grid | length >= 18 %}24px{% else %}28px{% endif %}; --word-grid-font: {% if print_payload.grid | length >= 22 %}16px{% elif print_payload.grid | length >= 18 %}18px{% else %}20px{% endif %}">
         {% for row in print_payload.grid %}
           {% set y = loop.index0 %}
           {% for letter in row %}

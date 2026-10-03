@@ -645,9 +645,9 @@ legend {
 
 .word-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--grid-size), var(--word-grid-cell, 32px));
   box-sizing: border-box;
-  width: min(100%, 520px);
+  width: fit-content;
   border: 2px solid var(--ink);
   background: var(--ink);
   gap: 1px;
@@ -661,6 +661,7 @@ legend {
   aspect-ratio: 1;
   background: white;
   color: var(--ink);
+  appearance: none;
   border: 0;
   border-radius: 0;
   box-sizing: border-box;
@@ -1197,9 +1198,10 @@ legend {
 
 .print-word-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--grid-size), var(--word-grid-cell, 22px));
   box-sizing: border-box;
-  width: min(100%, 560px);
+  width: fit-content;
+  max-width: 100%;
   margin: 0 0 18px;
   border: 2px solid var(--ink);
   background: var(--ink);
