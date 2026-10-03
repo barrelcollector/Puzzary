@@ -156,6 +156,7 @@
   function clearGuesses() {
     guesses = [];
     rejectedGuesses = [];
+    clearSelected();
     cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
     syncFoundWords();
   }
@@ -167,7 +168,7 @@
     if (existing) {
       existing.cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
       guesses = guesses.filter((guess) => guess.key !== key);
-      selected = [];
+      clearSelected();
       if (status) status.textContent = "Selection removed.";
       return;
     }
@@ -175,7 +176,7 @@
     if (rejected) {
       rejected.cells.forEach((cell) => cell.classList.remove("selected", "miss"));
       rejectedGuesses = rejectedGuesses.filter((guess) => guess.key !== key);
-      selected = [];
+      clearSelected();
       if (status) status.textContent = "Incorrect selection removed.";
       return;
     }
