@@ -125,8 +125,10 @@ def generate(
         "grid": solution,
         "givens": givens,
     }
+    title_prefix = theme.replace("_", " ").replace("-", " ").title().strip()
+    title = f"{title_prefix} Sudoku" if title_prefix else "Sudoku"
     return GeneratedPuzzle(
-        title=f"{theme.replace('_', ' ').title()} Sudoku",
+        title=title,
         prompt="Fill every row, column, and 3x3 box with digits 1 through 9.",
         print_payload=payload,
         play_payload=payload,
@@ -158,5 +160,6 @@ register_puzzle_type(
         description="A classic 9x9 number-placement puzzle.",
         supports_print=True,
         supports_web_play=True,
+        theme_mode="none",
     )
 )

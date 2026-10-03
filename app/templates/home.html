@@ -29,7 +29,7 @@
         <a class="row" href="/puzzles/{{ puzzle.id }}">
           <span>
             <strong>{{ puzzle.title }}</strong>
-            <small>{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</small>
+            <small>{{ puzzle.puzzle_type }}{% if puzzle.theme %} / {{ puzzle.theme }}{% endif %} / {{ puzzle.difficulty }}</small>
             {% if puzzle.id in progress_by_puzzle %}
               <small>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} complete</small>
             {% endif %}

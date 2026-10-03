@@ -4,7 +4,7 @@
 <section class="puzzle-head">
   <div>
     <h1>{{ puzzle.title }}</h1>
-    <p class="muted">{{ puzzle.puzzle_type }} / {{ puzzle.theme }} / {{ puzzle.difficulty }}</p>
+    <p class="muted">{{ puzzle.puzzle_type }}{% if puzzle.theme %} / {{ puzzle.theme }}{% endif %} / {{ puzzle.difficulty }}</p>
   </div>
   <div class="puzzle-head-actions">
     {% if puzzle_type_definition and puzzle_type_definition.supports_print and not puzzle_type_definition.digital_only %}

@@ -48,6 +48,7 @@ class PuzzleType:
     supports_gimmes: bool = False
     gimme_modes: tuple[str, ...] = ()
     generation_fields: tuple[GenerationField, ...] = ()
+    theme_mode: str = "free_text"
 
 
 PUZZLE_TYPES: dict[str, PuzzleType] = {}

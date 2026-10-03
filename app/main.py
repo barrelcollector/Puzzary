@@ -141,6 +141,7 @@ def puzzle_type_generation_schemas() -> dict[str, dict]:
             "label": puzzle_type.label,
             "description": puzzle_type.description,
             "needs_word_bank": needs_word_bank,
+            "theme_mode": puzzle_type.theme_mode,
             "source_requirements": list(puzzle_type.source_requirements),
             "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
         }
@@ -702,7 +703,7 @@ def generate_page(request: Request, db: Session = Depends(get_db)):
 async def web_generate_puzzle(
     request: Request,
     puzzle_type: str = Form("word_search"),
-    theme: str = Form("daily_stripe"),
+    theme: str = Form(""),
     difficulty: str = Form("easy"),
     db: Session = Depends(get_db),
 ):
@@ -710,10 +711,12 @@ async def web_generate_puzzle(
     if isinstance(user, RedirectResponse):
         return user
     form = await request.form()
+    puzzle_type_config = get_puzzle_type(puzzle_type)
+    generation_theme = theme if (puzzle_type_config is None or puzzle_type_config.theme_mode != "none") else ""
     puzzle = create_puzzle(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
-            theme=theme,
+            theme=generation_theme,
             difficulty=difficulty,
             generation_options=generation_options_from_form(form),
         ),
@@ -962,7 +965,11 @@ async def admin_generate_puzzle(
     bank = db.get(WordBank, bank_id) if needs_word_bank and bank_id else None
     if needs_word_bank and (bank is None or bank.archived_at is not None):
         raise HTTPException(status_code=404, detail="Word bank not found")
-    generation_theme = bank.slug if bank is not None else (slugify(theme) if theme.strip() else puzzle_type_config.label)
+    generation_theme = ""
+    if bank is not None:
+        generation_theme = bank.slug
+    elif puzzle_type_config.theme_mode != "none":
+        generation_theme = slugify(theme) if theme.strip() else puzzle_type_config.label
     form = await request.form()
     puzzle = create_puzzle(
         PuzzleGenerateRequest(

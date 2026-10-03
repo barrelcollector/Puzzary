@@ -141,7 +141,8 @@
         <section class="wizard-panel is-hidden" data-wizard-step>
           <h2>Choose Source</h2>
           <p class="muted" data-source-group="word_bank">Pick the word bank this puzzle should draw from.</p>
-          <p class="muted" data-source-group="theme">This puzzle type does not need a word bank.</p>
+          <p class="muted" data-source-group="theme">Name the source, subject, or theme for this generated puzzle.</p>
+          <p class="muted" data-source-group="none">This puzzle type does not need a source or theme.</p>
           <label data-source-group="word_bank">
             Word bank
             <select name="bank_id">
@@ -795,5 +796,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=2"></script>
+  <script src="/static/generation-form.js?v=3"></script>
 {% endblock %}

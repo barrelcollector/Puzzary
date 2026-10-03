@@ -99,12 +99,15 @@
     const typeSelect = form.querySelector("[data-puzzle-type]");
     const schema = schemas[typeSelect ? typeSelect.value : ""] || {};
     const needsWordBank = Boolean(schema.needs_word_bank);
+    const usesTheme = !needsWordBank && schema.theme_mode !== "none";
     addSummary(summary, "Puzzle type", selectedText(typeSelect));
-    addSummary(
-      summary,
-      needsWordBank ? "Word bank" : "Puzzle theme",
-      selectedText(form.querySelector(needsWordBank ? '[name="bank_id"], select[name="theme"]' : '[name="theme"]:not(:disabled)')),
-    );
+    if (needsWordBank) {
+      addSummary(summary, "Word bank", selectedText(form.querySelector('[name="bank_id"], select[name="theme"]')));
+    } else if (usesTheme) {
+      addSummary(summary, "Puzzle theme", selectedText(form.querySelector('[name="theme"]:not(:disabled)')));
+    } else {
+      addSummary(summary, "Source", "Not needed");
+    }
     addSummary(summary, "Difficulty", selectedText(form.querySelector('select[name="difficulty"]')));
     addSummary(summary, "Seed", selectedText(form.querySelector('input[name="seed"]')) || "Fresh random layout");
     form.querySelectorAll('[name^="gen_"]:not(:disabled)').forEach((control) => {
@@ -149,8 +152,10 @@
     const typeSelect = form.querySelector("[data-puzzle-type]");
     const schema = schemas[typeSelect ? typeSelect.value : ""] || {};
     const needsWordBank = Boolean(schema.needs_word_bank);
+    const usesTheme = !needsWordBank && schema.theme_mode !== "none";
     form.querySelectorAll('[data-source-group="word_bank"]').forEach((group) => setGroupVisible(group, needsWordBank));
-    form.querySelectorAll('[data-source-group="theme"]').forEach((group) => setGroupVisible(group, !needsWordBank));
+    form.querySelectorAll('[data-source-group="theme"]').forEach((group) => setGroupVisible(group, usesTheme));
+    form.querySelectorAll('[data-source-group="none"]').forEach((group) => setGroupVisible(group, !needsWordBank && !usesTheme));
     renderFields(form, schema);
     renderSummary(form);
   }

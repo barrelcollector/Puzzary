@@ -308,8 +308,10 @@ def generate(
         "equations": equation_list,
     }
     blank_count = len(answer_map) - len(givens)
+    title_prefix = theme.replace("_", " ").replace("-", " ").title().strip()
+    title = f"{title_prefix} Cross Equations" if title_prefix else "Cross Equations"
     return GeneratedPuzzle(
-        title=f"{theme.replace('_', ' ').replace('-', ' ').title()} Cross Equations",
+        title=title,
         prompt="Fill the shared number cells so every across and down equation is true.",
         print_payload=payload,
         play_payload=payload,
@@ -346,6 +348,7 @@ register_puzzle_type(
         description="A crossing arithmetic grid where rows and columns share number cells.",
         supports_print=True,
         supports_web_play=True,
+        theme_mode="none",
         generation_fields=(
             GenerationField(
                 name="operator_set",
