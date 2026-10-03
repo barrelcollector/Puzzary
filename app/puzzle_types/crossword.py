@@ -93,7 +93,6 @@ def clues_for_definition(definition: Any) -> list[str]:
 
 
 def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] | None = None) -> list[dict] | None:
-    count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
     entries = []
     for entry in word_entries or []:
         word = entry.get("word") if isinstance(entry, dict) else None
@@ -118,8 +117,6 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
                 "definition_id": definition_id,
             }
         )
-        if len(entries) >= count:
-            break
     return entries or None
 
 
@@ -208,6 +205,25 @@ def gimme_cells_from_entries(entries: list[dict]) -> dict[str, str]:
     return cells
 
 
+def gimme_cells_from_letters(entries: list[dict], count: int, rng: random.Random) -> dict[str, str]:
+    available_cells = []
+    seen = set()
+    for entry in entries:
+        dx = 1 if entry.get("direction") == "across" else 0
+        dy = 1 if entry.get("direction") == "down" else 0
+        answer = str(entry.get("answer", "")).upper()
+        for index, letter in enumerate(answer):
+            x = int(entry.get("x", 0)) + dx * index
+            y = int(entry.get("y", 0)) + dy * index
+            key = f"{x},{y}"
+            if key in seen:
+                continue
+            seen.add(key)
+            available_cells.append((key, letter))
+    rng.shuffle(available_cells)
+    return dict(available_cells[:count])
+
+
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     expected = {str(entry["answer"]).upper() for entry in solution_payload.get("entries", [])}
     supplied = normalize_answer(answer) | {
@@ -272,7 +288,13 @@ def generate(
         {"word": word, "clue": f"Word from {theme.replace('_', ' ')}."}
         for word in words_for_theme(theme, difficulty)
     ]
-    count = integer_option(generation_options, "answer_count", {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5), 3, 30)
+    default_answer_count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
+    answer_max = integer_option(generation_options, "answer_count", default_answer_count, 3, 30)
+    if "answer_count_min" in generation_options:
+        answer_min = integer_option(generation_options, "answer_count_min", min(default_answer_count, answer_max), 3, 30)
+    else:
+        answer_min = min(default_answer_count, answer_max)
+    answer_min = min(answer_min, answer_max)
     size = grid_size_option(generation_options, difficulty)
     clue_style = str(generation_options.get("clue_style", "mixed")).strip().lower()
     if clue_style not in {"mixed", "definition", "clue_tag", "easier", "more_cryptic"}:
@@ -287,11 +309,16 @@ def generate(
     if reveal_mode not in {"word", "letter", "whole_puzzle"}:
         reveal_mode = "word"
     auto_highlight_correct = bool_option(generation_options, "auto_highlight_correct", False)
-    entries = []
+    gimme_mode = str(generation_options.get("gimme_mode", "entries")).strip().lower()
+    if gimme_mode not in {"entries", "letters"}:
+        gimme_mode = "entries"
+    generation_seed = seed or f"crossword:{theme}:{difficulty}:{','.join(str(entry.get('word', '')) for entry in raw_entries)}"
+    rng = random.Random(generation_seed)
+    candidate_entries = []
     seen = set()
     for entry in raw_entries:
         word = "".join(ch for ch in str(entry.get("word", "")).upper() if ch.isalnum())
-        if len(word) < 3 or word in seen:
+        if len(word) < 3 or len(word) > size or word in seen:
             continue
         seen.add(word)
         primary_clue, clue_steps = styled_clues(
@@ -304,7 +331,7 @@ def generate(
             clue_style,
             more_clues_depth,
         )
-        entries.append(
+        candidate_entries.append(
             {
                 "word": word,
                 "clue": primary_clue,
@@ -312,14 +339,17 @@ def generate(
                 "definition_id": entry.get("definition_id"),
             }
         )
-        if len(entries) >= count:
-            break
+
+    if len(candidate_entries) < answer_min:
+        raise ValueError(f"Crossword generation needs at least {answer_min} usable words of 3+ characters.")
+    rng.shuffle(candidate_entries)
+    available_max = min(answer_max, len(candidate_entries))
+    requested_count = rng.randint(answer_min, available_max)
+    entries = candidate_entries[:requested_count]
 
     if len(entries) < 3:
         raise ValueError("Crossword generation needs at least three words of 3+ characters.")
 
-    generation_seed = seed or f"crossword:{theme}:{difficulty}:{','.join(item['word'] for item in entries)}"
-    rng = random.Random(generation_seed)
     grid: list[list[str | None]] = [[None for _ in range(size)] for _ in range(size)]
     placements: list[dict] = []
 
@@ -407,6 +437,8 @@ def generate(
 
     if len(placements) < 3:
         raise ValueError("Unable to place enough crossword words.")
+    if len(placements) < answer_min:
+        raise ValueError(f"Unable to place the minimum {answer_min} crossword words on the selected grid.")
 
     used_cells = [(x, y) for y, row in enumerate(grid) for x, value in enumerate(row) if value]
     min_x = max(0, min(x for x, _ in used_cells) - 1)
@@ -441,14 +473,16 @@ def generate(
         for item in sorted(placements, key=lambda item: (item["direction"], item["number"]))
     ]
     default_gimme_count = gimme_entry_count_for_difficulty(len(clue_entries), difficulty)
-    gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, max(0, len(clue_entries) - 1))
+    gimme_count_max = max(0, len(clue_entries) - 1) if gimme_mode == "entries" else sum(len(entry["answer"]) for entry in clue_entries)
+    gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, gimme_count_max)
+    sorted_clues = sorted(clue_entries, key=lambda item: (item["number"], item["direction"]))
     gimme_ids = {
         f"{entry['number']}:{entry['direction']}"
-        for entry in sorted(clue_entries, key=lambda item: (item["number"], item["direction"]))[:gimme_count]
-    }
+        for entry in sorted_clues[:gimme_count]
+    } if gimme_mode == "entries" else set()
     for entry in clue_entries:
         entry["gimme"] = f"{entry['number']}:{entry['direction']}" in gimme_ids
-    gimme_cells = gimme_cells_from_entries(clue_entries)
+    gimme_cells = gimme_cells_from_entries(clue_entries) if gimme_mode == "entries" else gimme_cells_from_letters(clue_entries, gimme_count, rng)
     play_cells = []
     print_cells = []
     for y, row in enumerate(cropped):
@@ -465,12 +499,15 @@ def generate(
     prompt = "Fill the crossword from the clues."
     settings = {
         "grid_size": size,
-        "answer_count": count,
+        "answer_count_min": answer_min,
+        "answer_count": len(clue_entries),
+        "answer_count_max": answer_max,
         "clue_style": clue_style,
         "more_clues_depth": more_clues_depth,
         "check_mode": check_mode,
         "auto_highlight_correct": auto_highlight_correct,
         "reveal_mode": reveal_mode,
+        "gimme_mode": gimme_mode,
     }
     play_payload = {
         "kind": "crossword",
@@ -488,7 +525,7 @@ def generate(
         "entries": clue_entries,
         "grid": solution_grid,
         "gimmes": {
-            "mode": "entries",
+            "mode": gimme_mode,
             "entries": [
                 {
                     "number": entry["number"],
@@ -517,7 +554,7 @@ def generate(
             "generator": "local.crossword.v1",
             "grid_size": len(play_cells),
             "seed": generation_seed,
-            "gimmes": {"mode": "entries", "count": gimme_count},
+            "gimmes": {"mode": gimme_mode, "count": gimme_count},
             "generation_options": settings | {"gimme_count": gimme_count},
         },
     )
@@ -537,7 +574,7 @@ register_puzzle_type(
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),
         supports_gimmes=True,
-        gimme_modes=("entries",),
+        gimme_modes=("entries", "letters"),
         generation_fields=(
             GenerationField(
                 name="grid_size",
@@ -564,8 +601,17 @@ register_puzzle_type(
                 maximum=25,
             ),
             GenerationField(
+                name="answer_count_min",
+                label="Minimum answers",
+                field_type="number",
+                default="",
+                help_text="Optional. Generation fails if fewer answers can be placed.",
+                minimum=3,
+                maximum=30,
+            ),
+            GenerationField(
                 name="answer_count",
-                label="Answer count",
+                label="Maximum answers",
                 field_type="number",
                 default="",
                 help_text="Optional. Leave blank to let difficulty choose.",
@@ -628,11 +674,21 @@ register_puzzle_type(
                 ),
             ),
             GenerationField(
+                name="gimme_mode",
+                label="Gimme mode",
+                field_type="select",
+                default="entries",
+                options=(
+                    {"value": "entries", "label": "Whole entries"},
+                    {"value": "letters", "label": "Individual letters"},
+                ),
+            ),
+            GenerationField(
                 name="gimme_count",
-                label="Gimme entries",
+                label="Gimme count",
                 field_type="number",
                 default="",
-                help_text="Optional. Number of complete entries to prefill.",
+                help_text="Optional. Number of entries or letters to prefill, depending on Gimme mode.",
                 minimum=0,
                 maximum=30,
             ),
