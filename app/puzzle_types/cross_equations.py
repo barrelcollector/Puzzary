@@ -50,6 +50,23 @@ def apply_operator(
     return value if result_min <= value <= result_max else None
 
 
+def operator_choices_from_options(options: dict[str, Any], difficulty: str) -> list[str]:
+    raw_choices = options.get("operators", [])
+    if isinstance(raw_choices, str):
+        raw_choices = [value.strip() for value in raw_choices.split(",") if value.strip()]
+    choices = [str(value).strip() for value in raw_choices if str(value).strip()]
+    valid = ["+", "-", "x", "/"]
+    selected = [operator for operator in valid if operator in choices]
+    if selected:
+        return selected
+
+    operator_set = str(options.get("operator_set") or "").strip()
+    if operator_set == "difficulty_default":
+        operator_set = ""
+    allow_division = bool_option(options, "allow_division", True)
+    return allowed_operators(difficulty, operator_set, allow_division)
+
+
 def allowed_operators(difficulty: str, operator_set: str = "", allow_division: bool = True) -> list[str]:
     if operator_set == "add_subtract":
         return ["+", "-"]
@@ -67,14 +84,13 @@ def allowed_operators(difficulty: str, operator_set: str = "", allow_division: b
 def find_solution(
     rng: random.Random,
     difficulty: str,
-    operator_set: str = "",
+    operators: list[str] | None = None,
     number_max: int = 9,
     result_min: int = 1,
     result_max: int = 9,
-    allow_division: bool = True,
     whole_number_division: bool = True,
 ) -> tuple[DigitGrid, OpGrid]:
-    operators = allowed_operators(difficulty, operator_set, allow_division)
+    operators = operators or allowed_operators(difficulty)
     fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
     fallback_ops = [["+", "+", "+"], ["+", "", "+"], ["+", "+", "+"]]
 
@@ -155,12 +171,11 @@ def count_solutions(
 def find_unique_puzzle(
     rng: random.Random,
     difficulty: str,
-    operator_set: str = "",
+    operators: list[str] | None = None,
     requested_given_count: int | None = None,
     number_max: int = 9,
     result_min: int = 1,
     result_max: int = 9,
-    allow_division: bool = True,
     whole_number_division: bool = True,
 ) -> tuple[DigitGrid, OpGrid, dict[str, str]]:
     fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
@@ -170,11 +185,10 @@ def find_unique_puzzle(
         solution, ops = find_solution(
             rng,
             difficulty,
-            operator_set,
+            operators,
             number_max,
             result_min,
             result_max,
-            allow_division,
             whole_number_division,
         )
         givens = given_cells(solution, difficulty, rng, requested_given_count)
@@ -373,9 +387,7 @@ def generate(
     generation_seed = seed or f"cross_equations:{theme}:{difficulty}"
     rng = random.Random(generation_seed)
     generation_options = generation_options or {}
-    operator_set = str(generation_options.get("operator_set") or "").strip()
-    if operator_set == "difficulty_default":
-        operator_set = ""
+    operators = operator_choices_from_options(generation_options, difficulty)
     grid_size = ranged_integer_option(generation_options, "grid_size", 3, 3, 5)
     custom_grid_size = integer_option(generation_options, "custom_grid_size")
     if str(generation_options.get("grid_size", "")).strip().lower() == "custom" and custom_grid_size is not None:
@@ -384,8 +396,9 @@ def generate(
         raise ValueError("Cross Equations currently supports the 3x3 equation grid. Larger patterns are tracked for a future generator.")
     number_max = number_max_option(generation_options)
     result_min, result_max = result_limits(generation_options, number_max)
-    allow_division = bool_option(generation_options, "allow_division", True)
     whole_number_division = bool_option(generation_options, "whole_number_division", True)
+    allow_multiple_operations = bool_option(generation_options, "allow_multiple_operations", False)
+    allow_multiple_equations = bool_option(generation_options, "allow_multiple_equations", False)
     difficulty_style = str(generation_options.get("difficulty_style", "balanced")).strip().lower()
     if difficulty_style not in {"more_givens", "balanced", "harder_operators"}:
         difficulty_style = "balanced"
@@ -394,17 +407,16 @@ def generate(
     else:
         requested_default = {"easy": 4, "medium": 3, "hard": 2}.get(difficulty, 3)
     given_count = integer_option(generation_options, "given_count") or requested_default
-    if difficulty_style == "harder_operators" and not operator_set:
-        operator_set = "all" if allow_division else "add_subtract_multiply"
+    if difficulty_style == "harder_operators" and "operators" not in generation_options and not generation_options.get("operator_set"):
+        operators = ["+", "-", "x", "/"]
     solution, ops, givens = find_unique_puzzle(
         rng,
         difficulty,
-        operator_set,
+        operators,
         given_count,
         number_max,
         result_min,
         result_max,
-        allow_division,
         whole_number_division,
     )
     answer_map = {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in DIGIT_COORDS}
@@ -417,8 +429,10 @@ def generate(
         "settings": {
             "grid_size": grid_size,
             "number_range": f"1-{number_max}",
-            "allow_division": allow_division,
+            "operators": operators,
             "whole_number_division": whole_number_division,
+            "allow_multiple_operations": allow_multiple_operations,
+            "allow_multiple_equations": allow_multiple_equations,
             "result_min": result_min,
             "result_max": result_max,
             "difficulty_style": difficulty_style,
@@ -452,12 +466,13 @@ def generate(
             "blanks": blank_count,
             "operators": sorted({operator for row in ops for operator in row if operator}),
             "generation_options": {
-                "operator_set": operator_set or "difficulty_default",
+                "operators": operators,
                 "given_count": len(givens),
                 "grid_size": grid_size,
                 "number_range": f"1-{number_max}",
-                "allow_division": allow_division,
                 "whole_number_division": whole_number_division,
+                "allow_multiple_operations": allow_multiple_operations,
+                "allow_multiple_equations": allow_multiple_equations,
                 "result_min": result_min,
                 "result_max": result_max,
                 "difficulty_style": difficulty_style,
@@ -501,16 +516,16 @@ register_puzzle_type(
                 maximum=5,
             ),
             GenerationField(
-                name="operator_set",
+                name="operators",
                 label="Operators",
-                field_type="select",
-                default="difficulty_default",
-                help_text="Choose which math operators can appear in the grid.",
+                field_type="checkboxes",
+                default=(),
+                help_text="Leave unchecked to use the difficulty default. Check specific operators to override it.",
                 options=(
-                    {"value": "difficulty_default", "label": "Use difficulty default"},
-                    {"value": "add_subtract", "label": "Add and subtract"},
-                    {"value": "add_subtract_multiply", "label": "Add, subtract, multiply"},
-                    {"value": "all", "label": "Add, subtract, multiply, divide"},
+                    {"value": "+", "label": "Add"},
+                    {"value": "-", "label": "Subtract"},
+                    {"value": "x", "label": "Multiply"},
+                    {"value": "/", "label": "Divide"},
                 ),
             ),
             GenerationField(
@@ -525,8 +540,8 @@ register_puzzle_type(
                 ),
             ),
             GenerationField(
-                name="allow_division",
-                label="Allow division",
+                name="whole_number_division",
+                label="Whole-number division",
                 field_type="select",
                 default="yes",
                 options=(
@@ -535,13 +550,23 @@ register_puzzle_type(
                 ),
             ),
             GenerationField(
-                name="whole_number_division",
-                label="Whole-number division",
+                name="allow_multiple_operations",
+                label="Allow multiple operations per equation",
                 field_type="select",
-                default="yes",
+                default="no",
                 options=(
-                    {"value": "yes", "label": "Yes"},
                     {"value": "no", "label": "No"},
+                    {"value": "yes", "label": "Yes"},
+                ),
+            ),
+            GenerationField(
+                name="allow_multiple_equations",
+                label="Allow multiple equations per row/column",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "No"},
+                    {"value": "yes", "label": "Yes"},
                 ),
             ),
             GenerationField(

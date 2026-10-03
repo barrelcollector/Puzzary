@@ -31,6 +31,23 @@
         if (String(option.value) === String(field.default || "")) optionElement.selected = true;
         control.appendChild(optionElement);
       });
+    } else if (field.field_type === "checkboxes") {
+      control = document.createElement("span");
+      control.className = "check-list";
+      const defaultValues = Array.isArray(field.default)
+        ? field.default.map(String)
+        : String(field.default || "").split(",").map((value) => value.trim()).filter(Boolean);
+      (field.options || []).forEach((option) => {
+        const optionLabel = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = `gen_${field.name}`;
+        input.value = option.value;
+        input.checked = defaultValues.includes(String(option.value));
+        input.dataset.summaryLabel = field.label;
+        optionLabel.append(input, option.label);
+        control.appendChild(optionLabel);
+      });
     } else {
       control = document.createElement("input");
       control.type = field.field_type === "number" ? "number" : "text";
@@ -38,9 +55,11 @@
       if (field.minimum !== null && field.minimum !== undefined) control.min = field.minimum;
       if (field.maximum !== null && field.maximum !== undefined) control.max = field.maximum;
     }
-    control.name = `gen_${field.name}`;
-    control.required = Boolean(field.required);
-    control.dataset.summaryLabel = field.label;
+    if (field.field_type !== "checkboxes") {
+      control.name = `gen_${field.name}`;
+      control.required = Boolean(field.required);
+      control.dataset.summaryLabel = field.label;
+    }
     return control;
   }
 
@@ -74,6 +93,9 @@
     if (!control) return "";
     if (control.tagName === "SELECT") {
       return Array.from(control.selectedOptions).map((option) => option.textContent.trim()).join(", ");
+    }
+    if (control.type === "checkbox") {
+      return control.checked ? (control.closest("label") ? control.closest("label").textContent.trim() : control.value) : "";
     }
     return control.value.trim();
   }
@@ -110,7 +132,16 @@
     }
     addSummary(summary, "Difficulty", selectedText(form.querySelector('select[name="difficulty"]')));
     addSummary(summary, "Seed", selectedText(form.querySelector('input[name="seed"]')) || "Fresh random layout");
+    const summarizedCheckboxes = new Set();
     form.querySelectorAll('[name^="gen_"]:not(:disabled)').forEach((control) => {
+      if (control.type === "checkbox") {
+        if (summarizedCheckboxes.has(control.name)) return;
+        summarizedCheckboxes.add(control.name);
+        const checked = Array.from(form.querySelectorAll(`[name="${control.name}"]:checked:not(:disabled)`))
+          .map((input) => input.closest("label") ? input.closest("label").textContent.trim() : input.value);
+        addSummary(summary, control.dataset.summaryLabel || control.name.replace(/^gen_/, ""), checked.join(", ") || "Difficulty default");
+        return;
+      }
       addSummary(summary, control.dataset.summaryLabel || control.name.replace(/^gen_/, ""), selectedText(control) || "Default");
     });
     addSummary(summary, "Category", selectedText(form.querySelector('select[name="category_id"]')));

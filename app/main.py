@@ -148,7 +148,7 @@ def puzzle_type_generation_schemas() -> dict[str, dict]:
     return schemas
 
 
-def generation_options_from_form(form) -> dict[str, str]:
+def generation_options_from_form(form) -> dict:
     options = {}
     for key, value in form.multi_items():
         if not key.startswith("gen_"):
@@ -156,7 +156,12 @@ def generation_options_from_form(form) -> dict[str, str]:
         option_key = key.removeprefix("gen_")
         value = str(value).strip()
         if value:
-            options[option_key] = value
+            if option_key in options:
+                if not isinstance(options[option_key], list):
+                    options[option_key] = [options[option_key]]
+                options[option_key].append(value)
+            else:
+                options[option_key] = value
     return options
 
 
