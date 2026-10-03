@@ -20,6 +20,7 @@
   let lastCell = null;
   let selected = [];
   let guesses = [];
+  let rejectedGuesses = [];
 
   try {
     placements = JSON.parse(grid.dataset.placements || "[]");
@@ -139,7 +140,7 @@
   }
 
   function previewSelection(toCell) {
-    selected.forEach((cell) => cell.classList.remove("selected", "miss"));
+    selected.forEach((cell) => cell.classList.remove("selected"));
     selected = lineCells(startCell, toCell);
     selected.forEach((cell) => cell.classList.add("selected"));
   }
@@ -154,6 +155,7 @@
 
   function clearGuesses() {
     guesses = [];
+    rejectedGuesses = [];
     cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
     syncFoundWords();
   }
@@ -167,6 +169,14 @@
       guesses = guesses.filter((guess) => guess.key !== key);
       selected = [];
       if (status) status.textContent = "Selection removed.";
+      return;
+    }
+    const rejected = rejectedGuesses.find((guess) => guess.key === key);
+    if (rejected) {
+      rejected.cells.forEach((cell) => cell.classList.remove("selected", "miss"));
+      rejectedGuesses = rejectedGuesses.filter((guess) => guess.key !== key);
+      selected = [];
+      if (status) status.textContent = "Incorrect selection removed.";
       return;
     }
     const forward = selectedWord();
@@ -241,6 +251,7 @@
     });
     newlyCompletedWords.forEach(markStoredWord);
     const wrongCount = guesses.filter((guess) => !matchedGuessKeys.has(guess.key)).length;
+    rejectedGuesses = guesses.filter((guess) => !matchedGuessKeys.has(guess.key));
     guesses = [];
     syncFoundWords();
     saveProgress();
@@ -283,7 +294,11 @@
       cell.classList.remove("selected");
       cell.classList.add("miss");
     });
-    window.setTimeout(clearSelected, 350);
+    const missed = selected.slice();
+    selected = [];
+    window.setTimeout(() => {
+      missed.forEach((cell) => cell.classList.remove("miss"));
+    }, 350);
   }
 
   grid.addEventListener("pointerdown", (event) => {
