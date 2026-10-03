@@ -1907,7 +1907,10 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
             "blocked_words": blocked_words_for_generation(db, excluded_tag_ids),
         }
     generation_seed = normalize_seed(payload.seed)
-    generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data, generation_seed, payload.generation_options)
+    try:
+        generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data, generation_seed, payload.generation_options)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
     generated.metadata["excluded_tag_slugs"] = [tag.slug for tag in excluded_tags]
     generated.metadata["seed"] = generation_seed

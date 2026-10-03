@@ -289,11 +289,16 @@ def generate(
         for word in words_for_theme(theme, difficulty)
     ]
     default_answer_count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
+    has_answer_max = "answer_count" in generation_options
     answer_max = integer_option(generation_options, "answer_count", default_answer_count, 3, 30)
     if "answer_count_min" in generation_options:
         answer_min = integer_option(generation_options, "answer_count_min", min(default_answer_count, answer_max), 3, 30)
     else:
         answer_min = min(default_answer_count, answer_max)
+    if not has_answer_max and answer_min > answer_max:
+        answer_max = answer_min
+    if has_answer_max and answer_min > answer_max:
+        raise ValueError("Crossword maximum answers must be at least the minimum answers.")
     answer_min = min(answer_min, answer_max)
     size = grid_size_option(generation_options, difficulty)
     clue_style = str(generation_options.get("clue_style", "mixed")).strip().lower()
@@ -342,16 +347,10 @@ def generate(
 
     if len(candidate_entries) < answer_min:
         raise ValueError(f"Crossword generation needs at least {answer_min} usable words of 3+ characters.")
-    rng.shuffle(candidate_entries)
     available_max = min(answer_max, len(candidate_entries))
-    requested_count = rng.randint(answer_min, available_max)
-    entries = candidate_entries[:requested_count]
-
-    if len(entries) < 3:
-        raise ValueError("Crossword generation needs at least three words of 3+ characters.")
-
     grid: list[list[str | None]] = [[None for _ in range(size)] for _ in range(size)]
     placements: list[dict] = []
+    entries: list[dict] = []
 
     def can_place(word: str, x: int, y: int, direction: str) -> bool:
         dx, dy = (1, 0) if direction == "across" else (0, 1)
@@ -406,39 +405,54 @@ def generate(
             }
         )
 
-    first = max(entries, key=lambda item: len(item["word"]))
-    place(
-        first["word"],
-        max(0, (size - len(first["word"])) // 2),
-        size // 2,
-        "across",
-        first["clue"],
-        first["clues"],
-        first.get("definition_id"),
-    )
+    best_placement_count = 0
+    for _attempt in range(80):
+        requested_count = rng.randint(answer_min, available_max)
+        shuffled_entries = candidate_entries[:]
+        rng.shuffle(shuffled_entries)
+        entries = shuffled_entries[:requested_count]
+        if len(entries) < 3:
+            continue
 
-    for entry in sorted([item for item in entries if item is not first], key=lambda item: len(item["word"]), reverse=True):
-        word = entry["word"]
-        candidates = []
-        for y, row in enumerate(grid):
-            for x, letter in enumerate(row):
-                if not letter or letter not in word:
-                    continue
-                for index, word_letter in enumerate(word):
-                    if word_letter != letter:
+        grid = [[None for _ in range(size)] for _ in range(size)]
+        placements = []
+        first = max(entries, key=lambda item: len(item["word"]))
+        place(
+            first["word"],
+            max(0, (size - len(first["word"])) // 2),
+            size // 2,
+            "across",
+            first["clue"],
+            first["clues"],
+            first.get("definition_id"),
+        )
+
+        for entry in sorted([item for item in entries if item is not first], key=lambda item: len(item["word"]), reverse=True):
+            word = entry["word"]
+            candidates = []
+            for y, row in enumerate(grid):
+                for x, letter in enumerate(row):
+                    if not letter or letter not in word:
                         continue
-                    candidates.append((x, y - index, "down"))
-                    candidates.append((x - index, y, "across"))
-        rng.shuffle(candidates)
-        for x, y, direction in candidates:
-            if can_place(word, x, y, direction):
-                place(word, x, y, direction, entry["clue"], entry["clues"], entry.get("definition_id"))
-                break
+                    for index, word_letter in enumerate(word):
+                        if word_letter != letter:
+                            continue
+                        candidates.append((x, y - index, "down"))
+                        candidates.append((x - index, y, "across"))
+            rng.shuffle(candidates)
+            for x, y, direction in candidates:
+                if can_place(word, x, y, direction):
+                    place(word, x, y, direction, entry["clue"], entry["clues"], entry.get("definition_id"))
+                    break
 
-    if len(placements) < 3:
-        raise ValueError("Unable to place enough crossword words.")
-    if len(placements) < answer_min:
-        raise ValueError(f"Unable to place the minimum {answer_min} crossword words on the selected grid.")
+        best_placement_count = max(best_placement_count, len(placements))
+        if len(placements) >= answer_min:
+            break
+    else:
+        raise ValueError(
+            f"Unable to place the minimum {answer_min} crossword words on the selected grid. "
+            f"Best attempt placed {best_placement_count}; try a larger grid, fewer minimum answers, or a different word bank."
+        )
 
     used_cells = [(x, y) for y, row in enumerate(grid) for x, value in enumerate(row) if value]
     min_x = max(0, min(x for x, _ in used_cells) - 1)
