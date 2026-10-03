@@ -645,7 +645,8 @@ legend {
 
 .word-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), 1fr);
+  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
+  box-sizing: border-box;
   width: min(100%, 520px);
   border: 2px solid var(--ink);
   background: var(--ink);
@@ -662,9 +663,11 @@ legend {
   color: var(--ink);
   border: 0;
   border-radius: 0;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 0;
   font-weight: 800;
-  font-size: clamp(14px, 3vw, 22px);
+  font-size: var(--word-grid-font, clamp(14px, 3vw, 22px));
   user-select: none;
   touch-action: none;
 }
@@ -1194,7 +1197,8 @@ legend {
 
 .print-word-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), 1fr);
+  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
+  box-sizing: border-box;
   width: min(100%, 560px);
   margin: 0 0 18px;
   border: 2px solid var(--ink);
@@ -1213,10 +1217,11 @@ legend {
   background: white;
   color: var(--ink);
   font-weight: 800;
+  min-width: 0;
 }
 
 .print-word-grid span {
-  font-size: 20px;
+  font-size: var(--word-grid-font, 20px);
 }
 
 .print-word-grid.compact {

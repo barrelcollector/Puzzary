@@ -36,8 +36,7 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
     ]
     if not words:
         return None
-    count = {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5)
-    return words[:count]
+    return words
 
 
 def gimme_words_for_difficulty(words: list[str], difficulty: str) -> list[str]:
@@ -168,25 +167,40 @@ def generate(
     else:
         source_words = source_data if source_data is not None else words_for_theme(theme, difficulty)
     blocked_words = {normalize_word(word) for word in blocked_source if len(normalize_word(word)) >= 3}
-    words = [normalize_word(word) for word in source_words]
-    words = [
+    candidate_words = [normalize_word(word) for word in source_words]
+    candidate_words = list(dict.fromkeys(
         word
-        for word in words
+        for word in candidate_words
         if word and not any(blocked in word or blocked in word[::-1] for blocked in blocked_words)
-    ]
-    word_limit = integer_option(generation_options, "word_count_limit", {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5), 1, 30)
-    words = words[:word_limit]
-    if not words:
-        raise ValueError("Word search generation needs at least one allowed word.")
+    ))
     size = grid_size_option(generation_options, difficulty)
+    candidate_words = [word for word in candidate_words if len(word) <= size]
+    if not candidate_words:
+        raise ValueError("Word search generation needs at least one allowed word that fits the selected grid size.")
+    default_word_count = {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5)
+    max_word_count = integer_option(generation_options, "word_count_limit", default_word_count, 1, 30)
+    if "word_count_min" in generation_options:
+        min_word_count = integer_option(generation_options, "word_count_min", min(default_word_count, max_word_count), 1, 30)
+    else:
+        min_word_count = min(max_word_count, len(candidate_words))
+    min_word_count = min(min_word_count, max_word_count)
+    available_max = min(max_word_count, len(candidate_words))
+    if available_max < min_word_count:
+        raise ValueError(
+            f"Word search generation needs at least {min_word_count} allowed words that fit the selected grid size."
+        )
+    generation_seed = seed or f"{theme}:{difficulty}:{','.join(candidate_words)}"
+    rng = random.Random(generation_seed)
+    word_count = rng.randint(min_word_count, available_max)
+    shuffled_words = candidate_words[:]
+    rng.shuffle(shuffled_words)
+    words = shuffled_words[:word_count]
     allow_crossings = bool_option(generation_options, "allow_crossings", True)
     auto_confirm = bool_option(generation_options, "auto_confirm", True)
     direction_preset, directions = direction_options(generation_options)
     print_style = str(generation_options.get("print_style", "boxed")).strip().lower()
     if print_style not in {"boxed", "compact"}:
         print_style = "boxed"
-    generation_seed = seed or f"{theme}:{difficulty}:{','.join(words)}"
-    rng = random.Random(generation_seed)
     grid = [["" for _ in range(size)] for _ in range(size)]
     placements: list[dict] = []
 
@@ -224,7 +238,10 @@ def generate(
         "directions": direction_preset,
         "allow_crossings": allow_crossings,
         "auto_confirm": auto_confirm,
-        "word_count_limit": len(words),
+        "word_count_min": min_word_count,
+        "word_count": len(words),
+        "word_count_limit": max_word_count,
+        "word_count_max": max_word_count,
         "print_style": print_style,
     }
 
@@ -336,8 +353,17 @@ register_puzzle_type(
                 ),
             ),
             GenerationField(
+                name="word_count_min",
+                label="Minimum word count",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to use as many as the maximum allows.",
+                minimum=1,
+                maximum=30,
+            ),
+            GenerationField(
                 name="word_count_limit",
-                label="Word count limit",
+                label="Maximum word count",
                 field_type="number",
                 default="",
                 help_text="Optional. Leave blank to let difficulty choose.",
