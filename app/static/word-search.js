@@ -27,6 +27,10 @@
     placements = [];
   }
 
+  const placementsByWord = new Map(
+    placements.map((placement) => [String(placement.word || "").toUpperCase(), placement])
+  );
+
   function syncFoundWords() {
     wordList.querySelectorAll("[data-word]").forEach((item) => {
       item.classList.toggle("found", found.has(item.dataset.word.toUpperCase()));
@@ -69,8 +73,19 @@
     return line;
   }
 
+  function coordsForPlacement(placement) {
+    return cellsForPlacement(placement).map((cell) => `${cell.dataset.x},${cell.dataset.y}`);
+  }
+
+  function sameCoordSet(first, second) {
+    if (first.length !== second.length) return false;
+    const firstSet = new Set(first);
+    if (firstSet.size !== second.length) return false;
+    return second.every((coord) => firstSet.has(coord));
+  }
+
   function markStoredWord(word) {
-    const placement = placements.find((item) => String(item.word).toUpperCase() === word);
+    const placement = placementsByWord.get(word);
     cellsForPlacement(placement).forEach((cell) => cell.classList.add("found-cell"));
   }
 
@@ -177,26 +192,70 @@
       return;
     }
     let correct = 0;
+    const matchedGuessKeys = new Set();
+    const newlyCompletedWords = [];
+    const singleSelectionWords = new Set();
+    const incompleteWords = [];
+
     guesses.forEach((guess) => {
       const match = words.has(guess.forward) ? guess.forward : words.has(guess.reverse) ? guess.reverse : "";
-      guess.cells.forEach((cell) => cell.classList.remove("candidate-cell", "selected", "miss"));
       if (match) {
         found.add(match);
-        guess.cells.forEach((cell) => cell.classList.add("found-cell"));
+        newlyCompletedWords.push(match);
+        singleSelectionWords.add(match);
+        matchedGuessKeys.add(guess.key);
         correct += 1;
+      }
+    });
+
+    words.forEach((word) => {
+      if (found.has(word)) return;
+      const placementCoords = coordsForPlacement(placementsByWord.get(word));
+      if (!placementCoords.length) return;
+      const coveringGuesses = guesses.filter((guess) => (
+        guess.cells.some((cell) => placementCoords.includes(`${cell.dataset.x},${cell.dataset.y}`))
+      ));
+      if (!coveringGuesses.length) return;
+      const guessCoords = coveringGuesses.flatMap((guess) => (
+        guess.cells.map((cell) => `${cell.dataset.x},${cell.dataset.y}`)
+      ));
+      if (sameCoordSet(guessCoords, placementCoords)) {
+        found.add(word);
+        newlyCompletedWords.push(word);
+        correct += 1;
+        coveringGuesses.forEach((guess) => matchedGuessKeys.add(guess.key));
+      } else if (guessCoords.some((coord) => placementCoords.includes(coord))) {
+        incompleteWords.push(word);
+      }
+    });
+
+    guesses.forEach((guess) => {
+      guess.cells.forEach((cell) => cell.classList.remove("candidate-cell", "selected", "miss"));
+      if (matchedGuessKeys.has(guess.key)) {
+        guess.cells.forEach((cell) => cell.classList.add("found-cell"));
       } else {
         guess.cells.forEach((cell) => {
           if (!cell.classList.contains("found-cell")) cell.classList.add("miss");
         });
       }
     });
+    newlyCompletedWords.forEach(markStoredWord);
+    const wrongCount = guesses.filter((guess) => !matchedGuessKeys.has(guess.key)).length;
     guesses = [];
     syncFoundWords();
     saveProgress();
     if (status) {
-      status.textContent = correct
-        ? `${correct} selection${correct === 1 ? "" : "s"} correct. ${found.size} of ${words.size} words found.`
-        : "No selected guesses matched the word list.";
+      const remaining = Array.from(words).filter((word) => !found.has(word));
+      const parts = [];
+      if (correct) {
+        parts.push(`${correct} word${correct === 1 ? "" : "s"} completed`);
+        const multipart = newlyCompletedWords.filter((word) => !singleSelectionWords.has(word));
+        if (multipart.length) parts.push(`${multipart.join(", ")} completed from multiple selections`);
+      }
+      if (wrongCount) parts.push(`${wrongCount} selection${wrongCount === 1 ? "" : "s"} did not complete a word`);
+      if (incompleteWords.length) parts.push(`Incomplete: ${Array.from(new Set(incompleteWords)).join(", ")}`);
+      parts.push(remaining.length ? `Remaining: ${remaining.join(", ")}` : "All words found");
+      status.textContent = `${parts.join(". ")}.`;
     }
   }
 
