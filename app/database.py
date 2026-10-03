@@ -56,6 +56,9 @@ def ensure_schema() -> None:
     with engine.begin() as connection:
         if "archived_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
+        if "auto_archive_at" not in puzzle_columns:
+            connection.execute(text("ALTER TABLE puzzles ADD COLUMN auto_archive_at TIMESTAMP WITH TIME ZONE"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzles_auto_archive_at ON puzzles (auto_archive_at)"))
         if "category_id" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN category_id INTEGER"))
         if "content_source_id" in puzzle_columns and "word_bank_id" not in puzzle_columns:

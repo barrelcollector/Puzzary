@@ -70,6 +70,9 @@
               <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }} / {{ puzzle.id }}</small>
               {% if puzzle.word_bank %}<small>Word bank: {{ puzzle.word_bank.name }}</small>{% endif %}
               {% if puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
+              {% if puzzle.auto_archive_at %}
+                <small>Auto-archives at {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
+              {% endif %}
             </div>
             <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/metadata">
               <label>
@@ -91,6 +94,11 @@
                   {% endfor %}
                 </div>
               </fieldset>
+              <label>
+                Auto-archive
+                <input type="datetime-local" name="auto_archive_at" value="{{ local_datetime_value(puzzle.auto_archive_at) }}">
+                <small class="muted">{{ puzzary_timezone }}. Leave blank for no automatic archive.</small>
+              </label>
               <button type="submit">Save</button>
             </form>
             <div class="action-row">
@@ -210,6 +218,11 @@
               {% endfor %}
             </div>
           </fieldset>
+          <label>
+            Auto-archive
+            <input type="datetime-local" name="auto_archive_at">
+            <small class="muted">{{ puzzary_timezone }}. Optional.</small>
+          </label>
         </section>
 
         <section class="wizard-panel is-hidden" data-wizard-step>

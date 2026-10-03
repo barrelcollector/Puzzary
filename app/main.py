@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -11,6 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -57,6 +59,7 @@ from app.schemas import (
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-local-session-secret")
+PUZZARY_TIMEZONE = os.getenv("PUZZARY_TIMEZONE", "America/New_York")
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Puzzary", version="0.1.0")
@@ -92,6 +95,34 @@ templates.env.globals["tag_values"] = tag_values
 templates.env.globals["tag_lines"] = tag_lines
 
 
+def app_timezone() -> ZoneInfo:
+    try:
+        return ZoneInfo(PUZZARY_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def local_datetime_value(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(app_timezone()).strftime("%Y-%m-%dT%H:%M")
+
+
+def local_datetime_label(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(app_timezone()).strftime("%Y-%m-%d %I:%M %p %Z")
+
+
+templates.env.globals["local_datetime_value"] = local_datetime_value
+templates.env.globals["local_datetime_label"] = local_datetime_label
+templates.env.globals["puzzary_timezone"] = PUZZARY_TIMEZONE
+
+
 def template_exists(template_name: str) -> bool:
     try:
         templates.env.get_template(template_name)
@@ -101,7 +132,7 @@ def template_exists(template_name: str) -> bool:
 
 
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ensure_schema()
     init_db()
@@ -109,6 +140,15 @@ def startup() -> None:
         ensure_admin_user(db)
         seed_word_banks(db)
         seed_word_definitions(db)
+        apply_due_auto_archives(db)
+    app.state.auto_archive_task = asyncio.create_task(auto_archive_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    task = getattr(app.state, "auto_archive_task", None)
+    if task is not None:
+        task.cancel()
 
 
 def puzzle_url(puzzle_id: str) -> str:
@@ -407,6 +447,42 @@ def add_word_bank_link(db: Session, bank: WordBank, word: DictionaryWord, defini
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def parse_local_datetime(value: str) -> datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Archive date/time is not valid") from error
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=app_timezone())
+    return parsed.astimezone(timezone.utc)
+
+
+def apply_due_auto_archives(db: Session) -> int:
+    now = utcnow()
+    due_puzzles = db.scalars(
+        select(Puzzle).where(
+            Puzzle.archived_at.is_(None),
+            Puzzle.auto_archive_at.is_not(None),
+            Puzzle.auto_archive_at <= now,
+        )
+    ).all()
+    for puzzle in due_puzzles:
+        puzzle.archived_at = now
+    if due_puzzles:
+        db.commit()
+    return len(due_puzzles)
+
+
+async def auto_archive_loop() -> None:
+    while True:
+        with SessionLocal() as db:
+            apply_due_auto_archives(db)
+        await asyncio.sleep(60)
 
 
 def hash_secret(value: str) -> str:
@@ -1423,6 +1499,8 @@ def admin_unarchive_puzzle(puzzle_id: str, request: Request, db: Session = Depen
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is not None:
         puzzle.archived_at = None
+        if puzzle.auto_archive_at is not None and puzzle.auto_archive_at <= utcnow():
+            puzzle.auto_archive_at = None
         db.commit()
     return RedirectResponse(url="/admin/puzzles", status_code=303)
 
@@ -1446,6 +1524,7 @@ def admin_update_puzzle_metadata(
     request: Request,
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
+    auto_archive_at: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -1455,6 +1534,7 @@ def admin_update_puzzle_metadata(
     if puzzle is not None:
         puzzle.category_id = category_id or None
         puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+        puzzle.auto_archive_at = parse_local_datetime(auto_archive_at)
         db.commit()
     return RedirectResponse(url="/admin/puzzles", status_code=303)
 
@@ -1471,6 +1551,7 @@ async def admin_generate_puzzle(
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
+    auto_archive_at: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -1508,6 +1589,7 @@ async def admin_generate_puzzle(
         source_tags = list(banks[0].tags) if len(banks) == 1 else []
         saved_puzzle.category_id = category_id or source_category
         saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else source_tags
+        saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at)
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
