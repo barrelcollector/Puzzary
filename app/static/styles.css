@@ -1132,6 +1132,15 @@ legend {
   padding-left: 22px;
 }
 
+.word-pyramid-clue-list li {
+  margin-bottom: 10px;
+}
+
+.word-pyramid-clue-list li > span:first-child {
+  display: block;
+  margin-bottom: 5px;
+}
+
 .pyramid-clue-steps {
   display: grid;
   gap: 3px;

@@ -282,6 +282,8 @@ def generate(
     print_layout = str(generation_options.get("print_layout", "alternating")).strip().lower()
     if print_layout not in {"alternating", "pyramid_clues_below"}:
         print_layout = "alternating"
+    if print_layout == "pyramid_clues_below":
+        clue_placement = "numbered_below"
     try:
         chain = choose_chain(source, difficulty, rng, target_row_count, starting_word_length, strict_chain)
     except ValueError:

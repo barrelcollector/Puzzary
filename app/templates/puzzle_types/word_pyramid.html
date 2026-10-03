@@ -27,22 +27,24 @@
             {% endfor %}
           </div>
         </div>
-        <div class="word-pyramid-clue">
-          <span>{{ row.clue }}</span>
-          <span class="word-pyramid-row-actions">
-            <small>{{ row.length }} letters</small>
-            {% if row.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
-            {% if row.clues and row.clues | length > 1 %}
-              <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
-              <span class="pyramid-clue-steps" hidden>
-                {% for extra_clue in row.clues[1:] %}
-                  <small hidden>{{ extra_clue }}</small>
-                {% endfor %}
-              </span>
-            {% endif %}
-            <button type="button" class="ghost-button reveal-pyramid-row" data-row="{{ row.index }}">Reveal row</button>
-          </span>
-        </div>
+        {% if puzzle.play_payload.settings.clue_placement | default('inline') != 'numbered_below' %}
+          <div class="word-pyramid-clue">
+            <span>{{ row.clue }}</span>
+            <span class="word-pyramid-row-actions">
+              <small>{{ row.length }} letters</small>
+              {% if row.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
+              {% if row.clues and row.clues | length > 1 %}
+                <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
+                <span class="pyramid-clue-steps" hidden>
+                  {% for extra_clue in row.clues[1:] %}
+                    <small hidden>{{ extra_clue }}</small>
+                  {% endfor %}
+                </span>
+              {% endif %}
+              <button type="button" class="ghost-button reveal-pyramid-row" data-row="{{ row.index }}">Reveal row</button>
+            </span>
+          </div>
+        {% endif %}
       </div>
     {% endfor %}
   </div>
@@ -52,7 +54,20 @@
       <ol>
         {% for row in puzzle.play_payload.rows %}
           <li value="{{ row.number }}">
-            {{ row.clue }} <small>{{ row.length }} letters</small>
+            <span>{{ row.clue }}</span>
+            <span class="word-pyramid-row-actions">
+              <small>{{ row.length }} letters</small>
+              {% if row.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
+              {% if row.clues and row.clues | length > 1 %}
+                <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
+                <span class="pyramid-clue-steps" hidden>
+                  {% for extra_clue in row.clues[1:] %}
+                    <small hidden>{{ extra_clue }}</small>
+                  {% endfor %}
+                </span>
+              {% endif %}
+              <button type="button" class="ghost-button reveal-pyramid-row" data-row="{{ row.index }}">Reveal row</button>
+            </span>
           </li>
         {% endfor %}
       </ol>
