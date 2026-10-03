@@ -430,7 +430,8 @@ button {
 }
 
 .preview-crossword-grid .block {
-  background: #171717;
+  border-color: transparent;
+  background: #fbfbf8;
 }
 
 .preview-crossword-grid .open {
