@@ -8,17 +8,6 @@
     <a class="button-link" href="/generate">Generate Puzzle</a>
   </div>
 
-  <form class="panel" method="post" action="/web/users">
-    <h1>Household Profiles</h1>
-    <label>
-      Display name
-      <input name="display_name" autocomplete="off" required>
-    </label>
-    <button type="submit">Add</button>
-    {% if users %}
-      <p class="muted">Current users: {{ users | map(attribute="display_name") | join(", ") }}</p>
-    {% endif %}
-  </form>
 </section>
 
 <section>

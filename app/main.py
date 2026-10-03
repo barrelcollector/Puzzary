@@ -1056,7 +1056,6 @@ def library(request: Request, db: Session = Depends(get_db)):
         return user
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(50)).all()
     puzzles = [puzzle for puzzle in puzzles if puzzle.archived_at is None]
-    users = db.scalars(select(User).order_by(User.display_name)).all()
     progress_rows = db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id)).all()
     progress_by_puzzle = {
         puzzle.id: {"found": 0, "total": progress_response(puzzle, user, None).expected_count}
@@ -1073,7 +1072,6 @@ def library(request: Request, db: Session = Depends(get_db)):
         {
             "request": request,
             "puzzles": puzzles,
-            "users": users,
             "current_user": user,
             "progress_by_puzzle": progress_by_puzzle,
         },
