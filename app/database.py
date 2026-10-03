@@ -64,6 +64,24 @@ def ensure_schema() -> None:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN word_bank_id INTEGER"))
         if "is_admin" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "email" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+        if "password_hash" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))
+        if "is_active" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "must_change_password" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "reset_token_hash" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN reset_token_hash VARCHAR(255)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_reset_token_hash ON users (reset_token_hash)"))
+        if "reset_token_expires_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN reset_token_expires_at TIMESTAMP WITH TIME ZONE"))
+        if "session_version" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1"))
+        if "last_login_at" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP WITH TIME ZONE"))
         if "dictionary_words" in table_names:
             if "archived_at" not in dictionary_word_columns:
                 connection.execute(text("ALTER TABLE dictionary_words ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))

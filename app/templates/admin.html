@@ -10,6 +10,7 @@
     <a class="{% if section in ['word_banks', 'word_bank_detail'] %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
     <a class="{% if section in ['tags', 'tag_detail'] %}active{% endif %}" href="/admin/tags">Tags</a>
     <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
+    <a class="{% if section == 'users' %}active{% endif %}" href="/admin/users">Users</a>
     <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
   </nav>
 
@@ -793,6 +794,84 @@
         </ol>
         <p class="muted">This is a placeholder until we connect Puzzary to the Daily Stripe print job format.</p>
       </div>
+    {% endif %}
+
+    {% if section == "users" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Users</h1>
+          <p class="muted">Create accounts, manage roles, reset passwords, and revoke sessions.</p>
+        </div>
+      </section>
+
+      {% if request.query_params.get("error") %}<p class="notice danger">{{ request.query_params.get("error") }}</p>{% endif %}
+      {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
+      {% if request.query_params.get("setup_token") %}
+        <section class="panel">
+          <h2>Password setup link</h2>
+          <p class="muted">Give this one-time link to {{ request.query_params.get("setup_user") }}. It expires in 24 hours.</p>
+          <input readonly value="{{ request.url_for('password_setup_page') }}?token={{ request.query_params.get('setup_token') }}">
+        </section>
+      {% endif %}
+
+      <section class="admin-grid two">
+        <form class="panel" method="post" action="/admin/users">
+          <h2>Create User</h2>
+          <label>
+            Display name
+            <input name="display_name" required>
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="off">
+          </label>
+          <label>
+            Temporary password
+            <input name="password" type="password" autocomplete="new-password">
+            <small class="muted">Leave blank to generate a one-time setup link.</small>
+          </label>
+          <label class="check-row"><input type="checkbox" name="is_admin"> Admin</label>
+          <button type="submit">Create User</button>
+        </form>
+
+        <div class="admin-list">
+          {% for managed_user in admin_users %}
+            <form class="panel edit-card" method="post" action="/admin/users/{{ managed_user.id }}">
+              <div class="row">
+                <span>
+                  <strong>{{ managed_user.display_name }}</strong>
+                  <small>
+                    {{ managed_user.email or "No email" }}
+                    / {{ "Admin" if managed_user.is_admin else "User" }}
+                    / {{ "Active" if managed_user.is_active else "Inactive" }}
+                  </small>
+                  {% if managed_user.must_change_password %}<span class="status-pill">Password setup needed</span>{% endif %}
+                </span>
+                <small>Last login: {{ managed_user.last_login_at or "Never" }}</small>
+              </div>
+              <label>
+                Display name
+                <input name="display_name" value="{{ managed_user.display_name }}" required>
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" value="{{ managed_user.email or '' }}">
+              </label>
+              <div class="action-row">
+                <label class="check-row"><input type="checkbox" name="is_admin" {% if managed_user.is_admin %}checked{% endif %}> Admin</label>
+                <label class="check-row"><input type="checkbox" name="is_active" {% if managed_user.is_active %}checked{% endif %}> Active</label>
+              </div>
+              <div class="action-row">
+                <button type="submit">Save</button>
+                <button type="submit" formaction="/admin/users/{{ managed_user.id }}/reset-password" formnovalidate class="ghost-button">Reset password</button>
+                <button type="submit" formaction="/admin/users/{{ managed_user.id }}/revoke-sessions" formnovalidate class="ghost-button">Revoke sessions</button>
+              </div>
+            </form>
+          {% else %}
+            <p class="muted">No users yet.</p>
+          {% endfor %}
+        </div>
+      </section>
     {% endif %}
   </div>
 </section>

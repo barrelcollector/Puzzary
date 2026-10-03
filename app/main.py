@@ -4,8 +4,13 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
+import hashlib
+import hmac
+import secrets
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -55,9 +60,16 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-local-session-secret")
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Puzzary", version="0.1.0")
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+PASSWORD_SCHEME = "pbkdf2_sha256"
+PASSWORD_ITERATIONS = 390000
+RESET_TOKEN_TTL_HOURS = 24
+LOGIN_RATE_LIMIT_WINDOW = 300
+LOGIN_RATE_LIMIT_MAX = 8
+LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 
 
 def tag_value(tags: list[PuzzleTag], tag_type: str) -> str:
@@ -393,14 +405,176 @@ def add_word_bank_link(db: Session, bank: WordBank, word: DictionaryWord, defini
     bank.word_links.append(WordBankWord(word=word, definition=definition, position=next_position))
 
 
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def hash_secret(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), PASSWORD_ITERATIONS)
+    return f"{PASSWORD_SCHEME}${PASSWORD_ITERATIONS}${salt}${derived.hex()}"
+
+
+def verify_password(password: str, stored_hash: str | None) -> bool:
+    if not stored_hash:
+        return False
+    try:
+        scheme, iterations_text, salt, digest = stored_hash.split("$", 3)
+        if scheme != PASSWORD_SCHEME:
+            return False
+        derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(iterations_text))
+        return hmac.compare_digest(derived.hex(), digest)
+    except (TypeError, ValueError):
+        return False
+
+
+def password_error(password: str) -> str:
+    if len(password) < 10:
+        return "Use at least 10 characters."
+    if password.lower() == password or password.upper() == password:
+        return "Use a mix of uppercase and lowercase letters."
+    if not any(char.isdigit() for char in password):
+        return "Add at least one number."
+    return ""
+
+
+def issue_password_setup_token(db: Session, user: User) -> str:
+    token = secrets.token_urlsafe(32)
+    user.reset_token_hash = hash_secret(token)
+    user.reset_token_expires_at = utcnow() + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+    user.must_change_password = True
+    user.session_version = (user.session_version or 1) + 1
+    db.commit()
+    return token
+
+
+def setup_url(token: str) -> str:
+    return f"{APP_BASE_URL}/password/setup?token={token}"
+
+
+def write_bootstrap_setup_link(user: User, token: str) -> None:
+    path = UPLOAD_DIR.parent / "bootstrap-admin-setup.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "Puzzary initial admin setup\n"
+        f"Account: {user.display_name}\n"
+        f"Setup link: {setup_url(token)}\n"
+        f"Expires: {user.reset_token_expires_at}\n",
+        encoding="utf-8",
+    )
+
+
+def login_rate_key(request: Request, username: str) -> str:
+    host = request.client.host if request.client else "unknown"
+    return f"{host}:{username.strip().lower()}"
+
+
+def login_limited(request: Request, username: str) -> bool:
+    key = login_rate_key(request, username)
+    now = time.time()
+    attempts = [stamp for stamp in LOGIN_ATTEMPTS.get(key, []) if now - stamp < LOGIN_RATE_LIMIT_WINDOW]
+    LOGIN_ATTEMPTS[key] = attempts
+    return len(attempts) >= LOGIN_RATE_LIMIT_MAX
+
+
+def record_login_failure(request: Request, username: str) -> None:
+    key = login_rate_key(request, username)
+    LOGIN_ATTEMPTS.setdefault(key, []).append(time.time())
+
+
+def clear_login_failures(request: Request, username: str) -> None:
+    LOGIN_ATTEMPTS.pop(login_rate_key(request, username), None)
+
+
+def find_login_user(db: Session, username: str) -> User | None:
+    normalized = username.strip()
+    if not normalized:
+        return None
+    email = normalized.lower()
+    return db.scalar(
+        select(User).where(
+            (User.display_name == normalized) | (User.email == email)
+        )
+    )
+
+
+def active_admin_count(db: Session, excluding_user_id: int | None = None) -> int:
+    users = db.scalars(select(User).where(User.is_admin == True, User.is_active == True)).all()  # noqa: E712
+    return sum(1 for user in users if user.id != excluding_user_id)
+
+
+def can_remove_admin(db: Session, user: User) -> bool:
+    if not user.is_admin or not user.is_active:
+        return True
+    return active_admin_count(db, excluding_user_id=user.id) >= 1
+
+
+def normalized_email(value: str) -> str | None:
+    email = value.strip().lower()
+    return email or None
+
+
+def create_user_record(
+    db: Session,
+    display_name: str,
+    email: str = "",
+    is_admin: bool = False,
+    password: str = "",
+) -> tuple[User, str | None]:
+    clean_name = display_name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Display name is required")
+    if db.scalar(select(User).where(User.display_name == clean_name)):
+        raise HTTPException(status_code=400, detail="That display name is already in use")
+    clean_email = normalized_email(email)
+    if clean_email and db.scalar(select(User).where(User.email == clean_email)):
+        raise HTTPException(status_code=400, detail="That email is already in use")
+    user = User(display_name=clean_name, email=clean_email, is_admin=is_admin, is_active=True)
+    db.add(user)
+    db.flush()
+    setup_token = None
+    if password.strip():
+        error = password_error(password)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        user.password_hash = hash_password(password)
+        user.must_change_password = True
+    else:
+        setup_token = issue_password_setup_token(db, user)
+        db.refresh(user)
+        return user, setup_token
+    db.commit()
+    db.refresh(user)
+    return user, setup_token
+
+
 def ensure_admin_user(db: Session) -> None:
     has_admin = db.scalar(select(User).where(User.is_admin == True))  # noqa: E712
-    if has_admin is not None:
-        return
     first_user = db.scalar(select(User).order_by(User.created_at, User.id))
-    if first_user is not None:
+    if first_user is None:
+        first_user = User(display_name=os.getenv("PUZZARY_BOOTSTRAP_ADMIN_NAME", "admin"), is_admin=True, is_active=True)
+        db.add(first_user)
+        db.flush()
+    if has_admin is None:
         first_user.is_admin = True
-        db.commit()
+        first_user.is_active = True
+        admin_user = first_user
+    else:
+        admin_user = has_admin
+    token_missing_or_expired = (
+        not admin_user.reset_token_hash
+        or not admin_user.reset_token_expires_at
+        or admin_user.reset_token_expires_at <= utcnow()
+    ) if admin_user is not None else False
+    if admin_user is not None and admin_user.is_admin and not admin_user.password_hash and token_missing_or_expired:
+        token = issue_password_setup_token(db, admin_user)
+        write_bootstrap_setup_link(admin_user, token)
+        return
+    db.commit()
 
 
 def seed_word_banks(db: Session) -> None:
@@ -620,7 +794,14 @@ def current_user(request: Request, db: Session) -> User | None:
     user_id = request.session.get("user_id")
     if not user_id:
         return None
-    return db.get(User, int(user_id))
+    user = db.get(User, int(user_id))
+    if user is None or not user.is_active:
+        request.session.clear()
+        return None
+    if int(request.session.get("session_version", 0)) != int(user.session_version or 1):
+        request.session.clear()
+        return None
+    return user
 
 
 def require_web_user(request: Request, db: Session) -> User | RedirectResponse:
@@ -669,28 +850,38 @@ def health() -> dict[str, str]:
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)):
-    users = db.scalars(select(User).order_by(User.display_name)).all()
-    return templates.TemplateResponse("login.html", {"request": request, "users": users})
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "current_user": current_user(request, db),
+            "error": request.query_params.get("error", ""),
+            "message": request.query_params.get("message", ""),
+        },
+    )
 
 
 @app.post("/login")
 def login(
     request: Request,
-    user_id: str = Form(""),
-    display_name: str = Form(""),
+    username: str = Form(""),
+    password: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user: User | None = None
-    if user_id:
-        user = db.get(User, int(user_id))
-    elif display_name.strip():
-        result = create_user(UserCreate(display_name=display_name.strip()), db)
-        user = db.get(User, int(result["id"]))
-
-    if user is None:
-        return RedirectResponse(url="/login", status_code=303)
+    if login_limited(request, username):
+        return RedirectResponse(url="/login?error=Too%20many%20attempts.%20Try%20again%20soon.", status_code=303)
+    user = find_login_user(db, username)
+    if user is None or not user.is_active or not verify_password(password, user.password_hash):
+        record_login_failure(request, username)
+        return RedirectResponse(url="/login?error=Invalid%20username%20or%20password.", status_code=303)
 
     request.session["user_id"] = user.id
+    request.session["session_version"] = user.session_version or 1
+    user.last_login_at = utcnow()
+    db.commit()
+    clear_login_failures(request, username)
+    if user.must_change_password:
+        return RedirectResponse(url="/account/password?message=Please%20set%20a%20new%20password.", status_code=303)
     return RedirectResponse(url="/library", status_code=303)
 
 
@@ -698,6 +889,95 @@ def login(
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
+
+
+@app.get("/password/setup", response_class=HTMLResponse)
+def password_setup_page(request: Request, token: str = "", db: Session = Depends(get_db)):
+    token_hash = hash_secret(token)
+    user = db.scalar(select(User).where(User.reset_token_hash == token_hash))
+    token_valid = bool(user and user.reset_token_expires_at and user.reset_token_expires_at > utcnow())
+    return templates.TemplateResponse(
+        "password_setup.html",
+        {
+            "request": request,
+            "current_user": current_user(request, db),
+            "token": token,
+            "token_valid": token_valid,
+            "error": request.query_params.get("error", ""),
+        },
+    )
+
+
+@app.post("/password/setup")
+def password_setup(
+    request: Request,
+    token: str = Form(""),
+    password: str = Form(""),
+    confirm_password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    token_hash = hash_secret(token)
+    user = db.scalar(select(User).where(User.reset_token_hash == token_hash))
+    if user is None or not user.reset_token_expires_at or user.reset_token_expires_at <= utcnow():
+        return RedirectResponse(url="/password/setup?error=That%20setup%20link%20is%20invalid%20or%20expired.", status_code=303)
+    if password != confirm_password:
+        return RedirectResponse(url=f"/password/setup?token={quote(token)}&error=Passwords%20do%20not%20match.", status_code=303)
+    error = password_error(password)
+    if error:
+        return RedirectResponse(url=f"/password/setup?token={quote(token)}&error={quote(error)}", status_code=303)
+    user.password_hash = hash_password(password)
+    user.must_change_password = False
+    user.reset_token_hash = None
+    user.reset_token_expires_at = None
+    user.is_active = True
+    user.session_version = (user.session_version or 1) + 1
+    user.last_login_at = utcnow()
+    db.commit()
+    request.session["user_id"] = user.id
+    request.session["session_version"] = user.session_version
+    return RedirectResponse(url="/library", status_code=303)
+
+
+@app.get("/account/password", response_class=HTMLResponse)
+def account_password_page(request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    return templates.TemplateResponse(
+        "account_password.html",
+        {
+            "request": request,
+            "current_user": user,
+            "error": request.query_params.get("error", ""),
+            "message": request.query_params.get("message", ""),
+        },
+    )
+
+
+@app.post("/account/password")
+def account_password_update(
+    request: Request,
+    current_password: str = Form(""),
+    password: str = Form(""),
+    confirm_password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    if user.password_hash and not verify_password(current_password, user.password_hash):
+        return RedirectResponse(url="/account/password?error=Current%20password%20is%20not%20correct.", status_code=303)
+    if password != confirm_password:
+        return RedirectResponse(url="/account/password?error=Passwords%20do%20not%20match.", status_code=303)
+    error = password_error(password)
+    if error:
+        return RedirectResponse(url=f"/account/password?error={quote(error)}", status_code=303)
+    user.password_hash = hash_password(password)
+    user.must_change_password = False
+    user.session_version = (user.session_version or 1) + 1
+    db.commit()
+    request.session["session_version"] = user.session_version
+    return RedirectResponse(url="/account/password?message=Password%20updated.", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -786,9 +1066,11 @@ async def web_generate_puzzle(
 
 
 @app.post("/web/users")
-def web_create_user(display_name: str = Form(...), db: Session = Depends(get_db)):
-    create_user(UserCreate(display_name=display_name), db)
-    return RedirectResponse(url="/library", status_code=303)
+def web_create_user(request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    return RedirectResponse(url="/admin/users", status_code=303)
 
 
 def admin_context(
@@ -820,6 +1102,7 @@ def admin_context(
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
     dictionary_words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+    admin_users = db.scalars(select(User).order_by(User.display_name)).all()
     return {
         "request": request,
         "current_user": user,
@@ -840,6 +1123,7 @@ def admin_context(
         "progress_rows": progress_rows,
         "photos": photos,
         "dictionary_words": dictionary_words,
+        "admin_users": admin_users,
         "selected_word": selected_word,
         "selected_word_bank": selected_word_bank,
         "selected_tag": selected_tag,
@@ -944,6 +1228,102 @@ def admin_activity_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/publishing", response_class=HTMLResponse)
 def admin_publishing_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "publishing")
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "users")
+
+
+@app.post("/admin/users")
+def admin_create_user(
+    request: Request,
+    display_name: str = Form(""),
+    email: str = Form(""),
+    is_admin: str = Form(""),
+    password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    new_user, setup_token = create_user_record(db, display_name, email, is_admin == "on", password)
+    if setup_token:
+        return RedirectResponse(
+            url=f"/admin/users?setup_user={quote(new_user.display_name)}&setup_token={quote(setup_token)}",
+            status_code=303,
+        )
+    return RedirectResponse(url="/admin/users?message=User%20created.", status_code=303)
+
+
+@app.post("/admin/users/{user_id}")
+def admin_update_user(
+    user_id: int,
+    request: Request,
+    display_name: str = Form(""),
+    email: str = Form(""),
+    is_admin: str = Form(""),
+    is_active: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    admin = require_admin_user(request, db)
+    if isinstance(admin, RedirectResponse):
+        return admin
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    requested_admin = is_admin == "on"
+    requested_active = is_active == "on"
+    if (user.is_admin and not requested_admin) or (user.is_active and not requested_active):
+        if not can_remove_admin(db, user):
+            return RedirectResponse(url="/admin/users?error=Keep%20at%20least%20one%20active%20admin.", status_code=303)
+    clean_name = display_name.strip()
+    if not clean_name:
+        return RedirectResponse(url="/admin/users?error=Display%20name%20is%20required.", status_code=303)
+    existing_name = db.scalar(select(User).where(User.display_name == clean_name, User.id != user.id))
+    if existing_name:
+        return RedirectResponse(url="/admin/users?error=That%20display%20name%20is%20already%20in%20use.", status_code=303)
+    clean_email = normalized_email(email)
+    if clean_email:
+        existing_email = db.scalar(select(User).where(User.email == clean_email, User.id != user.id))
+        if existing_email:
+            return RedirectResponse(url="/admin/users?error=That%20email%20is%20already%20in%20use.", status_code=303)
+    user.display_name = clean_name
+    user.email = clean_email
+    user.is_admin = requested_admin
+    if user.is_active != requested_active:
+        user.session_version = (user.session_version or 1) + 1
+    user.is_active = requested_active
+    db.commit()
+    return RedirectResponse(url="/admin/users?message=User%20updated.", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/reset-password")
+def admin_reset_user_password(user_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin_user(request, db)
+    if isinstance(admin, RedirectResponse):
+        return admin
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = issue_password_setup_token(db, user)
+    return RedirectResponse(
+        url=f"/admin/users?setup_user={quote(user.display_name)}&setup_token={quote(token)}",
+        status_code=303,
+    )
+
+
+@app.post("/admin/users/{user_id}/revoke-sessions")
+def admin_revoke_user_sessions(user_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin_user(request, db)
+    if isinstance(admin, RedirectResponse):
+        return admin
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.session_version = (user.session_version or 1) + 1
+    db.commit()
+    return RedirectResponse(url="/admin/users?message=Sessions%20revoked.", status_code=303)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/archive")
@@ -1735,15 +2115,15 @@ def web_reset_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get
 
 
 @app.post("/api/users")
-def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> dict[str, int | str]:
-    existing = db.scalar(select(User).where(User.display_name == payload.display_name))
-    if existing:
-        return {"id": existing.id, "display_name": existing.display_name}
-    user = User(display_name=payload.display_name)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return {"id": user.id, "display_name": user.display_name}
+def create_user(payload: UserCreate, request: Request, db: Session = Depends(get_db)) -> dict[str, int | str | bool]:
+    require_admin_api(request, db)
+    user, setup_token = create_user_record(db, payload.display_name)
+    return {
+        "id": user.id,
+        "display_name": user.display_name,
+        "requires_password_setup": bool(setup_token),
+        "setup_url": setup_url(setup_token) if setup_token else "",
+    }
 
 
 def apply_definition_payload(

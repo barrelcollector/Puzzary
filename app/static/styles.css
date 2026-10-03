@@ -63,6 +63,21 @@ body {
   color: white;
 }
 
+.notice {
+  padding: 10px 12px;
+  border: 1px solid #8fc6b9;
+  border-radius: 6px;
+  color: #174e45;
+  background: #e9f5f1;
+  font-weight: 750;
+}
+
+.notice.danger {
+  border-color: #d9a19a;
+  color: #7c2727;
+  background: #f8e7e4;
+}
+
 .brand {
   color: var(--ink);
   text-decoration: none;

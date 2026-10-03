@@ -9,8 +9,8 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - FastAPI app
 - PostgreSQL database
 - Web portal
-- Household user profiles
-- Household profile login
+- Password-based user accounts
+- Admin-managed account creation and password resets
 - Puzzle library view
 - Admin panel for archiving, deleting, and organizing puzzles
 - Admin-managed dictionary, word banks, categories, and tags
@@ -51,6 +51,26 @@ Admin panel:
 ```text
 http://localhost:8790/admin
 ```
+
+## Accounts
+
+Puzzary does not allow public self-registration. Users sign in with their display name or email address and password.
+
+Admins manage accounts from:
+
+```text
+http://localhost:8790/admin/users
+```
+
+Admins can create users, assign the Admin role, activate/deactivate accounts, reset passwords with one-time setup links, and revoke active sessions. Puzzary prevents demoting or deactivating the last active administrator.
+
+Existing installations are migrated in place. The oldest existing user becomes an admin if no admin exists. If the first admin does not have a password yet, Puzzary writes a one-time setup link to:
+
+```text
+/data/bootstrap-admin-setup.txt
+```
+
+That setup link expires after 24 hours. If it expires, an existing admin can issue a new reset link from the Users admin page.
 
 ## API
 

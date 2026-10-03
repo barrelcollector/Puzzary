@@ -17,6 +17,7 @@
         {% if current_user.is_admin %}
           <a class="nav-link" href="/admin">Admin</a>
         {% endif %}
+        <a class="nav-link" href="/account/password">Account</a>
         <span class="user-pill">{{ current_user.display_name }}</span>
         <form method="post" action="/logout" class="logout-form">
           <button type="submit" class="ghost-button">Log out</button>
