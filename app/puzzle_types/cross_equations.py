@@ -12,7 +12,12 @@ DigitGrid = list[list[int]]
 OpGrid = list[list[str]]
 
 
-DIGIT_COORDS = [(x, y) for y in (0, 2, 4) for x in (0, 2, 4)]
+DEFAULT_GRID_SIZE = 3
+MAX_GRID_SIZE = 5
+
+
+def digit_coords(grid_size: int = DEFAULT_GRID_SIZE) -> list[tuple[int, int]]:
+    return [(x * 2, y * 2) for y in range(grid_size) for x in range(grid_size)]
 
 
 def build_source(_source_entries: Any, _difficulty: str, _excluded_tag_ids: set[int] | None = None) -> dict:
@@ -48,6 +53,23 @@ def apply_operator(
     else:
         return None
     return value if result_min <= value <= result_max else None
+
+
+def apply_operator_sequence(
+    values: list[int],
+    operators: list[str],
+    result_min: int = 1,
+    result_max: int = 9,
+    whole_number_division: bool = True,
+) -> int | None:
+    if not values or len(operators) != len(values) - 1:
+        return None
+    current = values[0]
+    for operator, value in zip(operators, values[1:], strict=False):
+        current = apply_operator(current, value, operator, result_min, result_max, whole_number_division)
+        if current is None:
+            return None
+    return current
 
 
 def operator_choices_from_options(options: dict[str, Any], difficulty: str) -> list[str]:
@@ -89,34 +111,79 @@ def find_solution(
     result_min: int = 1,
     result_max: int = 9,
     whole_number_division: bool = True,
+    grid_size: int = DEFAULT_GRID_SIZE,
 ) -> tuple[DigitGrid, OpGrid]:
     operators = operators or allowed_operators(difficulty)
-    fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
-    fallback_ops = [["+", "+", "+"], ["+", "", "+"], ["+", "+", "+"]]
+    fallback_base = [[1 for _x in range(grid_size - 1)] for _y in range(grid_size - 1)]
+    fallback_digits = build_solution_from_base(
+        fallback_base,
+        [["+" for _x in range(grid_size - 2)] for _y in range(grid_size)],
+        [["+" for _x in range(grid_size - 2)] for _y in range(grid_size)],
+        result_min,
+        result_max,
+        whole_number_division,
+    ) or [[1 for _x in range(grid_size)] for _y in range(grid_size)]
+    fallback_ops = [
+        [["+" for _x in range(grid_size - 2)] for _y in range(grid_size)],
+        [["+" for _x in range(grid_size - 2)] for _y in range(grid_size)],
+    ]
 
     for _attempt in range(12000):
-        a, b, d, e = [rng.randint(1, number_max) for _ in range(4)]
-        row_top, row_middle, row_bottom = [rng.choice(operators) for _ in range(3)]
-        col_left, col_middle, col_right = [rng.choice(operators) for _ in range(3)]
-
-        c = apply_operator(a, b, row_top, result_min, result_max, whole_number_division)
-        f = apply_operator(d, e, row_middle, result_min, result_max, whole_number_division)
-        g = apply_operator(a, d, col_left, result_min, result_max, whole_number_division)
-        h = apply_operator(b, e, col_middle, result_min, result_max, whole_number_division)
-        if None in (c, f, g, h):
+        base = [[rng.randint(1, number_max) for _x in range(grid_size - 1)] for _y in range(grid_size - 1)]
+        row_ops = [[rng.choice(operators) for _x in range(grid_size - 2)] for _y in range(grid_size)]
+        col_ops = [[rng.choice(operators) for _y in range(grid_size - 2)] for _x in range(grid_size)]
+        solution = build_solution_from_base(base, row_ops, col_ops, result_min, result_max, whole_number_division)
+        if solution is None:
             continue
-
-        i_from_row = apply_operator(g, h, row_bottom, result_min, result_max, whole_number_division)
-        i_from_col = apply_operator(c, f, col_right, result_min, result_max, whole_number_division)
-        if i_from_row is None or i_from_row != i_from_col:
-            continue
-
-        return (
-            [[a, b, c], [d, e, f], [g, h, i_from_row]],
-            [[row_top, row_middle, row_bottom], [col_left, col_middle, col_right]],
-        )
+        return solution, [row_ops, col_ops]
 
     return fallback_digits, fallback_ops
+
+
+def build_solution_from_base(
+    base: list[list[int]],
+    row_ops: list[list[str]],
+    col_ops: list[list[str]],
+    result_min: int,
+    result_max: int,
+    whole_number_division: bool,
+) -> DigitGrid | None:
+    grid_size = len(row_ops)
+    solution = [[0 for _x in range(grid_size)] for _y in range(grid_size)]
+    for y in range(grid_size - 1):
+        for x in range(grid_size - 1):
+            solution[y][x] = base[y][x]
+
+    for y in range(grid_size - 1):
+        value = apply_operator_sequence(solution[y][: grid_size - 1], row_ops[y], result_min, result_max, whole_number_division)
+        if value is None:
+            return None
+        solution[y][grid_size - 1] = value
+
+    for x in range(grid_size - 1):
+        value = apply_operator_sequence(
+            [solution[y][x] for y in range(grid_size - 1)],
+            col_ops[x],
+            result_min,
+            result_max,
+            whole_number_division,
+        )
+        if value is None:
+            return None
+        solution[grid_size - 1][x] = value
+
+    row_value = apply_operator_sequence(solution[grid_size - 1][: grid_size - 1], row_ops[grid_size - 1], result_min, result_max, whole_number_division)
+    col_value = apply_operator_sequence(
+        [solution[y][grid_size - 1] for y in range(grid_size - 1)],
+        col_ops[grid_size - 1],
+        result_min,
+        result_max,
+        whole_number_division,
+    )
+    if row_value is None or row_value != col_value:
+        return None
+    solution[grid_size - 1][grid_size - 1] = row_value
+    return solution
 
 
 def derive_solution(
@@ -129,15 +196,15 @@ def derive_solution(
     result_max: int = 9,
     whole_number_division: bool = True,
 ) -> DigitGrid | None:
-    c = apply_operator(a, b, ops[0][0], result_min, result_max, whole_number_division)
-    f = apply_operator(d, e, ops[0][1], result_min, result_max, whole_number_division)
-    g = apply_operator(a, d, ops[1][0], result_min, result_max, whole_number_division)
-    h = apply_operator(b, e, ops[1][1], result_min, result_max, whole_number_division)
+    c = apply_operator(a, b, ops[0][0][0], result_min, result_max, whole_number_division)
+    f = apply_operator(d, e, ops[0][1][0], result_min, result_max, whole_number_division)
+    g = apply_operator(a, d, ops[1][0][0], result_min, result_max, whole_number_division)
+    h = apply_operator(b, e, ops[1][1][0], result_min, result_max, whole_number_division)
     if None in (c, f, g, h):
         return None
 
-    i_from_row = apply_operator(g, h, ops[0][2], result_min, result_max, whole_number_division)
-    i_from_col = apply_operator(c, f, ops[1][2], result_min, result_max, whole_number_division)
+    i_from_row = apply_operator(g, h, ops[0][2][0], result_min, result_max, whole_number_division)
+    i_from_col = apply_operator(c, f, ops[1][2][0], result_min, result_max, whole_number_division)
     if i_from_row is None or i_from_row != i_from_col:
         return None
 
@@ -177,9 +244,24 @@ def find_unique_puzzle(
     result_min: int = 1,
     result_max: int = 9,
     whole_number_division: bool = True,
+    grid_size: int = DEFAULT_GRID_SIZE,
 ) -> tuple[DigitGrid, OpGrid, dict[str, str]]:
     fallback_digits = [[1, 2, 3], [3, 1, 4], [4, 3, 7]]
-    fallback_ops = [["+", "+", "+"], ["+", "", "+"], ["+", "+", "+"]]
+    fallback_ops = [[["+"], ["+"], ["+"]], [["+"], ["+"], ["+"]]]
+
+    if grid_size != DEFAULT_GRID_SIZE:
+        solution, ops = find_solution(
+            rng,
+            difficulty,
+            operators,
+            number_max,
+            result_min,
+            result_max,
+            whole_number_division,
+            grid_size,
+        )
+        givens = given_cells(solution, difficulty, rng, requested_given_count)
+        return solution, ops, givens
 
     for _attempt in range(12000):
         solution, ops = find_solution(
@@ -190,6 +272,7 @@ def find_unique_puzzle(
             result_min,
             result_max,
             whole_number_division,
+            grid_size,
         )
         givens = given_cells(solution, difficulty, rng, requested_given_count)
         if count_solutions(ops, givens, number_max, result_min, result_max, whole_number_division) == 1:
@@ -211,9 +294,10 @@ def given_cells(
     rng: random.Random,
     requested_count: int | None = None,
 ) -> dict[str, str]:
+    grid_size = len(solution)
     given_count = requested_count or {"easy": 4, "medium": 3, "hard": 2}.get(difficulty, 3)
-    given_count = max(2, min(8, given_count))
-    coords = DIGIT_COORDS[:]
+    given_count = max(2, min((grid_size * grid_size) - 1, given_count))
+    coords = digit_coords(grid_size)
     rng.shuffle(coords)
     return {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in coords[:given_count]}
 
@@ -241,46 +325,59 @@ def number_cell(x: int, y: int, solution: DigitGrid, givens: dict[str, str], inc
 
 
 def build_cells(solution: DigitGrid, ops: OpGrid, givens: dict[str, str], include_solution: bool = False) -> list[list[dict]]:
-    return [
-        [
-            number_cell(0, 0, solution, givens, include_solution),
-            symbol_cell(ops[0][0]),
-            number_cell(2, 0, solution, givens, include_solution),
-            symbol_cell("="),
-            number_cell(4, 0, solution, givens, include_solution),
-        ],
-        [symbol_cell(ops[1][0]), spacer_cell(), symbol_cell(ops[1][1]), spacer_cell(), symbol_cell(ops[1][2])],
-        [
-            number_cell(0, 2, solution, givens, include_solution),
-            symbol_cell(ops[0][1]),
-            number_cell(2, 2, solution, givens, include_solution),
-            symbol_cell("="),
-            number_cell(4, 2, solution, givens, include_solution),
-        ],
-        [symbol_cell("="), spacer_cell(), symbol_cell("="), spacer_cell(), symbol_cell("=")],
-        [
-            number_cell(0, 4, solution, givens, include_solution),
-            symbol_cell(ops[0][2]),
-            number_cell(2, 4, solution, givens, include_solution),
-            symbol_cell("="),
-            number_cell(4, 4, solution, givens, include_solution),
-        ],
-    ]
+    grid_size = len(solution)
+    rendered_size = grid_size * 2 - 1
+    cells = []
+    row_ops, col_ops = ops
+    for rendered_y in range(rendered_size):
+        row = []
+        for rendered_x in range(rendered_size):
+            if rendered_x % 2 == 0 and rendered_y % 2 == 0:
+                row.append(number_cell(rendered_x, rendered_y, solution, givens, include_solution))
+            elif rendered_y % 2 == 0:
+                number_x = rendered_x // 2
+                number_y = rendered_y // 2
+                row.append(symbol_cell("=" if number_x == grid_size - 2 else row_ops[number_y][number_x]))
+            elif rendered_x % 2 == 0:
+                number_x = rendered_x // 2
+                number_y = rendered_y // 2
+                row.append(symbol_cell("=" if number_y == grid_size - 2 else col_ops[number_x][number_y]))
+            else:
+                row.append(spacer_cell())
+        cells.append(row)
+    return cells
 
 
-def equation_text(left: int, operator: str, right: int, result: int) -> str:
-    return f"{left} {operator} {right} = {result}"
+def equation_text(values: list[int], operators: list[str]) -> str:
+    expression = " ".join(str(value) if index == 0 else f"{operators[index - 1]} {value}" for index, value in enumerate(values[:-1]))
+    return f"{expression} = {values[-1]}"
 
 
 def equations(solution: DigitGrid, ops: OpGrid) -> list[dict]:
-    return [
-        {"number": 1, "direction": "across", "label": "Across 1", "cells": ["0,0", "2,0", "4,0"], "equation": equation_text(solution[0][0], ops[0][0], solution[0][1], solution[0][2])},
-        {"number": 2, "direction": "across", "label": "Across 2", "cells": ["0,2", "2,2", "4,2"], "equation": equation_text(solution[1][0], ops[0][1], solution[1][1], solution[1][2])},
-        {"number": 3, "direction": "across", "label": "Across 3", "cells": ["0,4", "2,4", "4,4"], "equation": equation_text(solution[2][0], ops[0][2], solution[2][1], solution[2][2])},
-        {"number": 1, "direction": "down", "label": "Down 1", "cells": ["0,0", "0,2", "0,4"], "equation": equation_text(solution[0][0], ops[1][0], solution[1][0], solution[2][0])},
-        {"number": 2, "direction": "down", "label": "Down 2", "cells": ["2,0", "2,2", "2,4"], "equation": equation_text(solution[0][1], ops[1][1], solution[1][1], solution[2][1])},
-        {"number": 3, "direction": "down", "label": "Down 3", "cells": ["4,0", "4,2", "4,4"], "equation": equation_text(solution[0][2], ops[1][2], solution[1][2], solution[2][2])},
-    ]
+    grid_size = len(solution)
+    row_ops, col_ops = ops
+    items = []
+    for y in range(grid_size):
+        items.append(
+            {
+                "number": y + 1,
+                "direction": "across",
+                "label": f"Across {y + 1}",
+                "cells": [f"{x * 2},{y * 2}" for x in range(grid_size)],
+                "equation": equation_text(solution[y], row_ops[y]),
+            }
+        )
+    for x in range(grid_size):
+        items.append(
+            {
+                "number": x + 1,
+                "direction": "down",
+                "label": f"Down {x + 1}",
+                "cells": [f"{x * 2},{y * 2}" for y in range(grid_size)],
+                "equation": equation_text([solution[y][x] for y in range(grid_size)], col_ops[x]),
+            }
+        )
+    return items
 
 
 def flat_answer_from_payload(value: Any) -> dict[str, str]:
@@ -293,7 +390,7 @@ def flat_answer_from_payload(value: Any) -> dict[str, str]:
             value = parsed
         else:
             digits = [char for char in str(parsed) if char.isdigit()]
-            return {f"{x},{y}": digit for (x, y), digit in zip(DIGIT_COORDS, digits, strict=False)}
+            return {f"{x},{y}": digit for (x, y), digit in zip(digit_coords(), digits, strict=False)}
     if not isinstance(value, dict):
         return {}
     answers = value.get("answers", value)
@@ -388,16 +485,16 @@ def generate(
     rng = random.Random(generation_seed)
     generation_options = generation_options or {}
     operators = operator_choices_from_options(generation_options, difficulty)
-    grid_size = ranged_integer_option(generation_options, "grid_size", 3, 3, 5)
+    grid_size = ranged_integer_option(generation_options, "grid_size", DEFAULT_GRID_SIZE, DEFAULT_GRID_SIZE, MAX_GRID_SIZE)
     custom_grid_size = integer_option(generation_options, "custom_grid_size")
     if str(generation_options.get("grid_size", "")).strip().lower() == "custom" and custom_grid_size is not None:
-        grid_size = custom_grid_size
-    if grid_size != 3:
-        raise ValueError("Cross Equations currently supports the 3x3 equation grid. Larger patterns are tracked for a future generator.")
+        grid_size = max(DEFAULT_GRID_SIZE, min(MAX_GRID_SIZE, custom_grid_size))
     number_max = number_max_option(generation_options)
     result_min, result_max = result_limits(generation_options, number_max)
     whole_number_division = bool_option(generation_options, "whole_number_division", True)
-    allow_multiple_operations = bool_option(generation_options, "allow_multiple_operations", False)
+    allow_multiple_operations = bool_option(generation_options, "allow_multiple_operations", grid_size > DEFAULT_GRID_SIZE)
+    if grid_size > DEFAULT_GRID_SIZE:
+        allow_multiple_operations = True
     allow_multiple_equations = bool_option(generation_options, "allow_multiple_equations", False)
     difficulty_style = str(generation_options.get("difficulty_style", "balanced")).strip().lower()
     if difficulty_style not in {"more_givens", "balanced", "harder_operators"}:
@@ -418,8 +515,9 @@ def generate(
         result_min,
         result_max,
         whole_number_division,
+        grid_size,
     )
-    answer_map = {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in DIGIT_COORDS}
+    answer_map = {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in digit_coords(grid_size)}
     equation_list = equations(solution, ops)
     payload = {
         "kind": "cross_equations",
@@ -436,6 +534,7 @@ def generate(
             "result_min": result_min,
             "result_max": result_max,
             "difficulty_style": difficulty_style,
+            "rendered_size": grid_size * 2 - 1,
         },
     }
     solution_payload = {
@@ -464,7 +563,7 @@ def generate(
             "seed": generation_seed,
             "givens": len(givens),
             "blanks": blank_count,
-            "operators": sorted({operator for row in ops for operator in row if operator}),
+            "operators": sorted({operator for group in ops for row in group for operator in row if operator}),
             "generation_options": {
                 "operators": operators,
                 "given_count": len(givens),
@@ -500,9 +599,11 @@ register_puzzle_type(
                 label="Grid size",
                 field_type="select",
                 default="3",
-                help_text="The current generator supports the 3x3 equation grid. Larger layouts are planned.",
+                help_text="Number cells per side. Larger grids use longer row and column equations.",
                 options=(
                     {"value": "3", "label": "3x3 equation grid"},
+                    {"value": "4", "label": "4x4 equation grid"},
+                    {"value": "5", "label": "5x5 equation grid"},
                     {"value": "custom", "label": "Custom"},
                 ),
             ),
@@ -511,7 +612,7 @@ register_puzzle_type(
                 label="Custom grid size",
                 field_type="number",
                 default="",
-                help_text="Currently must be 3.",
+                help_text="Valid range is 3 to 5.",
                 minimum=3,
                 maximum=5,
             ),
@@ -596,9 +697,9 @@ register_puzzle_type(
                 label="Starter numbers",
                 field_type="number",
                 default="",
-                help_text="Optional. Leave blank to let difficulty choose; valid range is 2 to 8.",
+                help_text="Optional. Leave blank to let difficulty choose; valid range is 2 to 24.",
                 minimum=2,
-                maximum=8,
+                maximum=24,
             ),
         ),
     )

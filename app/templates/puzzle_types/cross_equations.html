@@ -5,8 +5,12 @@
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.answers | tojson }}'
   data-value-max="{{ puzzle.play_payload.settings.result_max | default(9) }}"
+  data-grid-size="{{ puzzle.play_payload.settings.grid_size | default(3) }}"
 >
-  <div class="cross-equations-grid">
+  <div
+    class="cross-equations-grid"
+    style="--cross-equations-size: {{ puzzle.play_payload.settings.rendered_size | default(puzzle.play_payload.cells | length) }}; --cross-equations-cell: {% if puzzle.play_payload.settings.grid_size | default(3) >= 5 %}44px{% elif puzzle.play_payload.settings.grid_size | default(3) >= 4 %}52px{% else %}62px{% endif %}"
+  >
     {% for row in puzzle.play_payload.cells %}
       {% for cell in row %}
         {% if cell.type == "number" %}

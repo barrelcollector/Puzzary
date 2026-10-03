@@ -862,7 +862,7 @@ legend {
 .cross-equations-grid,
 .print-cross-equations-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 62px));
+  grid-template-columns: repeat(var(--cross-equations-size, 5), minmax(0, var(--cross-equations-cell, 62px)));
   width: fit-content;
   max-width: 100%;
   margin: 18px 0;

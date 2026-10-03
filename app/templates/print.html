@@ -141,7 +141,10 @@
     </section>
   {% elif print_payload.kind == "cross_equations" %}
     <section class="print-cross-equations">
-      <div class="print-cross-equations-grid">
+      <div
+        class="print-cross-equations-grid"
+        style="--cross-equations-size: {{ print_payload.settings.rendered_size | default(print_payload.cells | length) }}; --cross-equations-cell: {% if print_payload.settings.grid_size | default(3) >= 5 %}32px{% elif print_payload.settings.grid_size | default(3) >= 4 %}38px{% else %}48px{% endif %}"
+      >
         {% for row in print_payload.cells %}
           {% for cell in row %}
             {% if cell.type == "number" %}

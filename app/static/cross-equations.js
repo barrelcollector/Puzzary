@@ -9,6 +9,8 @@
   const revealButton = document.getElementById("reveal-solution");
   const progressUrl = root.dataset.progressUrl;
   const valueMax = Number(root.dataset.valueMax || 9);
+  const gridSize = Math.max(3, Number(root.dataset.gridSize || 3));
+  const maxCoord = (gridSize - 1) * 2;
   let solution = {};
   let saveTimer = null;
 
@@ -52,7 +54,7 @@
     const [xText, yText] = input.dataset.key.split(",");
     let x = Number(xText) + dx * 2;
     let y = Number(yText) + dy * 2;
-    while (x >= 0 && x <= 4 && y >= 0 && y <= 4) {
+    while (x >= 0 && x <= maxCoord && y >= 0 && y <= maxCoord) {
       const next = inputAt(`${x},${y}`);
       if (next && !next.disabled) {
         next.focus();
