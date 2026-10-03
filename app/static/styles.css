@@ -645,13 +645,14 @@ legend {
 
 .word-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), var(--word-grid-cell, 32px));
+  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
   box-sizing: border-box;
-  width: fit-content;
+  width: min(100%, var(--word-grid-width, 760px));
   border: 2px solid var(--ink);
   background: var(--ink);
   gap: 1px;
   margin: 18px 0;
+  overflow: hidden;
 }
 
 .word-grid span,

@@ -6,7 +6,7 @@
   data-placements='{{ puzzle.solution_payload.placements | tojson }}'
   data-auto-confirm="{{ 'true' if puzzle.play_payload.settings.auto_confirm | default(true) else 'false' }}"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
-  style="--grid-size: {{ puzzle.play_payload.grid | length }}; --word-grid-cell: {% if puzzle.play_payload.grid | length >= 22 %}20px{% elif puzzle.play_payload.grid | length >= 18 %}24px{% else %}32px{% endif %}; --word-grid-font: {% if puzzle.play_payload.grid | length >= 22 %}16px{% elif puzzle.play_payload.grid | length >= 18 %}18px{% else %}22px{% endif %}"
+  style="--grid-size: {{ puzzle.play_payload.grid | length }}; --word-grid-width: {% if puzzle.play_payload.grid | length >= 22 %}760px{% elif puzzle.play_payload.grid | length >= 18 %}680px{% else %}520px{% endif %}; --word-grid-font: {% if puzzle.play_payload.grid | length >= 22 %}20px{% elif puzzle.play_payload.grid | length >= 18 %}20px{% else %}22px{% endif %}"
 >
   {% for row in puzzle.play_payload.grid %}
     {% set y = loop.index0 %}
