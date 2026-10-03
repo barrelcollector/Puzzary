@@ -4,6 +4,8 @@
 
   const wordList = document.getElementById("word-list");
   const status = document.getElementById("word-search-status");
+  const checkButton = document.getElementById("word-search-check");
+  const clearGuessesButton = document.getElementById("word-search-clear-guesses");
   const revealButton = document.getElementById("reveal-solution");
   const words = new Set((grid.dataset.words || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const found = new Set((grid.dataset.foundWords || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
@@ -17,7 +19,7 @@
   let startCell = null;
   let lastCell = null;
   let selected = [];
-  let pendingMatch = "";
+  let guesses = [];
 
   try {
     placements = JSON.parse(grid.dataset.placements || "[]");
@@ -38,7 +40,6 @@
 
   function confirmWord(word) {
     if (!word || !words.has(word)) return;
-    pendingMatch = "";
     found.add(word);
     markStoredWord(word);
     syncFoundWords();
@@ -83,7 +84,7 @@
   }
 
   function clearSelected() {
-    selected.forEach((cell) => cell.classList.remove("selected", "miss"));
+    selected.forEach((cell) => cell.classList.remove("selected"));
     selected = [];
   }
 
@@ -132,28 +133,90 @@
     return selected.map((cell) => cell.dataset.letter).join("").toUpperCase();
   }
 
+  function selectionKey(cellsToKey) {
+    return cellsToKey.map((cell) => `${cell.dataset.x},${cell.dataset.y}`).join("|");
+  }
+
+  function clearGuesses() {
+    guesses = [];
+    cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
+    syncFoundWords();
+  }
+
+  function addGuess() {
+    if (!selected.length) return;
+    const key = selectionKey(selected);
+    const existing = guesses.find((guess) => guess.key === key);
+    if (existing) {
+      existing.cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
+      guesses = guesses.filter((guess) => guess.key !== key);
+      selected = [];
+      if (status) status.textContent = "Selection removed.";
+      return;
+    }
+    const forward = selectedWord();
+    const reverse = forward.split("").reverse().join("");
+    const guess = {
+      key,
+      forward,
+      reverse,
+      cells: selected.slice(),
+    };
+    guesses.push(guess);
+    guess.cells.forEach((cell) => {
+      cell.classList.remove("selected", "miss");
+      cell.classList.add("candidate-cell");
+    });
+    selected = [];
+    if (status) status.textContent = `${guesses.length} selection${guesses.length === 1 ? "" : "s"} ready to check.`;
+  }
+
+  function checkGuesses() {
+    if (!guesses.length) {
+      if (status) status.textContent = "Make one or more selections first.";
+      return;
+    }
+    let correct = 0;
+    guesses.forEach((guess) => {
+      const match = words.has(guess.forward) ? guess.forward : words.has(guess.reverse) ? guess.reverse : "";
+      guess.cells.forEach((cell) => cell.classList.remove("candidate-cell", "selected", "miss"));
+      if (match) {
+        found.add(match);
+        guess.cells.forEach((cell) => cell.classList.add("found-cell"));
+        correct += 1;
+      } else {
+        guess.cells.forEach((cell) => {
+          if (!cell.classList.contains("found-cell")) cell.classList.add("miss");
+        });
+      }
+    });
+    guesses = [];
+    syncFoundWords();
+    saveProgress();
+    if (status) {
+      status.textContent = correct
+        ? `${correct} selection${correct === 1 ? "" : "s"} correct. ${found.size} of ${words.size} words found.`
+        : "No selected guesses matched the word list.";
+    }
+  }
+
   function finishSelection() {
     if (!selected.length) return;
+    if (!autoConfirm) {
+      addGuess();
+      return;
+    }
     const forward = selectedWord();
     const reverse = forward.split("").reverse().join("");
     const match = words.has(forward) ? forward : words.has(reverse) ? reverse : "";
 
     if (match) {
-      if (autoConfirm) {
-        selected.forEach((cell) => {
-          cell.classList.remove("selected");
-          cell.classList.add("found-cell");
-        });
-        selected = [];
-        confirmWord(match);
-        return;
-      }
-      pendingMatch = match;
       selected.forEach((cell) => {
         cell.classList.remove("selected");
-        cell.classList.add("pending-cell");
+        cell.classList.add("found-cell");
       });
-      if (status) status.textContent = `${match} selected. Tap the word to confirm it.`;
+      selected = [];
+      confirmWord(match);
       return;
     }
 
@@ -216,16 +279,8 @@
   found.forEach(markStoredWord);
   syncFoundWords();
 
-  if (wordList) {
-    wordList.addEventListener("click", (event) => {
-      const item = event.target.closest("[data-word]");
-      if (!item || !pendingMatch) return;
-      const word = item.dataset.word.toUpperCase();
-      if (word !== pendingMatch) return;
-      cells.forEach((cell) => cell.classList.remove("pending-cell", "selected", "miss"));
-      confirmWord(word);
-    });
-  }
+  if (checkButton) checkButton.addEventListener("click", checkGuesses);
+  if (clearGuessesButton) clearGuessesButton.addEventListener("click", clearGuesses);
 
   if (revealButton) {
     revealButton.addEventListener("click", revealSolution);

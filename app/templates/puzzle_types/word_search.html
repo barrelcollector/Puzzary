@@ -25,3 +25,9 @@
   {% endfor %}
 </div>
 <p class="muted" id="word-search-status">Drag across a word to mark it found.</p>
+{% if puzzle.play_payload.settings.auto_confirm | default(true) == false %}
+  <div class="action-row">
+    <button type="button" class="ghost-button" id="word-search-check">Check Answers</button>
+    <button type="button" class="ghost-button" id="word-search-clear-guesses">Clear Guesses</button>
+  </div>
+{% endif %}

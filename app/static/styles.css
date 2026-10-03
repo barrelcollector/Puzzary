@@ -677,7 +677,7 @@ legend {
   background: #8fd0be;
 }
 
-.word-grid button.pending-cell {
+.word-grid button.candidate-cell {
   background: #dceee8;
   box-shadow: inset 0 0 0 2px #3c8f7a;
 }
