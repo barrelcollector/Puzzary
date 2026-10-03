@@ -1,11 +1,12 @@
 <p>{{ puzzle.prompt }}</p>
+{% set clues_below = puzzle.play_payload.settings.clue_placement | default('inline') == 'numbered_below' or puzzle.play_payload.settings.print_layout | default('alternating') == 'pyramid_clues_below' %}
 <div
   class="word-pyramid-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.rows | tojson }}'
 >
-  <div class="word-pyramid-rows {% if puzzle.play_payload.settings.clue_placement | default('inline') == 'numbered_below' %}numbered-clues{% endif %}">
+  <div class="word-pyramid-rows {% if clues_below %}numbered-clues{% endif %}">
     {% for row in puzzle.play_payload.rows %}
       {% set saved_answer = row.given if row.gimme else progress_answers[row.index | string] | default('') %}
       <div class="word-pyramid-row" style="--row-length: {{ row.length }}">
@@ -27,7 +28,7 @@
             {% endfor %}
           </div>
         </div>
-        {% if puzzle.play_payload.settings.clue_placement | default('inline') != 'numbered_below' %}
+        {% if not clues_below %}
           <div class="word-pyramid-clue">
             <span>{{ row.clue }}</span>
             <span class="word-pyramid-row-actions">
@@ -48,7 +49,7 @@
       </div>
     {% endfor %}
   </div>
-  {% if puzzle.play_payload.settings.clue_placement | default('inline') == 'numbered_below' %}
+  {% if clues_below %}
     <section class="word-pyramid-clue-list">
       <h2>Clues</h2>
       <ol>
