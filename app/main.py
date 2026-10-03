@@ -40,7 +40,7 @@ from app.models import (
     WordBank,
     WordBankWord,
 )
-from app.puzzles import get_puzzle_type, list_puzzle_types
+from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
 from app.schemas import (
     DictionaryDefinitionPatch,
     DictionaryDefinitionWrite,
@@ -177,6 +177,22 @@ def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
         metadata=puzzle.puzzle_metadata or {},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
     )
+
+
+def puzzle_preview(puzzle: Puzzle) -> dict:
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    label = puzzle_type.label if puzzle_type is not None else puzzle.puzzle_type.replace("_", " ").title()
+    if puzzle_type is None or puzzle_type.preview_builder is None:
+        return fallback_preview(puzzle.puzzle_type, label)
+    try:
+        preview = puzzle_type.preview_builder(puzzle.print_payload or {}, puzzle.play_payload or {}, puzzle.puzzle_metadata or {})
+    except Exception:
+        return fallback_preview(puzzle.puzzle_type, label)
+    if not isinstance(preview, dict) or not preview.get("kind"):
+        return fallback_preview(puzzle.puzzle_type, label)
+    preview.setdefault("label", label)
+    preview.setdefault("meta", puzzle.puzzle_type.replace("_", " "))
+    return preview
 
 
 def serialize_generation_field(field) -> dict:
@@ -1147,6 +1163,8 @@ def library(request: Request, db: Session = Depends(get_db)):
         for puzzle in puzzles
         if get_puzzle_type(puzzle.puzzle_type) is not None
     }
+    previews_by_puzzle = {puzzle.id: puzzle_preview(puzzle) for puzzle in puzzles}
+    labels_by_type = {puzzle_type.slug: puzzle_type.label for puzzle_type in list_puzzle_types()}
     for progress in progress_rows:
         if progress.puzzle_id in progress_by_puzzle:
             puzzle = next((item for item in puzzles if item.id == progress.puzzle_id), None)
@@ -1159,6 +1177,8 @@ def library(request: Request, db: Session = Depends(get_db)):
             "puzzles": puzzles,
             "current_user": user,
             "progress_by_puzzle": progress_by_puzzle,
+            "previews_by_puzzle": previews_by_puzzle,
+            "labels_by_type": labels_by_type,
         },
     )
 

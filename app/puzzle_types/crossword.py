@@ -276,6 +276,25 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return found_count, expected_count
 
 
+def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:
+    payload = print_payload if isinstance(print_payload, dict) else {}
+    grid = payload.get("grid", [])
+    clues = payload.get("clues", [])
+    return {
+        "kind": "crossword",
+        "grid": [
+            [
+                {"open": bool(cell.get("open")), "number": cell.get("number")}
+                if isinstance(cell, dict) else {"open": False, "number": ""}
+                for cell in row[:12]
+            ]
+            for row in grid[:12]
+            if isinstance(row, list)
+        ],
+        "meta": f"{len(clues)} clues",
+    }
+
+
 def generate(
     theme: str,
     difficulty: str,
@@ -583,6 +602,7 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        preview_builder=build_preview,
         description="A clue-driven crossword built from dictionary definitions.",
         supports_print=True,
         supports_web_play=True,

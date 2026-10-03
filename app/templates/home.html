@@ -13,20 +13,92 @@
 <section>
   <h1>Puzzles</h1>
   {% if puzzles %}
-    <div class="list">
+    <div class="puzzle-card-grid">
       {% for puzzle in puzzles %}
-        <a class="row" href="/puzzles/{{ puzzle.id }}">
-          <span>
-            <strong>{{ puzzle.title }}</strong>
-            <small>{{ puzzle.puzzle_type }}{% if puzzle.theme %} / {{ puzzle.theme }}{% endif %} / {{ puzzle.difficulty }}</small>
-            {% if puzzle.id in progress_by_puzzle %}
-              <small>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} complete</small>
+        {% set preview = previews_by_puzzle[puzzle.id] %}
+        <a class="puzzle-card" href="/puzzles/{{ puzzle.id }}" aria-label="Open {{ puzzle.title }}">
+          <div class="puzzle-preview puzzle-preview-{{ preview.kind }}">
+            {% if preview.kind == "word_search" %}
+              <div class="preview-word-grid" style="--preview-grid-size: {{ preview.grid | length if preview.grid else 1 }}">
+                {% for row in preview.grid %}
+                  {% for letter in row %}
+                    <span>{{ letter }}</span>
+                  {% endfor %}
+                {% endfor %}
+              </div>
+              <div class="preview-word-chips">
+                {% for word in preview.words %}
+                  <span>{{ word }}</span>
+                {% endfor %}
+              </div>
+            {% elif preview.kind == "crossword" %}
+              <div class="preview-crossword-grid" style="--preview-grid-size: {{ preview.grid[0] | length if preview.grid else 1 }}">
+                {% for row in preview.grid %}
+                  {% for cell in row %}
+                    {% if cell.open %}
+                      <span class="open">{% if cell.number %}<small>{{ cell.number }}</small>{% endif %}</span>
+                    {% else %}
+                      <span class="block"></span>
+                    {% endif %}
+                  {% endfor %}
+                {% endfor %}
+              </div>
+            {% elif preview.kind == "sudoku" %}
+              <div class="preview-sudoku-grid" style="--preview-grid-size: {{ preview.size }}; --box-rows: {{ preview.box_rows }}; --box-cols: {{ preview.box_cols }}">
+                {% for row in preview.grid %}
+                  {% set y = loop.index0 %}
+                  {% for value in row %}
+                    {% set x = loop.index0 %}
+                    {% set key = x ~ "," ~ y %}
+                    <span class="{% if key in preview.givens %}given{% endif %}">{{ preview.givens.get(key, "") }}</span>
+                  {% endfor %}
+                {% endfor %}
+              </div>
+            {% elif preview.kind == "cross_equations" %}
+              <div class="preview-cross-equations-grid" style="--preview-grid-size: {{ preview.size }}">
+                {% for row in preview.cells %}
+                  {% for cell in row %}
+                    {% if cell.type == "number" %}
+                      <span class="number {% if cell.given %}given{% endif %}">{{ cell.value if cell.given else "" }}</span>
+                    {% elif cell.type == "symbol" %}
+                      <span class="symbol">{{ cell.value }}</span>
+                    {% else %}
+                      <span class="spacer"></span>
+                    {% endif %}
+                  {% endfor %}
+                {% endfor %}
+              </div>
+            {% elif preview.kind == "word_pyramid" %}
+              <div class="preview-pyramid">
+                {% for row in preview.rows %}
+                  <div class="preview-pyramid-row">
+                    {% for _ in range(row.length) %}
+                      <span>{{ row.given[loop.index0] if row.given else "" }}</span>
+                    {% endfor %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="preview-fallback">
+                <strong>{{ preview.icon }}</strong>
+                <span>{{ preview.label }}</span>
+              </div>
             {% endif %}
-          </span>
-          <span class="row-meta">
-            <small>{{ puzzle.created_at }}</small>
+          </div>
+          <div class="puzzle-card-body">
+            <span class="puzzle-type-pill">{{ labels_by_type.get(puzzle.puzzle_type, puzzle.puzzle_type.replace("_", " ").title()) }}</span>
+            <h2>{{ puzzle.title }}</h2>
+            <p class="muted">{{ puzzle.theme if puzzle.theme else "No theme" }} / {{ puzzle.difficulty }}</p>
+            <div class="puzzle-card-meta">
+              <span>{{ preview.meta }}</span>
+              {% if puzzle.id in progress_by_puzzle %}
+                <span>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} complete</span>
+              {% else %}
+                <span>Not started</span>
+              {% endif %}
+            </div>
             <code>{{ puzzle.id }}</code>
-          </span>
+          </div>
         </a>
       {% endfor %}
     </div>

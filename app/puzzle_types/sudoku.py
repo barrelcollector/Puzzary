@@ -259,6 +259,22 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return matched, len(expected)
 
 
+def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:
+    payload = print_payload if isinstance(print_payload, dict) else play_payload
+    grid = payload.get("grid", []) if isinstance(payload, dict) else []
+    givens = payload.get("givens", {}) if isinstance(payload, dict) else {}
+    settings = payload.get("settings", {}) if isinstance(payload, dict) else {}
+    return {
+        "kind": "sudoku",
+        "grid": grid[:9],
+        "givens": {str(key): str(value) for key, value in givens.items()} if isinstance(givens, dict) else {},
+        "size": int(settings.get("grid_size", len(grid) or 9)),
+        "box_rows": int(settings.get("box_rows", 3)),
+        "box_cols": int(settings.get("box_cols", 3)),
+        "meta": f"{len(givens) if isinstance(givens, dict) else 0} givens",
+    }
+
+
 def generate(
     theme: str,
     difficulty: str,
@@ -344,6 +360,7 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        preview_builder=build_preview,
         description="A classic 9x9 number-placement puzzle.",
         supports_print=True,
         supports_web_play=True,

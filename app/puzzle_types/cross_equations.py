@@ -437,6 +437,19 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return matched, len(expected)
 
 
+def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:
+    payload = print_payload if isinstance(print_payload, dict) else play_payload
+    cells = payload.get("cells", []) if isinstance(payload, dict) else []
+    settings = payload.get("settings", {}) if isinstance(payload, dict) else {}
+    givens = payload.get("givens", {}) if isinstance(payload, dict) else {}
+    return {
+        "kind": "cross_equations",
+        "cells": cells[:9],
+        "size": int(settings.get("rendered_size", len(cells) or 5)),
+        "meta": f"{len(givens) if isinstance(givens, dict) else 0} starters",
+    }
+
+
 def integer_option(options: dict[str, Any], key: str) -> int | None:
     try:
         return int(str(options.get(key, "")).strip())
@@ -589,6 +602,7 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        preview_builder=build_preview,
         description="A crossing arithmetic grid where rows and columns share number cells.",
         supports_print=True,
         supports_web_play=True,

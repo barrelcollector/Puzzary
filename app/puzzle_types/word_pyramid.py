@@ -258,6 +258,26 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return found, len(rows)
 
 
+def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:
+    payload = print_payload if isinstance(print_payload, dict) else play_payload
+    rows = payload.get("rows", []) if isinstance(payload, dict) else []
+    return {
+        "kind": "word_pyramid",
+        "rows": [
+            {
+                "length": int(row.get("length", 0)),
+                "number": row.get("number"),
+                "clue": str(row.get("clue", ""))[:70],
+                "gimme": bool(row.get("gimme")),
+                "given": str(row.get("given", "")) if row.get("gimme") else "",
+            }
+            for row in rows[:6]
+            if isinstance(row, dict)
+        ],
+        "meta": f"{len(rows)} rows",
+    }
+
+
 def generate(
     theme: str,
     difficulty: str,
@@ -359,6 +379,7 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        preview_builder=build_preview,
         description="A clue-driven chain where each answer grows by one letter.",
         supports_print=True,
         supports_web_play=True,

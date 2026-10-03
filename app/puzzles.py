@@ -49,6 +49,16 @@ class PuzzleType:
     gimme_modes: tuple[str, ...] = ()
     generation_fields: tuple[GenerationField, ...] = ()
     theme_mode: str = "free_text"
+    preview_builder: Callable[[dict, dict, dict], dict] | None = None
+
+
+def fallback_preview(kind: str, label: str) -> dict:
+    return {
+        "kind": "fallback",
+        "label": label,
+        "icon": "".join(part[:1] for part in label.split()[:2]).upper() or "?",
+        "meta": kind.replace("_", " "),
+    }
 
 
 PUZZLE_TYPES: dict[str, PuzzleType] = {}

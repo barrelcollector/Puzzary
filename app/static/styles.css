@@ -295,6 +295,225 @@ button {
   text-align: right;
 }
 
+.puzzle-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.puzzle-card {
+  display: grid;
+  grid-template-rows: 190px minmax(0, 1fr);
+  min-width: 0;
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.puzzle-card:hover,
+.puzzle-card:focus-visible {
+  border-color: #8fc6b9;
+  box-shadow: 0 0 0 3px #dff0eb;
+  outline: 0;
+}
+
+.puzzle-preview {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 14px;
+  background: #fbfbf8;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.puzzle-card-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.puzzle-card-body h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.puzzle-card-body p {
+  margin: 0;
+}
+
+.puzzle-card-body code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.puzzle-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.puzzle-card-meta span,
+.puzzle-type-pill {
+  width: fit-content;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.puzzle-type-pill {
+  color: #174e45;
+  border-color: #a8d3ca;
+  background: #eef8f5;
+}
+
+.preview-word-grid,
+.preview-crossword-grid,
+.preview-sudoku-grid,
+.preview-cross-equations-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--preview-grid-size), minmax(0, 1fr));
+  width: min(150px, 100%);
+  aspect-ratio: 1;
+  border: 2px solid var(--ink);
+  background: #ffffff;
+}
+
+.preview-word-grid span,
+.preview-crossword-grid span,
+.preview-sudoku-grid span,
+.preview-cross-equations-grid span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #282828;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.preview-word-grid {
+  border-width: 1px;
+}
+
+.preview-word-grid span {
+  border: 0;
+}
+
+.preview-word-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.preview-word-chips span {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.preview-crossword-grid .block {
+  background: #171717;
+}
+
+.preview-crossword-grid .open {
+  position: relative;
+  background: #ffffff;
+}
+
+.preview-crossword-grid small {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1;
+}
+
+.preview-sudoku-grid span,
+.preview-cross-equations-grid .number {
+  color: transparent;
+}
+
+.preview-sudoku-grid .given,
+.preview-cross-equations-grid .given,
+.preview-cross-equations-grid .symbol {
+  color: var(--ink);
+}
+
+.preview-sudoku-grid span:nth-child(3n) {
+  border-right-width: 2px;
+}
+
+.preview-sudoku-grid span:nth-child(n + 19):nth-child(-n + 27),
+.preview-sudoku-grid span:nth-child(n + 46):nth-child(-n + 54) {
+  border-bottom-width: 2px;
+}
+
+.preview-cross-equations-grid .symbol,
+.preview-cross-equations-grid .spacer {
+  border-color: transparent;
+  background: transparent;
+}
+
+.preview-pyramid {
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  width: 100%;
+}
+
+.preview-pyramid-row {
+  display: flex;
+  justify-content: center;
+}
+
+.preview-pyramid-row span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--ink);
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.preview-fallback {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.preview-fallback strong {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 28px;
+}
+
 .action-row {
   display: flex;
   flex-wrap: wrap;

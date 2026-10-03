@@ -115,6 +115,18 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return len(expected & found), expected_count
 
 
+def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:
+    payload = print_payload if isinstance(print_payload, dict) else play_payload
+    grid = payload.get("grid", []) if isinstance(payload, dict) else []
+    words = payload.get("words", []) if isinstance(payload, dict) else []
+    return {
+        "kind": "word_search",
+        "grid": [str(row)[:10] for row in grid[:10]],
+        "words": [str(word).upper() for word in words[:5]],
+        "meta": f"{len(words)} words",
+    }
+
+
 def contains_blocked_word(grid: list[list[str]], blocked_words: set[str]) -> bool:
     if not blocked_words:
         return False
@@ -290,6 +302,7 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        preview_builder=build_preview,
         description="A printable and interactive word-search grid.",
         supports_print=True,
         supports_web_play=True,
