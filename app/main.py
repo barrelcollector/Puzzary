@@ -1187,6 +1187,8 @@ async def web_generate_puzzle(
     theme: str = Form(""),
     word_bank_slugs: list[str] = Form(default=[]),
     difficulty: str = Form("easy"),
+    seed: str = Form(""),
+    auto_archive_at: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_web_user(request, db)
@@ -1205,10 +1207,15 @@ async def web_generate_puzzle(
             theme=generation_theme,
             word_bank_slugs=[bank.slug for bank in selected_banks],
             difficulty=difficulty,
+            seed=seed or None,
             generation_options=generation_options_from_form(form),
         ),
         db,
     )
+    saved_puzzle = db.get(Puzzle, puzzle.id)
+    if saved_puzzle:
+        saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at)
+        db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
 
