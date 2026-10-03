@@ -474,6 +474,55 @@ def word_bank_for_slug(db: Session, slug: str) -> WordBank | None:
     return db.scalar(select(WordBank).where(WordBank.slug == slug, WordBank.archived_at.is_(None)))
 
 
+def word_banks_for_slugs(db: Session, slugs: list[str]) -> list[WordBank]:
+    normalized = [slug.strip() for slug in slugs if slug.strip()]
+    if not normalized:
+        return []
+    if "__all__" in normalized:
+        return word_bank_options(db)
+    banks = db.scalars(
+        select(WordBank).where(WordBank.slug.in_(normalized), WordBank.archived_at.is_(None))
+    ).all()
+    by_slug = {bank.slug: bank for bank in banks}
+    return [by_slug[slug] for slug in normalized if slug in by_slug]
+
+
+def word_banks_for_ids(db: Session, bank_ids: list[int]) -> list[WordBank]:
+    cleaned = [int(bank_id) for bank_id in bank_ids if int(bank_id) >= 0]
+    if not cleaned:
+        return []
+    if 0 in cleaned:
+        return word_bank_options(db)
+    banks = db.scalars(
+        select(WordBank).where(WordBank.id.in_(cleaned), WordBank.archived_at.is_(None))
+    ).all()
+    by_id = {bank.id: bank for bank in banks}
+    return [by_id[bank_id] for bank_id in cleaned if bank_id in by_id]
+
+
+def combined_word_bank_entries(db: Session, banks: list[WordBank], excluded_tag_ids: set[int] | None = None) -> list[dict]:
+    entries = []
+    seen = set()
+    for bank in banks:
+        for entry in word_bank_entries(db, bank, excluded_tag_ids):
+            word = entry.get("word") if isinstance(entry, dict) else None
+            definition = entry.get("definition") if isinstance(entry, dict) else None
+            key = (getattr(word, "id", None), getattr(definition, "id", None) if definition is not None else None)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(entry)
+    return entries
+
+
+def word_bank_source_theme(banks: list[WordBank], fallback: str = "") -> str:
+    if len(banks) == 1:
+        return banks[0].slug
+    if len(banks) > 1:
+        return "all_word_banks"
+    return fallback
+
+
 def tags_for_ids(db: Session, tag_ids: list[int]) -> list[PuzzleTag]:
     if not tag_ids:
         return []
@@ -704,6 +753,7 @@ async def web_generate_puzzle(
     request: Request,
     puzzle_type: str = Form("word_search"),
     theme: str = Form(""),
+    word_bank_slugs: list[str] = Form(default=[]),
     difficulty: str = Form("easy"),
     db: Session = Depends(get_db),
 ):
@@ -712,11 +762,16 @@ async def web_generate_puzzle(
         return user
     form = await request.form()
     puzzle_type_config = get_puzzle_type(puzzle_type)
-    generation_theme = theme if (puzzle_type_config is None or puzzle_type_config.theme_mode != "none") else ""
+    needs_word_bank = bool(puzzle_type_config and "word_bank" in puzzle_type_config.source_requirements)
+    selected_banks = word_banks_for_slugs(db, word_bank_slugs) if needs_word_bank else []
+    generation_theme = word_bank_source_theme(selected_banks, theme) if needs_word_bank else (
+        theme if (puzzle_type_config is None or puzzle_type_config.theme_mode != "none") else ""
+    )
     puzzle = create_puzzle(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
             theme=generation_theme,
+            word_bank_slugs=[bank.slug for bank in selected_banks],
             difficulty=difficulty,
             generation_options=generation_options_from_form(form),
         ),
@@ -947,6 +1002,7 @@ async def admin_generate_puzzle(
     request: Request,
     puzzle_type: str = Form("word_search"),
     bank_id: int = Form(0),
+    bank_ids: list[int] = Form(default=[]),
     theme: str = Form(""),
     difficulty: str = Form("easy"),
     seed: str = Form(""),
@@ -962,12 +1018,13 @@ async def admin_generate_puzzle(
     if puzzle_type_config is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
     needs_word_bank = "word_bank" in puzzle_type_config.source_requirements
-    bank = db.get(WordBank, bank_id) if needs_word_bank and bank_id else None
-    if needs_word_bank and (bank is None or bank.archived_at is not None):
+    selected_bank_ids = bank_ids or ([bank_id] if bank_id else [])
+    banks = word_banks_for_ids(db, selected_bank_ids) if needs_word_bank else []
+    if needs_word_bank and not banks:
         raise HTTPException(status_code=404, detail="Word bank not found")
     generation_theme = ""
-    if bank is not None:
-        generation_theme = bank.slug
+    if banks:
+        generation_theme = word_bank_source_theme(banks)
     elif puzzle_type_config.theme_mode != "none":
         generation_theme = slugify(theme) if theme.strip() else puzzle_type_config.label
     form = await request.form()
@@ -975,6 +1032,7 @@ async def admin_generate_puzzle(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
             theme=generation_theme,
+            word_bank_slugs=[bank.slug for bank in banks],
             difficulty=difficulty,
             excluded_tag_ids=excluded_tag_ids,
             seed=seed or None,
@@ -984,8 +1042,10 @@ async def admin_generate_puzzle(
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle is not None:
-        saved_puzzle.category_id = category_id or (bank.category_id if bank is not None else None)
-        saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else (list(bank.tags) if bank is not None else [])
+        source_category = banks[0].category_id if len(banks) == 1 else None
+        source_tags = list(banks[0].tags) if len(banks) == 1 else []
+        saved_puzzle.category_id = category_id or source_category
+        saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else source_tags
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -1892,14 +1952,20 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
 
     needs_word_bank = "word_bank" in puzzle_type.source_requirements
-    word_bank = word_bank_for_slug(db, payload.theme) if needs_word_bank else None
-    if needs_word_bank and word_bank is None:
+    selected_banks = []
+    if needs_word_bank:
+        selected_banks = word_banks_for_slugs(db, payload.word_bank_slugs)
+        if not selected_banks and payload.theme:
+            selected_banks = word_banks_for_slugs(db, [payload.theme])
+    word_bank = selected_banks[0] if len(selected_banks) == 1 else None
+    if needs_word_bank and not selected_banks:
         raise HTTPException(status_code=400, detail="This puzzle type requires a word bank source")
+    generation_theme = word_bank_source_theme(selected_banks, payload.theme) if selected_banks else payload.theme
     excluded_tag_ids = set(payload.excluded_tag_ids)
     excluded_tags = tags_for_ids(db, payload.excluded_tag_ids)
-    source_entries = word_bank_entries(db, word_bank, excluded_tag_ids) if word_bank is not None else []
-    source_data = puzzle_type.source_builder(source_entries, payload.difficulty, excluded_tag_ids) if word_bank is not None else None
-    if word_bank is not None and source_data is None:
+    source_entries = combined_word_bank_entries(db, selected_banks, excluded_tag_ids) if selected_banks else []
+    source_data = puzzle_type.source_builder(source_entries, payload.difficulty, excluded_tag_ids) if selected_banks else None
+    if selected_banks and source_data is None:
         raise HTTPException(status_code=400, detail="No usable words remain after archive, ban, and tag exclusions")
     if payload.puzzle_type == "word_search":
         source_data = {
@@ -1908,17 +1974,20 @@ def create_puzzle(payload: PuzzleGenerateRequest, db: Session = Depends(get_db))
         }
     generation_seed = normalize_seed(payload.seed)
     try:
-        generated = puzzle_type.generator(payload.theme, payload.difficulty, source_data, generation_seed, payload.generation_options)
+        generated = puzzle_type.generator(generation_theme, payload.difficulty, source_data, generation_seed, payload.generation_options)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
     generated.metadata["excluded_tag_slugs"] = [tag.slug for tag in excluded_tags]
     generated.metadata["seed"] = generation_seed
+    if selected_banks:
+        generated.metadata["word_bank_slugs"] = [bank.slug for bank in selected_banks]
+        generated.metadata["word_bank_names"] = [bank.name for bank in selected_banks]
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
         title=generated.title,
-        theme=payload.theme,
+        theme=generation_theme,
         difficulty=payload.difficulty,
         word_bank_id=word_bank.id if word_bank is not None else None,
         prompt=generated.prompt,

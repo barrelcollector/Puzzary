@@ -73,7 +73,7 @@
   function selectedText(control) {
     if (!control) return "";
     if (control.tagName === "SELECT") {
-      return control.selectedOptions.length ? control.selectedOptions[0].textContent.trim() : "";
+      return Array.from(control.selectedOptions).map((option) => option.textContent.trim()).join(", ");
     }
     return control.value.trim();
   }
@@ -102,7 +102,7 @@
     const usesTheme = !needsWordBank && schema.theme_mode !== "none";
     addSummary(summary, "Puzzle type", selectedText(typeSelect));
     if (needsWordBank) {
-      addSummary(summary, "Word bank", selectedText(form.querySelector('[name="bank_id"], select[name="theme"]')));
+      addSummary(summary, "Word banks", selectedText(form.querySelector('[name="bank_ids"], [name="word_bank_slugs"], select[name="theme"]')));
     } else if (usesTheme) {
       addSummary(summary, "Puzzle theme", selectedText(form.querySelector('[name="theme"]:not(:disabled)')));
     } else {

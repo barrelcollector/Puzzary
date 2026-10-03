@@ -144,12 +144,14 @@
           <p class="muted" data-source-group="theme">Name the source, subject, or theme for this generated puzzle.</p>
           <p class="muted" data-source-group="none">This puzzle type does not need a source or theme.</p>
           <label data-source-group="word_bank">
-            Word bank
-            <select name="bank_id">
+            Word banks
+            <select name="bank_ids" multiple size="8">
+              <option value="0">All word banks</option>
               {% for bank in word_banks %}
-                <option value="{{ bank.id }}">{{ bank.name }}</option>
+                <option value="{{ bank.id }}" {% if loop.first %}selected{% endif %}>{{ bank.name }}</option>
               {% endfor %}
             </select>
+            <small class="muted">Select one, several, or All word banks.</small>
           </label>
           <label data-source-group="theme">
             Puzzle theme
@@ -796,5 +798,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=3"></script>
+  <script src="/static/generation-form.js?v=4"></script>
 {% endblock %}
