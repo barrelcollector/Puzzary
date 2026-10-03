@@ -4,6 +4,7 @@
   data-words="{{ puzzle.play_payload.words | join(',') }}"
   data-found-words="{{ ((progress_found_words | default([])) + (puzzle.solution_payload.gimmes.words | default([]))) | unique | join(',') }}"
   data-placements='{{ puzzle.solution_payload.placements | tojson }}'
+  data-auto-confirm="{{ 'true' if puzzle.play_payload.settings.auto_confirm | default(true) else 'false' }}"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   style="--grid-size: {{ puzzle.play_payload.grid | length }}"
 >

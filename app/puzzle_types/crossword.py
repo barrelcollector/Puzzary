@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from app.content import words_for_theme
-from app.puzzles import GeneratedPuzzle, PuzzleType, normalize_answer, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, normalize_answer, register_puzzle_type
 
 
 def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
@@ -128,6 +128,71 @@ def gimme_entry_count_for_difficulty(entry_count: int, difficulty: str) -> int:
     return min(count, max(0, entry_count - 1))
 
 
+def integer_option(options: dict[str, Any], key: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(options.get(key, "")).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def bool_option(options: dict[str, Any], key: str, default: bool) -> bool:
+    raw = str(options.get(key, "")).strip().lower()
+    if raw in {"yes", "true", "1", "on"}:
+        return True
+    if raw in {"no", "false", "0", "off"}:
+        return False
+    return default
+
+
+def grid_size_option(options: dict[str, Any], difficulty: str) -> int:
+    default = {"easy": 11, "medium": 13, "hard": 15}.get(difficulty, 11)
+    preset = str(options.get("grid_size", "")).strip().lower()
+    legacy = {"mini": 8, "regular": 12, "large": 14}
+    if preset in legacy:
+        return legacy[preset]
+    if preset == "custom":
+        return integer_option(options, "custom_grid_size", default, 5, 25)
+    if preset:
+        try:
+            return max(5, min(25, int(preset)))
+        except ValueError:
+            pass
+    return default
+
+
+def clue_depth_steps(clue_steps: list[str], depth: str) -> list[str]:
+    if not clue_steps:
+        return clue_steps
+    if depth == "none":
+        return clue_steps[:1]
+    if depth == "one_hint":
+        return clue_steps[:2]
+    return clue_steps
+
+
+def styled_clues(raw_clues: list[str], word: str, clue_style: str, depth: str) -> tuple[str, list[str]]:
+    primary, clue_steps = progressive_clues(raw_clues, word)
+    if clue_style == "definition":
+        definition_clues = [clue for clue in clue_steps if str(clue).lower().startswith("definition:")]
+        if definition_clues:
+            clue_steps = definition_clues + [clue for clue in clue_steps if clue not in definition_clues]
+            primary = clue_steps[0]
+    elif clue_style == "clue_tag":
+        tag_clues = [clue for clue in clue_steps if not str(clue).lower().startswith("definition:")]
+        if tag_clues:
+            clue_steps = tag_clues + [clue for clue in clue_steps if clue not in tag_clues]
+            primary = clue_steps[0]
+    elif clue_style == "easier":
+        easier = f"{word[0]} starts a {len(word)}-letter answer."
+        clue_steps = [primary, easier, *[clue for clue in clue_steps[1:] if clue != easier]]
+    elif clue_style == "more_cryptic":
+        primary = f"{len(word)} letters; crossings are your best clue."
+        clue_steps = [primary, *clue_steps]
+    clue_steps = clue_depth_steps(clue_steps, depth)
+    return clue_steps[0], clue_steps
+
+
 def gimme_cells_from_entries(entries: list[dict]) -> dict[str, str]:
     cells = {}
     for entry in entries:
@@ -202,12 +267,26 @@ def generate(
     seed: str | None = None,
     _generation_options: dict[str, Any] | None = None,
 ) -> GeneratedPuzzle:
+    generation_options = _generation_options or {}
     raw_entries = source_data if source_data is not None else [
         {"word": word, "clue": f"Word from {theme.replace('_', ' ')}."}
         for word in words_for_theme(theme, difficulty)
     ]
-    count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
-    size = {"easy": 11, "medium": 13, "hard": 15}.get(difficulty, 11)
+    count = integer_option(generation_options, "answer_count", {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5), 3, 30)
+    size = grid_size_option(generation_options, difficulty)
+    clue_style = str(generation_options.get("clue_style", "mixed")).strip().lower()
+    if clue_style not in {"mixed", "definition", "clue_tag", "easier", "more_cryptic"}:
+        clue_style = "mixed"
+    more_clues_depth = str(generation_options.get("more_clues_depth", "multi_step")).strip().lower()
+    if more_clues_depth not in {"none", "one_hint", "multi_step"}:
+        more_clues_depth = "multi_step"
+    check_mode = str(generation_options.get("check_mode", "whole_puzzle")).strip().lower()
+    if check_mode not in {"whole_puzzle", "per_word"}:
+        check_mode = "whole_puzzle"
+    reveal_mode = str(generation_options.get("reveal_mode", "word")).strip().lower()
+    if reveal_mode not in {"word", "letter", "whole_puzzle"}:
+        reveal_mode = "word"
+    auto_highlight_correct = bool_option(generation_options, "auto_highlight_correct", False)
     entries = []
     seen = set()
     for entry in raw_entries:
@@ -215,13 +294,15 @@ def generate(
         if len(word) < 3 or word in seen:
             continue
         seen.add(word)
-        primary_clue, clue_steps = progressive_clues(
+        primary_clue, clue_steps = styled_clues(
             [
                 str(clue).strip()
                 for clue in entry.get("clues", [entry.get("clue") or f"{word.title()} entry."])
                 if str(clue).strip()
             ],
             word,
+            clue_style,
+            more_clues_depth,
         )
         entries.append(
             {
@@ -359,7 +440,8 @@ def generate(
         }
         for item in sorted(placements, key=lambda item: (item["direction"], item["number"]))
     ]
-    gimme_count = gimme_entry_count_for_difficulty(len(clue_entries), difficulty)
+    default_gimme_count = gimme_entry_count_for_difficulty(len(clue_entries), difficulty)
+    gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, max(0, len(clue_entries) - 1))
     gimme_ids = {
         f"{entry['number']}:{entry['direction']}"
         for entry in sorted(clue_entries, key=lambda item: (item["number"], item["direction"]))[:gimme_count]
@@ -381,15 +463,26 @@ def generate(
 
     solution_grid = [[cell["letter"] for cell in row] for row in play_cells]
     prompt = "Fill the crossword from the clues."
+    settings = {
+        "grid_size": size,
+        "answer_count": count,
+        "clue_style": clue_style,
+        "more_clues_depth": more_clues_depth,
+        "check_mode": check_mode,
+        "auto_highlight_correct": auto_highlight_correct,
+        "reveal_mode": reveal_mode,
+    }
     play_payload = {
         "kind": "crossword",
         "grid": play_cells,
         "clues": clue_entries,
+        "settings": settings,
     }
     print_payload = {
         "kind": "crossword",
         "grid": print_cells,
         "clues": [{key: value for key, value in clue.items() if key != "answer"} for clue in clue_entries],
+        "settings": settings,
     }
     solution_payload = {
         "entries": clue_entries,
@@ -407,6 +500,7 @@ def generate(
             ],
             "cells": gimme_cells,
         },
+        "settings": settings,
     }
     return GeneratedPuzzle(
         title=f"{theme.replace('_', ' ').title()} Crossword",
@@ -424,6 +518,7 @@ def generate(
             "grid_size": len(play_cells),
             "seed": generation_seed,
             "gimmes": {"mode": "entries", "count": gimme_count},
+            "generation_options": settings | {"gimme_count": gimme_count},
         },
     )
 
@@ -443,5 +538,104 @@ register_puzzle_type(
         source_requirements=("word_bank", "definitions"),
         supports_gimmes=True,
         gimme_modes=("entries",),
+        generation_fields=(
+            GenerationField(
+                name="grid_size",
+                label="Grid size",
+                field_type="select",
+                default="difficulty_default",
+                help_text="Pick a target canvas size before the crossword is trimmed.",
+                options=(
+                    {"value": "difficulty_default", "label": "Use difficulty default"},
+                    {"value": "8", "label": "8x8"},
+                    {"value": "10", "label": "10x10"},
+                    {"value": "12", "label": "12x12"},
+                    {"value": "14", "label": "14x14"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_grid_size",
+                label="Custom grid size",
+                field_type="number",
+                default="",
+                help_text="Only used when Grid size is Custom.",
+                minimum=5,
+                maximum=25,
+            ),
+            GenerationField(
+                name="answer_count",
+                label="Answer count",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose.",
+                minimum=3,
+                maximum=30,
+            ),
+            GenerationField(
+                name="clue_style",
+                label="Clue style",
+                field_type="select",
+                default="mixed",
+                options=(
+                    {"value": "mixed", "label": "Mixed"},
+                    {"value": "definition", "label": "Definitions first"},
+                    {"value": "clue_tag", "label": "Clue tags first"},
+                    {"value": "easier", "label": "Easier"},
+                    {"value": "more_cryptic", "label": "More cryptic"},
+                ),
+            ),
+            GenerationField(
+                name="more_clues_depth",
+                label="More clues depth",
+                field_type="select",
+                default="multi_step",
+                options=(
+                    {"value": "none", "label": "None"},
+                    {"value": "one_hint", "label": "One hint"},
+                    {"value": "multi_step", "label": "Multi-step"},
+                ),
+            ),
+            GenerationField(
+                name="check_mode",
+                label="Check mode",
+                field_type="select",
+                default="whole_puzzle",
+                options=(
+                    {"value": "whole_puzzle", "label": "Whole puzzle only"},
+                    {"value": "per_word", "label": "Per-word check"},
+                ),
+            ),
+            GenerationField(
+                name="auto_highlight_correct",
+                label="Auto-highlight correct words",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "No"},
+                    {"value": "yes", "label": "Yes"},
+                ),
+            ),
+            GenerationField(
+                name="reveal_mode",
+                label="Reveal mode",
+                field_type="select",
+                default="word",
+                options=(
+                    {"value": "word", "label": "Per word"},
+                    {"value": "letter", "label": "Letter"},
+                    {"value": "whole_puzzle", "label": "Whole puzzle"},
+                ),
+            ),
+            GenerationField(
+                name="gimme_count",
+                label="Gimme entries",
+                field_type="number",
+                default="",
+                help_text="Optional. Number of complete entries to prefill.",
+                minimum=0,
+                maximum=30,
+            ),
+        ),
     )
 )

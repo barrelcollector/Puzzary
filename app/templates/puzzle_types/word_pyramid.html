@@ -5,7 +5,7 @@
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.rows | tojson }}'
 >
-  <div class="word-pyramid-rows">
+  <div class="word-pyramid-rows {% if puzzle.play_payload.settings.clue_placement | default('inline') == 'numbered_below' %}numbered-clues{% endif %}">
     {% for row in puzzle.play_payload.rows %}
       {% set saved_answer = row.given if row.gimme else progress_answers[row.index | string] | default('') %}
       <div class="word-pyramid-row" style="--row-length: {{ row.length }}">
@@ -46,6 +46,18 @@
       </div>
     {% endfor %}
   </div>
+  {% if puzzle.play_payload.settings.clue_placement | default('inline') == 'numbered_below' %}
+    <section class="word-pyramid-clue-list">
+      <h2>Clues</h2>
+      <ol>
+        {% for row in puzzle.play_payload.rows %}
+          <li value="{{ row.number }}">
+            {{ row.clue }} <small>{{ row.length }} letters</small>
+          </li>
+        {% endfor %}
+      </ol>
+    </section>
+  {% endif %}
   <p class="muted" id="word-pyramid-status">Fill the pyramid from top to bottom.</p>
   <div class="action-row">
     <button type="button" class="ghost-button" id="word-pyramid-check">Check</button>

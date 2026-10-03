@@ -8,6 +8,7 @@
   const clearButton = document.getElementById("cross-equations-clear");
   const revealButton = document.getElementById("reveal-solution");
   const progressUrl = root.dataset.progressUrl;
+  const valueMax = Number(root.dataset.valueMax || 9);
   let solution = {};
   let saveTimer = null;
 
@@ -21,8 +22,8 @@
     const answers = {};
     inputs.forEach((input) => {
       if (input.disabled) return;
-      const value = input.value.trim().slice(0, 1);
-      if (/^[1-9]$/.test(value)) answers[input.dataset.key] = value;
+      const value = input.value.trim();
+      if (/^-?\d+$/.test(value)) answers[input.dataset.key] = value;
     });
     return answers;
   }
@@ -65,8 +66,16 @@
 
   function setValue(input, value) {
     if (input.disabled) return;
-    const digit = String(value).replace(/[^1-9]/g, "").slice(0, 1);
-    input.value = digit;
+    let text = String(value).replace(/[^0-9-]/g, "");
+    if (text.includes("-")) {
+      text = `${text.startsWith("-") ? "-" : ""}${text.replace(/-/g, "")}`;
+    }
+    if (/^-?\d+$/.test(text)) {
+      const number = Number(text);
+      if (number > valueMax) text = String(valueMax);
+      if (number < -valueMax * valueMax) text = String(-valueMax * valueMax);
+    }
+    input.value = text.slice(0, 4);
     input.closest(".number-cell").classList.remove("correct", "incorrect");
     queueSave();
   }
@@ -111,24 +120,23 @@
   inputs.forEach((input) => {
     input.addEventListener("input", () => {
       setValue(input, input.value);
-      if (input.value) move(input, 1, 0);
     });
     input.addEventListener("keydown", (event) => {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
-      if (/^[1-9]$/.test(event.key)) {
-        event.preventDefault();
-        setValue(input, event.key);
-        move(input, 1, 0);
+      if (/^[0-9]$/.test(event.key)) {
+        return;
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          move(input, 1, 0);
+        }
       } else if (event.key === "Backspace") {
-        event.preventDefault();
-        if (input.value) {
-          setValue(input, "");
-        } else {
+        if (!input.value) {
+          event.preventDefault();
           move(input, -1, 0);
         }
-      } else if (event.key === "Delete" || event.key === "0") {
-        event.preventDefault();
-        setValue(input, "");
+      } else if (event.key === "Delete") {
+        return;
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
         move(input, 1, 0);

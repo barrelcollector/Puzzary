@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Any
 
 from app.content import words_for_theme
-from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, register_puzzle_type
 
 
 GUARANTEED_CHAINS = [
@@ -118,8 +118,23 @@ def extends_by_one_letter(previous: str, candidate: str) -> bool:
     return all(candidate_counts[letter] >= count for letter, count in previous_counts.items())
 
 
-def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -> list[dict]:
-    target_count = {"easy": 4, "medium": 5, "hard": 6}.get(difficulty, 4)
+def integer_option(options: dict[str, Any], key: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(options.get(key, "")).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def choose_chain(
+    source_data: list[dict],
+    difficulty: str,
+    rng: random.Random,
+    target_count: int | None = None,
+    starting_length: int | None = None,
+    strict_chain: bool = True,
+) -> list[dict]:
+    target_count = target_count or {"easy": 4, "medium": 5, "hard": 6}.get(difficulty, 4)
     candidates_by_length: dict[int, list[dict]] = {}
     for entry in source_data:
         word = normalize_word(entry.get("word", ""))
@@ -135,11 +150,14 @@ def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -
         if len(chain) == target_count:
             return chain
         previous = chain[-1]["word"]
-        next_options = [
-            entry
-            for entry in candidates_by_length.get(len(previous) + 1, [])
-            if extends_by_one_letter(previous, entry["word"])
-        ]
+        if strict_chain:
+            next_options = [
+                entry
+                for entry in candidates_by_length.get(len(previous) + 1, [])
+                if extends_by_one_letter(previous, entry["word"])
+            ]
+        else:
+            next_options = list(candidates_by_length.get(len(previous) + 1, []))
         rng.shuffle(next_options)
         for entry in next_options:
             result = extend([*chain, entry])
@@ -147,7 +165,14 @@ def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -
                 return result
         return None
 
-    starts = [entry for options in candidates_by_length.values() for entry in options]
+    starts = [
+        entry
+        for length, options in candidates_by_length.items()
+        for entry in options
+        if starting_length is None or length == starting_length
+    ]
+    if not starts and starting_length is not None:
+        starts = [entry for options in candidates_by_length.values() for entry in options]
     rng.shuffle(starts)
     for entry in starts:
         result = extend([entry])
@@ -162,7 +187,7 @@ def choose_chain(source_data: list[dict], difficulty: str, rng: random.Random) -
             best_chain = chain
         previous = chain[-1]["word"]
         for entry in candidates_by_length.get(len(previous) + 1, []):
-            if extends_by_one_letter(previous, entry["word"]):
+            if not strict_chain or extends_by_one_letter(previous, entry["word"]):
                 collect_best([*chain, entry])
 
     for entry in starts:
@@ -240,19 +265,34 @@ def generate(
     seed: str | None = None,
     _generation_options: dict[str, Any] | None = None,
 ) -> GeneratedPuzzle:
+    generation_options = _generation_options or {}
     source = source_data if source_data is not None else fallback_source(theme, difficulty)
     generation_seed = seed or f"word_pyramid:{theme}:{difficulty}:{','.join(str(item.get('word', '')) for item in source)}"
     rng = random.Random(generation_seed)
+    target_row_count = integer_option(generation_options, "row_count", {"easy": 4, "medium": 5, "hard": 6}.get(difficulty, 4), 3, 10)
+    starting_word_length = integer_option(generation_options, "starting_word_length", 0, 0, 12)
+    starting_word_length = starting_word_length or None
+    chain_rule = str(generation_options.get("chain_rule", "strict_anagram_plus_one")).strip().lower()
+    if chain_rule not in {"strict_anagram_plus_one", "loose_clue_ladder"}:
+        chain_rule = "strict_anagram_plus_one"
+    strict_chain = chain_rule == "strict_anagram_plus_one"
+    clue_placement = str(generation_options.get("clue_placement", "inline")).strip().lower()
+    if clue_placement not in {"inline", "numbered_below"}:
+        clue_placement = "inline"
+    print_layout = str(generation_options.get("print_layout", "alternating")).strip().lower()
+    if print_layout not in {"alternating", "pyramid_clues_below"}:
+        print_layout = "alternating"
     try:
-        chain = choose_chain(source, difficulty, rng)
+        chain = choose_chain(source, difficulty, rng, target_row_count, starting_word_length, strict_chain)
     except ValueError:
         if source_data is None:
             raise
-        chain = choose_chain([*source, *fallback_source(theme, difficulty)], difficulty, rng)
+        chain = choose_chain([*source, *fallback_source(theme, difficulty)], difficulty, rng, target_row_count, starting_word_length, strict_chain)
 
     rows = []
     solution_rows = []
-    gimme_count = gimme_count_for_difficulty(difficulty, len(chain))
+    default_gimme_count = gimme_count_for_difficulty(difficulty, len(chain))
+    gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, max(0, len(chain) - 1))
     for index, entry in enumerate(chain):
         answer = normalize_word(entry.get("word", ""))
         clues = [str(clue).strip() for clue in entry.get("clues", []) if str(clue).strip()]
@@ -272,10 +312,21 @@ def generate(
         rows.append(row)
         solution_rows.append({**row, "answer": answer})
 
-    prompt = "Fill each row. Every answer is an anagram of the row above it plus one new letter."
-    play_payload = {"kind": "word_pyramid", "rows": rows}
-    print_payload = {"kind": "word_pyramid", "rows": rows}
-    solution_payload = {"rows": solution_rows}
+    prompt = (
+        "Fill each row. Every answer is an anagram of the row above it plus one new letter."
+        if strict_chain
+        else "Fill each row. Every answer is one letter longer than the row above it."
+    )
+    settings = {
+        "row_count": len(rows),
+        "starting_word_length": rows[0]["length"] if rows else starting_word_length,
+        "clue_placement": clue_placement,
+        "chain_rule": chain_rule,
+        "print_layout": print_layout,
+    }
+    play_payload = {"kind": "word_pyramid", "rows": rows, "settings": settings}
+    print_payload = {"kind": "word_pyramid", "rows": rows, "settings": settings}
+    solution_payload = {"rows": solution_rows, "settings": settings}
     return GeneratedPuzzle(
         title=f"{theme.replace('_', ' ').title()} Word Pyramid",
         prompt=prompt,
@@ -292,6 +343,7 @@ def generate(
             "seed": generation_seed,
             "row_count": len(rows),
             "gimmes": {"mode": "starting_rows", "count": gimme_count},
+            "generation_options": settings | {"gimme_count": gimme_count},
         },
     )
 
@@ -311,5 +363,64 @@ register_puzzle_type(
         source_requirements=("word_bank", "definitions"),
         supports_gimmes=True,
         gimme_modes=("starting_rows",),
+        generation_fields=(
+            GenerationField(
+                name="row_count",
+                label="Row count",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose.",
+                minimum=3,
+                maximum=10,
+            ),
+            GenerationField(
+                name="starting_word_length",
+                label="Starting word length",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let the generator choose.",
+                minimum=2,
+                maximum=12,
+            ),
+            GenerationField(
+                name="clue_placement",
+                label="Clue placement",
+                field_type="select",
+                default="inline",
+                options=(
+                    {"value": "inline", "label": "Between rows"},
+                    {"value": "numbered_below", "label": "Numbered below"},
+                ),
+            ),
+            GenerationField(
+                name="gimme_count",
+                label="Gimme rows",
+                field_type="number",
+                default="",
+                help_text="Optional. Number of starting rows to prefill.",
+                minimum=0,
+                maximum=10,
+            ),
+            GenerationField(
+                name="chain_rule",
+                label="Chain rule",
+                field_type="select",
+                default="strict_anagram_plus_one",
+                options=(
+                    {"value": "strict_anagram_plus_one", "label": "Anagram plus one"},
+                    {"value": "loose_clue_ladder", "label": "Loose clue ladder"},
+                ),
+            ),
+            GenerationField(
+                name="print_layout",
+                label="Print layout",
+                field_type="select",
+                default="alternating",
+                options=(
+                    {"value": "alternating", "label": "Alternating rows and clues"},
+                    {"value": "pyramid_clues_below", "label": "Pyramid with clues below"},
+                ),
+            ),
+        ),
     )
 )

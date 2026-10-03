@@ -8,10 +8,12 @@
   const clearButton = document.getElementById("crossword-clear");
   const revealButton = document.getElementById("reveal-solution");
   const revealEntryButtons = Array.from(document.querySelectorAll(".reveal-entry"));
+  const checkEntryButtons = Array.from(document.querySelectorAll(".check-entry"));
   const moreClueButtons = Array.from(document.querySelectorAll(".more-clue"));
   const progressUrl = root.dataset.progressUrl;
   let solution = [];
   let entries = [];
+  let settings = {};
   let saveTimer = null;
   let activeEntry = null;
 
@@ -25,6 +27,12 @@
     entries = JSON.parse(root.dataset.entries || "[]");
   } catch (_error) {
     entries = [];
+  }
+
+  try {
+    settings = JSON.parse(root.dataset.settings || "{}");
+  } catch (_error) {
+    settings = {};
   }
 
   const inputsByKey = new Map(inputs.map((input) => [input.dataset.key, input]));
@@ -102,6 +110,52 @@
     }
   }
 
+  function entryValues(entry) {
+    const keys = cellsByEntry.get(entryId(entry)) || [];
+    return keys.map((key) => {
+      const input = inputsByKey.get(key);
+      return input ? input.value.trim().toUpperCase() : "";
+    });
+  }
+
+  function checkEntry(entry) {
+    const keys = cellsByEntry.get(entryId(entry)) || [];
+    const expected = String(entry.answer || "").toUpperCase();
+    const values = entryValues(entry);
+    const filled = values.every(Boolean);
+    const correct = values.join("") === expected;
+    keys.forEach((key, index) => {
+      const input = inputsByKey.get(key);
+      if (!input) return;
+      const cell = input.closest(".crossword-cell");
+      cell.classList.remove("correct", "incorrect");
+      if (!values[index]) return;
+      cell.classList.add(correct ? "correct" : "incorrect");
+    });
+    if (status) {
+      status.textContent = correct
+        ? `${entry.number} ${entry.direction} is correct.`
+        : filled
+          ? `${entry.number} ${entry.direction} needs another look.`
+          : `${entry.number} ${entry.direction} is not filled yet.`;
+    }
+    return correct;
+  }
+
+  function autoHighlightEntries() {
+    if (!settings.auto_highlight_correct) return;
+    entries.forEach((entry) => {
+      const expected = String(entry.answer || "").toUpperCase();
+      const values = entryValues(entry);
+      if (values.every(Boolean) && values.join("") === expected) {
+        (cellsByEntry.get(entryId(entry)) || []).forEach((key) => {
+          const input = inputsByKey.get(key);
+          if (input) input.closest(".crossword-cell").classList.add("correct");
+        });
+      }
+    });
+  }
+
   function revealSolution() {
     inputs.forEach((input) => {
       input.value = expectedFor(input);
@@ -114,14 +168,22 @@
 
   function revealEntry(entry) {
     const keys = cellsByEntry.get(entryId(entry)) || [];
-    keys.forEach((key, index) => {
+    const revealMode = settings.reveal_mode || "word";
+    const targetKeys = revealMode === "letter"
+      ? keys.filter((key) => {
+          const input = inputsByKey.get(key);
+          return input && !input.value.trim();
+        }).slice(0, 1)
+      : keys;
+    targetKeys.forEach((key) => {
       const input = inputsByKey.get(key);
       if (!input) return;
+      const index = keys.indexOf(key);
       input.value = String(entry.answer || "")[index] || expectedFor(input);
       input.closest(".crossword-cell").classList.remove("incorrect");
       input.closest(".crossword-cell").classList.add("correct");
     });
-    if (status) status.textContent = `${entry.number} ${entry.direction} revealed.`;
+    if (status) status.textContent = revealMode === "letter" ? `One letter revealed for ${entry.number} ${entry.direction}.` : `${entry.number} ${entry.direction} revealed.`;
     saveProgress();
   }
 
@@ -180,6 +242,7 @@
     input.value = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     input.closest(".crossword-cell").classList.remove("correct", "incorrect");
     queueSave();
+    window.setTimeout(autoHighlightEntries, 0);
   }
 
   inputs.forEach((input) => {
@@ -259,6 +322,16 @@
         && item.direction === button.dataset.entryDirection
       ));
       if (entry) revealEntry(entry);
+    });
+  });
+
+  checkEntryButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const entry = entries.find((item) => (
+        String(item.number) === button.dataset.entryNumber
+        && item.direction === button.dataset.entryDirection
+      ));
+      if (entry) checkEntry(entry);
     });
   });
 

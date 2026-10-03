@@ -8,6 +8,8 @@
   const clearButton = document.getElementById("sudoku-clear");
   const revealButton = document.getElementById("reveal-solution");
   const progressUrl = root.dataset.progressUrl;
+  const size = Number(root.dataset.size || 9);
+  const checkMode = root.dataset.checkMode || "check_puzzle";
   let solution = [];
   let saveTimer = null;
 
@@ -58,7 +60,7 @@
     const [xText, yText] = input.dataset.key.split(",");
     let x = Number(xText) + dx;
     let y = Number(yText) + dy;
-    while (x >= 0 && x < 9 && y >= 0 && y < 9) {
+    while (x >= 0 && x < size && y >= 0 && y < size) {
       const next = inputAt(x, y);
       if (next && !next.disabled) {
         next.focus();
@@ -72,13 +74,18 @@
 
   function setValue(input, value) {
     if (input.disabled) return;
-    const digit = String(value).replace(/[^1-9]/g, "").slice(0, 1);
+    const allowed = new RegExp(`[^1-${size}]`, "g");
+    const digit = String(value).replace(allowed, "").slice(0, 1);
     input.value = digit;
     input.closest(".sudoku-cell").classList.remove("correct", "incorrect");
     queueSave();
   }
 
   function checkGrid() {
+    if (checkMode === "none") {
+      if (status) status.textContent = "Checking is off for this puzzle.";
+      return;
+    }
     let filled = 0;
     let correct = 0;
     inputs.forEach((input) => {
@@ -94,6 +101,7 @@
       } else {
         cell.classList.add("incorrect");
       }
+      if (checkMode === "check_cell") return;
     });
     if (status) {
       status.textContent = correct === inputs.length
@@ -119,7 +127,8 @@
     });
     input.addEventListener("keydown", (event) => {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
-      if (/^[1-9]$/.test(event.key)) {
+      const digitPattern = new RegExp(`^[1-${size}]$`);
+      if (digitPattern.test(event.key)) {
         event.preventDefault();
         setValue(input, event.key);
         move(input, 1, 0);

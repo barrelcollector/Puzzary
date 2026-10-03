@@ -4,36 +4,192 @@ import json
 import random
 from typing import Any
 
-from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, register_puzzle_type
 
 
 Grid = list[list[int]]
+BOX_DEFAULTS = {
+    4: (2, 2),
+    6: (2, 3),
+    9: (3, 3),
+}
 
 
 def build_source(_source_entries: Any, _difficulty: str, _excluded_tag_ids: set[int] | None = None) -> dict:
     return {}
 
 
-def base_solution() -> Grid:
-    return [[((row * 3 + row // 3 + col) % 9) + 1 for col in range(9)] for row in range(9)]
+def integer_option(options: dict[str, Any], key: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(options.get(key, "")).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
 
 
-def shuffled_solution(rng: random.Random) -> Grid:
-    rows = [band * 3 + row for band in rng.sample(range(3), 3) for row in rng.sample(range(3), 3)]
-    cols = [stack * 3 + col for stack in rng.sample(range(3), 3) for col in rng.sample(range(3), 3)]
-    values = rng.sample(range(1, 10), 9)
-    base = base_solution()
+def bool_option(options: dict[str, Any], key: str, default: bool) -> bool:
+    raw = str(options.get(key, "")).strip().lower()
+    if raw in {"yes", "true", "1", "on"}:
+        return True
+    if raw in {"no", "false", "0", "off"}:
+        return False
+    return default
+
+
+def sudoku_shape(options: dict[str, Any]) -> tuple[int, int, int]:
+    preset = str(options.get("grid_size", "")).strip().lower()
+    if preset == "custom":
+        size = integer_option(options, "custom_grid_size", 9, 4, 9)
+        box_rows = integer_option(options, "box_rows", BOX_DEFAULTS.get(size, (3, 3))[0], 1, size)
+        box_cols = integer_option(options, "box_cols", BOX_DEFAULTS.get(size, (3, 3))[1], 1, size)
+    elif preset:
+        try:
+            size = int(preset)
+        except ValueError:
+            size = 9
+        box_rows, box_cols = BOX_DEFAULTS.get(size, (3, 3))
+    else:
+        size = 9
+        box_rows, box_cols = BOX_DEFAULTS[size]
+    if box_rows * box_cols != size:
+        raise ValueError("Sudoku custom size requires box rows x box columns to equal the grid size.")
+    return size, box_rows, box_cols
+
+
+def base_solution(size: int, box_rows: int, box_cols: int) -> Grid:
+    return [[((row * box_cols + row // box_rows + col) % size) + 1 for col in range(size)] for row in range(size)]
+
+
+def shuffled_solution(rng: random.Random, size: int, box_rows: int, box_cols: int) -> Grid:
+    rows = [
+        band * box_rows + row
+        for band in rng.sample(range(box_cols), box_cols)
+        for row in rng.sample(range(box_rows), box_rows)
+    ]
+    cols = [
+        stack * box_cols + col
+        for stack in rng.sample(range(box_rows), box_rows)
+        for col in rng.sample(range(box_cols), box_cols)
+    ]
+    values = rng.sample(range(1, size + 1), size)
+    base = base_solution(size, box_rows, box_cols)
     return [[values[base[row][col] - 1] for col in cols] for row in rows]
 
 
-def puzzle_from_solution(solution: Grid, difficulty: str, rng: random.Random) -> Grid:
-    givens = {"easy": 42, "medium": 34, "hard": 28}.get(difficulty, 34)
+def mirror_cell(row: int, col: int, size: int, symmetry: str) -> tuple[int, int] | None:
+    if symmetry == "rotational":
+        return size - 1 - row, size - 1 - col
+    if symmetry == "mirrored":
+        return row, size - 1 - col
+    return None
+
+
+def count_solutions(puzzle: Grid, size: int, box_rows: int, box_cols: int, limit: int = 2) -> int:
+    grid = [row[:] for row in puzzle]
+    rows = [set(row) - {0} for row in grid]
+    cols = [{grid[row][col] for row in range(size)} - {0} for col in range(size)]
+    boxes = [
+        {grid[row][col] for row in range(br * box_rows, (br + 1) * box_rows) for col in range(bc * box_cols, (bc + 1) * box_cols)} - {0}
+        for br in range(box_cols)
+        for bc in range(box_rows)
+    ]
+
+    def box_index(row: int, col: int) -> int:
+        return (row // box_rows) * box_rows + (col // box_cols)
+
+    def solve() -> int:
+        best_cell = None
+        best_candidates: list[int] = []
+        for row in range(size):
+            for col in range(size):
+                if grid[row][col]:
+                    continue
+                used = rows[row] | cols[col] | boxes[box_index(row, col)]
+                candidates = [value for value in range(1, size + 1) if value not in used]
+                if not candidates:
+                    return 0
+                if best_cell is None or len(candidates) < len(best_candidates):
+                    best_cell = (row, col)
+                    best_candidates = candidates
+        if best_cell is None:
+            return 1
+        found = 0
+        row, col = best_cell
+        box = box_index(row, col)
+        for value in best_candidates:
+            grid[row][col] = value
+            rows[row].add(value)
+            cols[col].add(value)
+            boxes[box].add(value)
+            found += solve()
+            rows[row].remove(value)
+            cols[col].remove(value)
+            boxes[box].remove(value)
+            grid[row][col] = 0
+            if found >= limit:
+                return found
+        return found
+
+    return solve()
+
+
+def puzzle_from_solution(
+    solution: Grid,
+    difficulty: str,
+    rng: random.Random,
+    given_count: int | None,
+    symmetry: str,
+) -> Grid:
+    size = len(solution)
+    default_ratio = {"easy": 0.52, "medium": 0.42, "hard": 0.35}.get(difficulty, 0.42)
+    givens = given_count or round(size * size * default_ratio)
+    givens = max(size, min(size * size - 1, givens))
     puzzle = [row[:] for row in solution]
-    cells = [(row, col) for row in range(9) for col in range(9)]
+    cells = [(row, col) for row in range(size) for col in range(size)]
     rng.shuffle(cells)
-    for row, col in cells[: 81 - givens]:
-        puzzle[row][col] = 0
+    blanks_needed = size * size - givens
+    removed = 0
+    for row, col in cells:
+        if removed >= blanks_needed:
+            break
+        targets = {(row, col)}
+        mirrored = mirror_cell(row, col, size, symmetry)
+        if mirrored is not None:
+            targets.add(mirrored)
+        open_targets = [(r, c) for r, c in targets if puzzle[r][c]]
+        if not open_targets or removed + len(open_targets) > blanks_needed:
+            continue
+        for target_row, target_col in open_targets:
+            puzzle[target_row][target_col] = 0
+        removed += len(open_targets)
+    if removed < blanks_needed:
+        for row, col in cells:
+            if removed >= blanks_needed:
+                break
+            if puzzle[row][col]:
+                puzzle[row][col] = 0
+                removed += 1
     return puzzle
+
+
+def unique_puzzle(
+    rng: random.Random,
+    difficulty: str,
+    size: int,
+    box_rows: int,
+    box_cols: int,
+    given_count: int | None,
+    symmetry: str,
+    require_unique: bool,
+) -> tuple[Grid, Grid, bool]:
+    for _ in range(60 if require_unique else 1):
+        solution = shuffled_solution(rng, size, box_rows, box_cols)
+        puzzle = puzzle_from_solution(solution, difficulty, rng, given_count, symmetry)
+        if not require_unique or count_solutions(puzzle, size, box_rows, box_cols) == 1:
+            return solution, puzzle, require_unique
+    solution = shuffled_solution(rng, size, box_rows, box_cols)
+    puzzle = puzzle_from_solution(solution, difficulty, rng, given_count, symmetry)
+    return solution, puzzle, False
 
 
 def flat_answer_from_payload(value: Any) -> dict[str, str]:
@@ -55,7 +211,7 @@ def flat_answer_from_payload(value: Any) -> dict[str, str]:
     normalized = {}
     for key, raw_value in answers.items():
         digit = str(raw_value).strip()[:1]
-        if key and digit in "123456789":
+        if key and digit.isdigit() and digit != "0":
             normalized[str(key)] = digit
     return normalized
 
@@ -110,33 +266,63 @@ def generate(
     seed: str | None = None,
     _generation_options: dict[str, Any] | None = None,
 ) -> GeneratedPuzzle:
+    generation_options = _generation_options or {}
     generation_seed = seed or f"sudoku:{theme}:{difficulty}"
     rng = random.Random(generation_seed)
-    solution = shuffled_solution(rng)
-    puzzle = puzzle_from_solution(solution, difficulty, rng)
+    size, box_rows, box_cols = sudoku_shape(generation_options)
+    given_count = integer_option(generation_options, "given_count", 0, 0, size * size - 1) or None
+    symmetry = str(generation_options.get("symmetry", "random")).strip().lower()
+    if symmetry not in {"random", "rotational", "mirrored"}:
+        symmetry = "random"
+    check_mode = str(generation_options.get("check_mode", "check_puzzle")).strip().lower()
+    if check_mode not in {"none", "check_cell", "check_puzzle"}:
+        check_mode = "check_puzzle"
+    show_candidate_notes = bool_option(generation_options, "candidate_notes", False)
+    require_unique = bool_option(generation_options, "require_unique", True)
+    solution, puzzle, uniqueness_verified = unique_puzzle(
+        rng,
+        difficulty,
+        size,
+        box_rows,
+        box_cols,
+        given_count,
+        symmetry,
+        require_unique,
+    )
     givens = given_cells(puzzle)
-    blank_count = 81 - len(givens)
+    blank_count = size * size - len(givens)
+    settings = {
+        "grid_size": size,
+        "box_rows": box_rows,
+        "box_cols": box_cols,
+        "symmetry": symmetry,
+        "candidate_notes": show_candidate_notes,
+        "check_mode": check_mode,
+        "uniqueness_verified": uniqueness_verified,
+    }
     payload = {
         "kind": "sudoku",
         "grid": puzzle,
         "givens": givens,
+        "settings": settings,
     }
     solution_payload = {
         "grid": solution,
         "givens": givens,
+        "settings": settings,
     }
     title_prefix = theme.replace("_", " ").replace("-", " ").title().strip()
     title = f"{title_prefix} Sudoku" if title_prefix else "Sudoku"
     return GeneratedPuzzle(
         title=title,
-        prompt="Fill every row, column, and 3x3 box with digits 1 through 9.",
+        prompt=f"Fill every row, column, and {box_rows}x{box_cols} box with digits 1 through {size}.",
         print_payload=payload,
         play_payload=payload,
         solution_payload=solution_payload,
         hints=[
-            "Each row must contain 1 through 9 without repeats.",
-            "Each column must contain 1 through 9 without repeats.",
-            "Each 3x3 box must contain 1 through 9 without repeats.",
+            f"Each row must contain 1 through {size} without repeats.",
+            f"Each column must contain 1 through {size} without repeats.",
+            f"Each {box_rows}x{box_cols} box must contain 1 through {size} without repeats.",
             f"This puzzle starts with {len(givens)} givens and {blank_count} blanks.",
         ],
         metadata={
@@ -144,6 +330,7 @@ def generate(
             "seed": generation_seed,
             "givens": len(givens),
             "blanks": blank_count,
+            "generation_options": settings | {"given_count": len(givens)},
         },
     )
 
@@ -161,5 +348,97 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         theme_mode="none",
+        generation_fields=(
+            GenerationField(
+                name="grid_size",
+                label="Grid size",
+                field_type="select",
+                default="9",
+                options=(
+                    {"value": "4", "label": "4x4"},
+                    {"value": "6", "label": "6x6"},
+                    {"value": "9", "label": "9x9"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_grid_size",
+                label="Custom grid size",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom. Values above 9 are not supported yet.",
+                minimum=4,
+                maximum=9,
+            ),
+            GenerationField(
+                name="box_rows",
+                label="Box rows",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom. Box rows x box columns must equal grid size.",
+                minimum=1,
+                maximum=9,
+            ),
+            GenerationField(
+                name="box_cols",
+                label="Box columns",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom.",
+                minimum=1,
+                maximum=9,
+            ),
+            GenerationField(
+                name="given_count",
+                label="Given count",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose.",
+                minimum=4,
+                maximum=80,
+            ),
+            GenerationField(
+                name="symmetry",
+                label="Symmetry",
+                field_type="select",
+                default="random",
+                options=(
+                    {"value": "random", "label": "Random"},
+                    {"value": "rotational", "label": "Rotational"},
+                    {"value": "mirrored", "label": "Mirrored"},
+                ),
+            ),
+            GenerationField(
+                name="candidate_notes",
+                label="Candidate notes",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "Off"},
+                    {"value": "yes", "label": "On"},
+                ),
+            ),
+            GenerationField(
+                name="check_mode",
+                label="Check mode",
+                field_type="select",
+                default="check_puzzle",
+                options=(
+                    {"value": "none", "label": "No checking"},
+                    {"value": "check_cell", "label": "Check cell"},
+                    {"value": "check_puzzle", "label": "Check puzzle"},
+                ),
+            ),
+            GenerationField(
+                name="require_unique",
+                label="Require unique solution",
+                field_type="select",
+                default="yes",
+                options=(
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+        ),
     )
 )

@@ -5,7 +5,15 @@ import string
 from typing import Any
 
 from app.content import words_for_theme
-from app.puzzles import GeneratedPuzzle, PuzzleType, normalize_answer, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, normalize_answer, register_puzzle_type
+
+
+DIRECTION_PRESETS: dict[str, list[tuple[int, int]]] = {
+    "horizontal_vertical": [(1, 0), (0, 1)],
+    "horizontal_vertical_diagonal": [(1, 0), (0, 1), (1, 1), (-1, 1)],
+    "all_forward": [(1, 0), (0, 1), (1, 1), (-1, 1)],
+    "all": [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)],
+}
 
 
 def normalize_word(value: str) -> str:
@@ -35,6 +43,51 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
 def gimme_words_for_difficulty(words: list[str], difficulty: str) -> list[str]:
     count = {"easy": 1, "medium": 1, "hard": 0}.get(difficulty, 0)
     return words[: min(count, max(0, len(words) - 1))]
+
+
+def integer_option(options: dict[str, Any], key: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(options.get(key, "")).strip())
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def bool_option(options: dict[str, Any], key: str, default: bool) -> bool:
+    raw = str(options.get(key, "")).strip().lower()
+    if raw in {"yes", "true", "1", "on"}:
+        return True
+    if raw in {"no", "false", "0", "off"}:
+        return False
+    return default
+
+
+def grid_size_option(options: dict[str, Any], difficulty: str) -> int:
+    default = {"easy": 10, "medium": 12, "hard": 14}.get(difficulty, 10)
+    preset = str(options.get("grid_size", "")).strip().lower()
+    if preset == "custom":
+        return integer_option(options, "custom_grid_size", default, 6, 24)
+    if preset:
+        try:
+            return max(6, min(24, int(preset)))
+        except ValueError:
+            pass
+    return default
+
+
+def direction_options(options: dict[str, Any]) -> tuple[str, list[tuple[int, int]]]:
+    preset = str(options.get("directions", "horizontal_vertical_diagonal")).strip().lower()
+    if preset not in DIRECTION_PRESETS:
+        preset = "horizontal_vertical_diagonal"
+    return preset, DIRECTION_PRESETS[preset]
+
+
+def coordinate_bounds(length: int, delta: int, size: int) -> tuple[int, int]:
+    if delta > 0:
+        return 0, size - length
+    if delta < 0:
+        return length - 1, size - 1
+    return 0, size - 1
 
 
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
@@ -106,6 +159,7 @@ def generate(
     seed: str | None = None,
     _generation_options: dict[str, Any] | None = None,
 ) -> GeneratedPuzzle:
+    generation_options = _generation_options or {}
     blocked_source = []
     if isinstance(source_data, dict):
         raw_words = source_data.get("words")
@@ -120,27 +174,38 @@ def generate(
         for word in words
         if word and not any(blocked in word or blocked in word[::-1] for blocked in blocked_words)
     ]
+    word_limit = integer_option(generation_options, "word_count_limit", {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5), 1, 30)
+    words = words[:word_limit]
     if not words:
         raise ValueError("Word search generation needs at least one allowed word.")
-    size = {"easy": 10, "medium": 12, "hard": 14}.get(difficulty, 10)
+    size = grid_size_option(generation_options, difficulty)
+    allow_crossings = bool_option(generation_options, "allow_crossings", True)
+    auto_confirm = bool_option(generation_options, "auto_confirm", True)
+    direction_preset, directions = direction_options(generation_options)
+    print_style = str(generation_options.get("print_style", "boxed")).strip().lower()
+    if print_style not in {"boxed", "compact"}:
+        print_style = "boxed"
     generation_seed = seed or f"{theme}:{difficulty}:{','.join(words)}"
     rng = random.Random(generation_seed)
     grid = [["" for _ in range(size)] for _ in range(size)]
     placements: list[dict] = []
-    directions = [(1, 0), (0, 1), (1, 1), (-1, 1)]
 
     for word in sorted(words, key=len, reverse=True):
+        if len(word) > size:
+            raise ValueError(f"Word '{word}' is longer than the selected grid size.")
         placed = False
-        for _ in range(200):
+        for _ in range(500):
             dx, dy = rng.choice(directions)
-            min_x = 0 if dx >= 0 else len(word) - 1
-            max_x = size - len(word) if dx >= 0 else size - 1
-            min_y = 0
-            max_y = size - len(word) if dy > 0 else size - 1
+            min_x, max_x = coordinate_bounds(len(word), dx, size)
+            min_y, max_y = coordinate_bounds(len(word), dy, size)
             x = rng.randint(min_x, max_x)
             y = rng.randint(min_y, max_y)
             coords = [(x + i * dx, y + i * dy) for i in range(len(word))]
-            if all(grid[cy][cx] in {"", letter} for (cx, cy), letter in zip(coords, word)):
+            if allow_crossings:
+                can_place = all(grid[cy][cx] in {"", letter} for (cx, cy), letter in zip(coords, word))
+            else:
+                can_place = all(grid[cy][cx] == "" for cx, cy in coords)
+            if can_place:
                 for (cx, cy), letter in zip(coords, word):
                     grid[cy][cx] = letter
                 placements.append({"word": word, "start": [x, y], "direction": [dx, dy]})
@@ -150,7 +215,18 @@ def generate(
             raise ValueError(f"Unable to place word: {word}")
 
     grid = fill_grid(grid, rng, blocked_words)
-    gimme_words = gimme_words_for_difficulty(words, difficulty)
+    default_gimme_count = len(gimme_words_for_difficulty(words, difficulty))
+    gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, max(0, len(words) - 1))
+    gimme_words = words[:gimme_count]
+
+    settings = {
+        "grid_size": size,
+        "directions": direction_preset,
+        "allow_crossings": allow_crossings,
+        "auto_confirm": auto_confirm,
+        "word_count_limit": len(words),
+        "print_style": print_style,
+    }
 
     prompt = "Find all listed words."
     print_payload = {
@@ -158,11 +234,13 @@ def generate(
         "grid": ["".join(row) for row in grid],
         "words": words,
         "gimmes": {"mode": "found_words", "words": gimme_words},
+        "settings": settings,
     }
     solution_payload = {
         "words": words,
         "placements": placements,
         "gimmes": {"mode": "found_words", "words": gimme_words},
+        "settings": settings,
     }
     return GeneratedPuzzle(
         title=f"{theme.replace('_', ' ').title()} Word Search",
@@ -181,6 +259,7 @@ def generate(
             "blocked_word_count": len(blocked_words),
             "seed": generation_seed,
             "gimmes": {"mode": "found_words", "count": len(gimme_words)},
+            "generation_options": settings | {"gimme_count": len(gimme_words)},
         },
     )
 
@@ -200,5 +279,90 @@ register_puzzle_type(
         source_requirements=("word_bank",),
         supports_gimmes=True,
         gimme_modes=("found_words",),
+        generation_fields=(
+            GenerationField(
+                name="grid_size",
+                label="Grid size",
+                field_type="select",
+                default="difficulty_default",
+                help_text="Use the difficulty default, pick a common size, or choose custom.",
+                options=(
+                    {"value": "difficulty_default", "label": "Use difficulty default"},
+                    {"value": "8", "label": "8x8"},
+                    {"value": "10", "label": "10x10"},
+                    {"value": "12", "label": "12x12"},
+                    {"value": "14", "label": "14x14"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_grid_size",
+                label="Custom grid size",
+                field_type="number",
+                default="",
+                help_text="Only used when Grid size is Custom.",
+                minimum=6,
+                maximum=24,
+            ),
+            GenerationField(
+                name="directions",
+                label="Allowed directions",
+                field_type="select",
+                default="horizontal_vertical_diagonal",
+                options=(
+                    {"value": "horizontal_vertical", "label": "Horizontal and vertical"},
+                    {"value": "horizontal_vertical_diagonal", "label": "Horizontal, vertical, diagonal"},
+                    {"value": "all", "label": "Horizontal, vertical, diagonal, backwards"},
+                ),
+            ),
+            GenerationField(
+                name="allow_crossings",
+                label="Allow shared letters",
+                field_type="select",
+                default="yes",
+                options=(
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+            GenerationField(
+                name="auto_confirm",
+                label="Auto-confirm found words",
+                field_type="select",
+                default="yes",
+                options=(
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+            GenerationField(
+                name="word_count_limit",
+                label="Word count limit",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose.",
+                minimum=1,
+                maximum=30,
+            ),
+            GenerationField(
+                name="gimme_count",
+                label="Gimme words",
+                field_type="number",
+                default="",
+                help_text="Optional. Number of words already marked found.",
+                minimum=0,
+                maximum=30,
+            ),
+            GenerationField(
+                name="print_style",
+                label="Print style",
+                field_type="select",
+                default="boxed",
+                options=(
+                    {"value": "boxed", "label": "Boxed grid"},
+                    {"value": "compact", "label": "Compact letters"},
+                ),
+            ),
+        ),
     )
 )

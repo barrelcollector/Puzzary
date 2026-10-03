@@ -6,6 +6,7 @@
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.grid | tojson }}'
   data-entries='{{ puzzle.solution_payload.entries | tojson }}'
+  data-settings='{{ puzzle.play_payload.settings | default({}) | tojson }}'
 >
   <div
     class="crossword-grid"
@@ -59,6 +60,9 @@
           {% endif %}
           <small>{{ clue.length }} letters</small>
           {% if clue.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
+          {% if puzzle.play_payload.settings.check_mode | default('whole_puzzle') == 'per_word' %}
+            <button type="button" class="ghost-button check-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">Check word</button>
+          {% endif %}
           <button type="button" class="ghost-button reveal-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}" {% if clue.gimme %}disabled{% endif %}>Reveal word</button>
         </li>
       {% endfor %}
@@ -80,6 +84,9 @@
           {% endif %}
           <small>{{ clue.length }} letters</small>
           {% if clue.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
+          {% if puzzle.play_payload.settings.check_mode | default('whole_puzzle') == 'per_word' %}
+            <button type="button" class="ghost-button check-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">Check word</button>
+          {% endif %}
           <button type="button" class="ghost-button reveal-entry" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}" {% if clue.gimme %}disabled{% endif %}>Reveal word</button>
         </li>
       {% endfor %}

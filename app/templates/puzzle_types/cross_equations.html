@@ -4,6 +4,7 @@
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.answers | tojson }}'
+  data-value-max="{{ puzzle.play_payload.settings.result_max | default(9) }}"
 >
   <div class="cross-equations-grid">
     {% for row in puzzle.play_payload.cells %}
@@ -13,8 +14,8 @@
             <input
               aria-label="Cell {{ cell.key }}"
               inputmode="numeric"
-              pattern="[1-9]"
-              maxlength="1"
+              pattern="-?[0-9]+"
+              maxlength="4"
               autocomplete="off"
               data-key="{{ cell.key }}"
               value="{{ cell.value if cell.given else progress_answers[cell.key] | default('') }}"

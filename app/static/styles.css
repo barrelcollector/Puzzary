@@ -677,6 +677,11 @@ legend {
   background: #8fd0be;
 }
 
+.word-grid button.pending-cell {
+  background: #dceee8;
+  box-shadow: inset 0 0 0 2px #3c8f7a;
+}
+
 .word-grid button.miss {
   background: #e99a91;
 }
@@ -787,7 +792,7 @@ legend {
 .sudoku-grid,
 .print-sudoku-grid {
   display: grid;
-  grid-template-columns: repeat(9, minmax(0, 44px));
+  grid-template-columns: repeat(var(--sudoku-size, 9), minmax(0, 44px));
   width: fit-content;
   max-width: 100%;
   margin: 18px 0;
@@ -809,28 +814,6 @@ legend {
   border: 1px solid var(--ink);
   border-right-width: 0;
   border-bottom-width: 0;
-}
-
-.sudoku-cell:nth-child(3n),
-.print-sudoku-grid span:nth-child(3n) {
-  border-right-width: 2px;
-}
-
-.sudoku-cell:nth-child(9n),
-.print-sudoku-grid span:nth-child(9n) {
-  border-right-width: 1px;
-}
-
-.sudoku-cell:nth-child(n + 19):nth-child(-n + 27),
-.sudoku-cell:nth-child(n + 46):nth-child(-n + 54),
-.print-sudoku-grid span:nth-child(n + 19):nth-child(-n + 27),
-.print-sudoku-grid span:nth-child(n + 46):nth-child(-n + 54) {
-  border-bottom-width: 2px;
-}
-
-.sudoku-cell:nth-child(n + 73),
-.print-sudoku-grid span:nth-child(n + 73) {
-  border-bottom-width: 1px;
 }
 
 .sudoku-cell input {
@@ -874,7 +857,7 @@ legend {
 .cross-equations-grid,
 .print-cross-equations-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 52px));
+  grid-template-columns: repeat(5, minmax(0, 62px));
   width: fit-content;
   max-width: 100%;
   margin: 18px 0;
@@ -923,7 +906,7 @@ legend {
   border-radius: 0;
   padding: 0;
   text-align: center;
-  font-size: clamp(18px, 4vw, 26px);
+  font-size: clamp(16px, 3vw, 24px);
   font-weight: 850;
   background: transparent;
 }
@@ -1122,10 +1105,26 @@ legend {
 }
 
 .word-pyramid-row .reveal-pyramid-row,
-.word-pyramid-row .more-pyramid-clue {
+.word-pyramid-row .more-pyramid-clue,
+.word-pyramid-row .check-entry {
   width: auto;
   padding: 5px 8px;
   font-size: 13px;
+}
+
+.word-pyramid-rows.numbered-clues .word-pyramid-clue {
+  display: none;
+}
+
+.word-pyramid-clue-list {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 680px);
+}
+
+.word-pyramid-clue-list ol {
+  margin: 0;
+  padding-left: 22px;
 }
 
 .pyramid-clue-steps {
@@ -1218,6 +1217,21 @@ legend {
 
 .print-word-grid span {
   font-size: 20px;
+}
+
+.print-word-grid.compact {
+  border: 0;
+  background: transparent;
+  gap: 0;
+}
+
+.print-word-grid.compact span {
+  aspect-ratio: auto;
+  min-height: 0;
+  border: 0;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 19px;
+  letter-spacing: 0;
 }
 
 .print-gimme-cell {
@@ -1317,6 +1331,10 @@ legend {
   gap: 12px;
 }
 
+.print-word-pyramid.clues-below {
+  gap: 6px;
+}
+
 .print-pyramid-row {
   display: grid;
   justify-items: center;
@@ -1343,6 +1361,12 @@ legend {
 .print-pyramid-row p {
   width: min(100%, 560px);
   margin: 0;
+}
+
+.print-pyramid-clues {
+  width: min(100%, 560px);
+  margin: 10px auto 0;
+  padding-left: 22px;
 }
 
 .print-generic pre {

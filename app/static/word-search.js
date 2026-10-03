@@ -8,6 +8,7 @@
   const words = new Set((grid.dataset.words || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const found = new Set((grid.dataset.foundWords || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const progressUrl = grid.dataset.progressUrl;
+  const autoConfirm = grid.dataset.autoConfirm !== "false";
   const cells = Array.from(grid.querySelectorAll("button[data-letter]"));
   const cellsByCoord = new Map(cells.map((cell) => [`${cell.dataset.x},${cell.dataset.y}`, cell]));
   let placements = [];
@@ -16,6 +17,7 @@
   let startCell = null;
   let lastCell = null;
   let selected = [];
+  let pendingMatch = "";
 
   try {
     placements = JSON.parse(grid.dataset.placements || "[]");
@@ -32,6 +34,15 @@
         ? "All words found."
         : `${found.size} of ${words.size} words found.`;
     }
+  }
+
+  function confirmWord(word) {
+    if (!word || !words.has(word)) return;
+    pendingMatch = "";
+    found.add(word);
+    markStoredWord(word);
+    syncFoundWords();
+    saveProgress();
   }
 
   function saveProgress() {
@@ -128,14 +139,21 @@
     const match = words.has(forward) ? forward : words.has(reverse) ? reverse : "";
 
     if (match) {
-      found.add(match);
+      if (autoConfirm) {
+        selected.forEach((cell) => {
+          cell.classList.remove("selected");
+          cell.classList.add("found-cell");
+        });
+        selected = [];
+        confirmWord(match);
+        return;
+      }
+      pendingMatch = match;
       selected.forEach((cell) => {
         cell.classList.remove("selected");
-        cell.classList.add("found-cell");
+        cell.classList.add("pending-cell");
       });
-      selected = [];
-      syncFoundWords();
-      saveProgress();
+      if (status) status.textContent = `${match} selected. Tap the word to confirm it.`;
       return;
     }
 
@@ -197,6 +215,17 @@
 
   found.forEach(markStoredWord);
   syncFoundWords();
+
+  if (wordList) {
+    wordList.addEventListener("click", (event) => {
+      const item = event.target.closest("[data-word]");
+      if (!item || !pendingMatch) return;
+      const word = item.dataset.word.toUpperCase();
+      if (word !== pendingMatch) return;
+      cells.forEach((cell) => cell.classList.remove("pending-cell", "selected", "miss"));
+      confirmWord(word);
+    });
+  }
 
   if (revealButton) {
     revealButton.addEventListener("click", revealSolution);

@@ -4,14 +4,27 @@
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.grid | tojson }}'
+  data-size="{{ puzzle.play_payload.settings.grid_size | default(9) }}"
+  data-check-mode="{{ puzzle.play_payload.settings.check_mode | default('check_puzzle') }}"
 >
-  <div class="sudoku-grid">
+  <div
+    class="sudoku-grid"
+    style="--sudoku-size: {{ puzzle.play_payload.settings.grid_size | default(9) }}; --box-rows: {{ puzzle.play_payload.settings.box_rows | default(3) }}; --box-cols: {{ puzzle.play_payload.settings.box_cols | default(3) }}"
+  >
     {% for row in puzzle.play_payload.grid %}
       {% set y = loop.index0 %}
       {% for value in row %}
         {% set x = loop.index0 %}
         {% set cell_key = x ~ ',' ~ y %}
-        <label class="sudoku-cell" data-x="{{ x }}" data-y="{{ y }}">
+        {% set box_cols = puzzle.play_payload.settings.box_cols | default(3) %}
+        {% set box_rows = puzzle.play_payload.settings.box_rows | default(3) %}
+        {% set size = puzzle.play_payload.settings.grid_size | default(9) %}
+        <label
+          class="sudoku-cell"
+          data-x="{{ x }}"
+          data-y="{{ y }}"
+          style="{% if (x + 1) % box_cols == 0 and x + 1 < size %}border-right-width: 2px;{% endif %}{% if (y + 1) % box_rows == 0 and y + 1 < size %}border-bottom-width: 2px;{% endif %}"
+        >
           <input
             aria-label="Row {{ y + 1 }}, column {{ x + 1 }}"
             inputmode="numeric"
@@ -26,7 +39,7 @@
       {% endfor %}
     {% endfor %}
   </div>
-  <p class="muted" id="sudoku-status">Fill the grid with digits 1 through 9.</p>
+  <p class="muted" id="sudoku-status">Fill the grid with digits 1 through {{ puzzle.play_payload.settings.grid_size | default(9) }}.</p>
   <div class="action-row">
     <button type="button" class="ghost-button" id="sudoku-check">Check</button>
     <button type="button" class="ghost-button" id="sudoku-clear">Clear Grid</button>
