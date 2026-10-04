@@ -713,6 +713,69 @@ button {
   font-size: 14px;
 }
 
+.dashboard-review {
+  display: grid;
+  gap: 14px;
+}
+
+.review-count-grid,
+.dashboard-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.review-count-grid a,
+.dashboard-actions a,
+.review-link-list a {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfaf6;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.review-count-grid a:hover,
+.dashboard-actions a:hover,
+.review-link-list a:hover {
+  border-color: #9ab8ae;
+  background: #f7fbf9;
+}
+
+.review-count-grid strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.review-count-grid span,
+.dashboard-actions span,
+.review-link-list span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dashboard-actions a {
+  align-content: start;
+  min-height: 78px;
+}
+
+.review-link-list {
+  display: grid;
+  gap: 8px;
+}
+
+.review-link-list a {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.review-link-list strong {
+  font-size: 18px;
+}
+
 .admin-list {
   display: grid;
   gap: 12px;
@@ -1904,6 +1967,8 @@ summary {
   .word-entry-grid,
   .admin-shell,
   .metric-grid,
+  .review-count-grid,
+  .dashboard-actions,
   .inline-form,
   .print-clues {
     grid-template-columns: 1fr;

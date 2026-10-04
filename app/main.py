@@ -606,6 +606,108 @@ def write_manual_puzzle(
     return puzzle
 
 
+def puzzle_is_draft(puzzle: Puzzle) -> bool:
+    metadata = puzzle.puzzle_metadata if isinstance(puzzle.puzzle_metadata, dict) else {}
+    return bool(metadata.get("draft"))
+
+
+def manual_puzzle_publish_error(db: Session, puzzle: Puzzle) -> str:
+    metadata = puzzle.puzzle_metadata if isinstance(puzzle.puzzle_metadata, dict) else {}
+    if not (metadata.get("manual") or puzzle.source == "manual"):
+        return ""
+    payload = PuzzleManualWrite(
+        puzzle_type=puzzle.puzzle_type,
+        title=puzzle.title,
+        theme=puzzle.theme,
+        difficulty=puzzle.difficulty,
+        prompt=puzzle.prompt,
+        print_payload=puzzle.print_payload or {},
+        play_payload=puzzle.play_payload or {},
+        solution_payload=puzzle.solution_payload or {},
+        metadata=metadata,
+        hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
+        draft=False,
+    )
+    valid, error = validate_manual_puzzle_payload(db, payload, allow_draft=False)
+    return "" if valid else error
+
+
+def active_word_definitions(word: DictionaryWord) -> list[DictionaryDefinition]:
+    return [definition for definition in word.definitions if definition.archived_at is None]
+
+
+templates.env.globals["active_word_definitions"] = active_word_definitions
+
+
+def dashboard_review_context(
+    db: Session,
+    puzzles: list[Puzzle],
+    dictionary_words: list[DictionaryWord],
+    all_word_banks: list[WordBank],
+    tags: list[PuzzleTag],
+) -> dict:
+    now = utcnow()
+    soon_cutoff = now + timedelta(hours=24)
+    draft_puzzles = [puzzle for puzzle in puzzles if puzzle_is_draft(puzzle)]
+    incomplete_puzzles = []
+    for puzzle in puzzles:
+        error = manual_puzzle_publish_error(db, puzzle)
+        if error:
+            incomplete_puzzles.append({"puzzle": puzzle, "error": error})
+    banned_words = [word for word in dictionary_words if word.banned_at is not None]
+    archived_words = [word for word in dictionary_words if word.archived_at is not None]
+    words_without_definitions = [
+        word for word in dictionary_words
+        if word.archived_at is None and word.banned_at is None and not active_word_definitions(word)
+    ]
+    definitions_without_clues = [
+        definition
+        for word in dictionary_words
+        if word.archived_at is None and word.banned_at is None
+        for definition in active_word_definitions(word)
+        if not tag_value(definition.tags, "Clue").strip()
+    ]
+    archived_banks = [bank for bank in all_word_banks if bank.archived_at is not None]
+    empty_banks = [
+        bank for bank in all_word_banks
+        if bank.archived_at is None and len(word_bank_entries(db, bank)) == 0
+    ]
+    unused_tags = [
+        tag for tag in tags
+        if not tag.puzzles and not tag.word_banks and not tag.dictionary_words and not tag.dictionary_definitions
+    ]
+    auto_archive_soon = [
+        puzzle for puzzle in puzzles
+        if puzzle.archived_at is None and puzzle.auto_archive_at is not None and now <= puzzle.auto_archive_at <= soon_cutoff
+    ]
+    return {
+        "counts": {
+            "total_puzzles": len(puzzles),
+            "draft_puzzles": len(draft_puzzles),
+            "incomplete_puzzles": len(incomplete_puzzles),
+            "total_words": len(dictionary_words),
+            "banned_words": len(banned_words),
+            "archived_words": len(archived_words),
+            "words_without_definitions": len(words_without_definitions),
+            "definitions_without_clues": len(definitions_without_clues),
+            "archived_banks": len(archived_banks),
+            "empty_banks": len(empty_banks),
+            "unused_tags": len(unused_tags),
+            "auto_archive_soon": len(auto_archive_soon),
+        },
+        "draft_puzzles": draft_puzzles[:8],
+        "incomplete_puzzles": incomplete_puzzles[:8],
+        "banned_words": banned_words[:8],
+        "archived_words": archived_words[:8],
+        "words_without_definitions": words_without_definitions[:8],
+        "definitions_without_clues": definitions_without_clues[:8],
+        "archived_banks": archived_banks[:8],
+        "empty_banks": empty_banks[:8],
+        "unused_tags": unused_tags[:8],
+        "auto_archive_soon": auto_archive_soon[:8],
+    }
+
+
 def import_portable_puzzles(
     db: Session,
     items: list[dict],
@@ -2514,8 +2616,11 @@ def admin_context(
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
     dictionary_words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+    recent_words = db.scalars(select(DictionaryWord).order_by(desc(DictionaryWord.created_at)).limit(8)).all()
+    recent_word_banks = db.scalars(select(WordBank).order_by(desc(WordBank.created_at)).limit(8)).all()
     dictionary_import_sources = db.scalars(select(DictionaryImportSource).order_by(DictionaryImportSource.name)).all()
     admin_users = db.scalars(select(User).order_by(User.display_name)).all()
+    dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags)
     return {
         "request": request,
         "current_user": user,
@@ -2541,8 +2646,11 @@ def admin_context(
         "progress_rows": progress_rows,
         "photos": photos,
         "dictionary_words": dictionary_words,
+        "recent_words": recent_words,
+        "recent_word_banks": recent_word_banks,
         "dictionary_import_sources": dictionary_import_sources,
         "admin_users": admin_users,
+        "dashboard_review": dashboard_review,
         "selected_word": selected_word,
         "selected_word_bank": selected_word_bank,
         "selected_tag": selected_tag,

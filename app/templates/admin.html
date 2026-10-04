@@ -20,37 +20,152 @@
       <section class="puzzle-head">
         <div>
           <h1>Admin Dashboard</h1>
-        <p class="muted">Manage words, banks, generated puzzles, and solving activity.</p>
+          <p class="muted">Review what changed, what needs cleanup, and where to jump next.</p>
         </div>
+        <span class="action-row">
+          <a class="button-link" href="/admin/generate">Generate</a>
+          <a class="ghost-button" href="/admin/puzzles/manual">Manual Puzzle</a>
+        </span>
       </section>
       <div class="metric-grid">
-        <a class="metric-card" href="/admin/word-banks"><strong>{{ all_word_banks | length }}</strong><span>Word banks</span></a>
-        <a class="metric-card" href="/admin/dictionary"><strong>{{ dictionary_words | length }}</strong><span>Dictionary words</span></a>
+        <a class="metric-card" href="/admin/puzzles"><strong>{{ dashboard_review.counts.total_puzzles }}</strong><span>Total puzzles</span></a>
         <a class="metric-card" href="/admin/puzzles"><strong>{{ live_puzzles | length }}</strong><span>Live puzzles</span></a>
-        <a class="metric-card" href="/admin/puzzles"><strong>{{ archived_puzzles | length }}</strong><span>Archived puzzles</span></a>
+        <a class="metric-card" href="/admin/dictionary"><strong>{{ dashboard_review.counts.total_words }}</strong><span>Dictionary words</span></a>
+        <a class="metric-card" href="/admin/word-banks"><strong>{{ all_word_banks | length }}</strong><span>Word banks</span></a>
       </div>
+
+      <section class="admin-grid two">
+        <article class="panel dashboard-review">
+          <h2>Needs Attention</h2>
+          <div class="review-count-grid">
+            <a href="/admin/puzzles"><strong>{{ dashboard_review.counts.draft_puzzles }}</strong><span>Draft puzzles</span></a>
+            <a href="/admin/puzzles"><strong>{{ dashboard_review.counts.incomplete_puzzles }}</strong><span>Incomplete manuals</span></a>
+            <a href="/admin/dictionary"><strong>{{ dashboard_review.counts.banned_words }}</strong><span>Banned words</span></a>
+            <a href="/admin/dictionary"><strong>{{ dashboard_review.counts.words_without_definitions }}</strong><span>Words missing definitions</span></a>
+            <a href="/admin/word-banks"><strong>{{ dashboard_review.counts.empty_banks }}</strong><span>Empty word banks</span></a>
+            <a href="/admin/tags"><strong>{{ dashboard_review.counts.unused_tags }}</strong><span>Unused tags</span></a>
+          </div>
+          <div class="list compact">
+            {% for item in dashboard_review.incomplete_puzzles %}
+              <a class="row" href="/admin/puzzles/{{ item.puzzle.id }}/edit">
+                <span><strong>{{ item.puzzle.title }}</strong><small>{{ item.error }}</small></span>
+                <small>Fix</small>
+              </a>
+            {% endfor %}
+            {% for puzzle in dashboard_review.draft_puzzles %}
+              <a class="row" href="/admin/puzzles/{{ puzzle.id }}/edit">
+                <span><strong>{{ puzzle.title }}</strong><small>{{ puzzle.puzzle_type }} / draft</small></span>
+                <small>Resume</small>
+              </a>
+            {% endfor %}
+            {% for word in dashboard_review.words_without_definitions %}
+              <a class="row" href="/admin/dictionary/{{ word.id }}">
+                <span><strong>{{ word.display_text or word.word }}</strong><small>No active definitions yet.</small></span>
+                <small>Define</small>
+              </a>
+            {% endfor %}
+            {% if not dashboard_review.incomplete_puzzles and not dashboard_review.draft_puzzles and not dashboard_review.words_without_definitions %}
+              <p class="muted">Nothing urgent in the main review queue.</p>
+            {% endif %}
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>Review Queues</h2>
+          <div class="review-link-list">
+            <a href="/admin/dictionary"><span>Banned words</span><strong>{{ dashboard_review.counts.banned_words }}</strong></a>
+            <a href="/admin/dictionary"><span>Archived words</span><strong>{{ dashboard_review.counts.archived_words }}</strong></a>
+            <a href="/admin/dictionary"><span>Definitions missing clue text</span><strong>{{ dashboard_review.counts.definitions_without_clues }}</strong></a>
+            <a href="/admin/word-banks"><span>Archived word banks</span><strong>{{ dashboard_review.counts.archived_banks }}</strong></a>
+            <a href="/admin/puzzles"><span>Archived puzzles</span><strong>{{ archived_puzzles | length }}</strong></a>
+            <a href="/admin/publishing"><span>Auto-archive in 24 hours</span><strong>{{ dashboard_review.counts.auto_archive_soon }}</strong></a>
+          </div>
+        </article>
+      </section>
+
       <section class="panel">
         <h2>Quick Actions</h2>
-        <div class="action-row">
-          <a class="button-link" href="/admin/generate">Generate Puzzle</a>
-          <a class="button-link" href="/admin/word-banks">Add Word Bank</a>
-          <a class="ghost-link" href="/admin/publishing">Publishing Plan</a>
+        <div class="dashboard-actions">
+          <a href="/admin/generate"><strong>Generate Puzzle</strong><span>Use a module wizard and selected source.</span></a>
+          <a href="/admin/puzzles/manual"><strong>Create Manual Puzzle</strong><span>Save a draft, preview it, then publish.</span></a>
+          <a href="/admin/dictionary"><strong>Add Dictionary Words</strong><span>Define words once and reuse them in banks.</span></a>
+          <a href="/admin/word-banks"><strong>Manage Word Banks</strong><span>Build manual or tag-driven sources.</span></a>
+          <a href="/admin/tags"><strong>Manage Tags</strong><span>Organize words, definitions, banks, and puzzles.</span></a>
+          <a href="/admin/publishing"><strong>Publishing Tasks</strong><span>Plan Daily Stripe bundle work.</span></a>
         </div>
       </section>
-      <section>
-        <h2>Recent Puzzles</h2>
-        <div class="list">
-          {% for puzzle in puzzles[:6] %}
-            <a class="row" href="/puzzles/{{ puzzle.id }}">
-              <span>
-                <strong>{{ puzzle.title }}</strong>
-                <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }}{% if puzzle.word_bank %} / {{ puzzle.word_bank.name }}{% endif %}</small>
-              </span>
-              {% if puzzle.archived_at %}<small>Archived</small>{% endif %}
-            </a>
-          {% else %}
-            <p class="muted">No puzzles yet.</p>
-          {% endfor %}
+
+      <section class="admin-grid two">
+        <div>
+          <h2>Recent Puzzles</h2>
+          <div class="list">
+            {% for puzzle in puzzles[:8] %}
+              <a class="row" href="/puzzles/{{ puzzle.id }}">
+                <span>
+                  <strong>{{ puzzle.title }}</strong>
+                  <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }}{% if puzzle.word_bank %} / {{ puzzle.word_bank.name }}{% endif %}</small>
+                </span>
+                {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") %}<small>Draft</small>{% elif puzzle.archived_at %}<small>Archived</small>{% endif %}
+              </a>
+            {% else %}
+              <p class="muted">No puzzles yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <h2>Recent Words</h2>
+          <div class="list">
+            {% for word in recent_words %}
+              <a class="row" href="/admin/dictionary/{{ word.id }}">
+                <span>
+                  <strong>{{ word.display_text or word.word }}</strong>
+                  <small>{{ active_word_definitions(word) | length }} active definition{% if active_word_definitions(word) | length != 1 %}s{% endif %}</small>
+                </span>
+                {% if word.banned_at %}<small>Banned</small>{% elif word.archived_at %}<small>Archived</small>{% endif %}
+              </a>
+            {% else %}
+              <p class="muted">No dictionary words yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+
+      <section class="admin-grid two">
+        <div>
+          <h2>Recent Word Banks</h2>
+          <div class="list">
+            {% for bank in recent_word_banks %}
+              <a class="row" href="/admin/word-banks/{{ bank.id }}">
+                <span>
+                  <strong>{{ bank.name }}</strong>
+                  <small>{{ bank.slug }} / {{ word_bank_mode(bank) }}</small>
+                </span>
+                {% if bank.archived_at %}<small>Archived</small>{% endif %}
+              </a>
+            {% else %}
+              <p class="muted">No word banks yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <h2>Recent Activity</h2>
+          <div class="list">
+            {% for attempt in attempts[:5] %}
+              <a class="row" href="/puzzles/{{ attempt.puzzle_id }}">
+                <span><strong>{{ attempt.puzzle.title if attempt.puzzle else attempt.puzzle_id }}</strong><small>Answer attempt{% if attempt.is_correct %} / correct{% endif %}</small></span>
+                <small>{{ local_datetime_label(attempt.created_at) }}</small>
+              </a>
+            {% endfor %}
+            {% for photo in photos[:3] %}
+              <a class="row" href="/admin/activity">
+                <span><strong>{{ photo.puzzle.title if photo.puzzle else photo.puzzle_id }}</strong><small>Photo upload</small></span>
+                <small>{{ local_datetime_label(photo.created_at) }}</small>
+              </a>
+            {% endfor %}
+            {% if not attempts and not photos %}
+              <p class="muted">No solve activity yet.</p>
+            {% endif %}
+          </div>
         </div>
       </section>
     {% endif %}
