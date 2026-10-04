@@ -10,9 +10,32 @@ from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleTyp
 
 GUARANTEED_CHAINS = [
     ["TIP", "PINT", "POINT", "PISTON", "OPTIONS", "STOOPING"],
+    ["AN", "RAN", "EARN", "ANGER", "ORANGE"],
+    ["TO", "TOP", "PLOT", "PILOT", "PISTOL"],
+    ["IN", "TIN", "TINE", "INERT", "INTER"],
+    ["AS", "SAY", "STAY", "TASTY"],
 ]
 
 FALLBACK_CLUES = {
+    "AN": ["A form of the indefinite article.", "Comes before a vowel sound."],
+    "RAN": ["Moved quickly on foot.", "Operated or managed something."],
+    "EARN": ["Receive through work or effort.", "Gain as a result of action."],
+    "ANGER": ["A strong feeling of displeasure.", "Irritation with more heat behind it."],
+    "ORANGE": ["A citrus fruit or a color.", "Between red and yellow."],
+    "TO": ["A direction word.", "Points toward a destination."],
+    "TOP": ["The highest part.", "A lid or upper surface."],
+    "PLOT": ["A storyline or plan.", "A small piece of land."],
+    "PILOT": ["One who flies an aircraft.", "A test episode or trial run."],
+    "PISTOL": ["A small handheld firearm.", "A word that grows from PILOT by one letter."],
+    "IN": ["Inside or within.", "The opposite of out."],
+    "TIN": ["A silvery metal.", "A small metal container."],
+    "TINE": ["A prong on a fork or antler.", "A pointed projection."],
+    "INERT": ["Not moving or chemically inactive.", "Lacking power to move."],
+    "INTER": ["To bury.", "Place in a grave."],
+    "AS": ["Used for comparison.", "In the role of."],
+    "SAY": ["Speak or express.", "Offer an opinion."],
+    "STAY": ["Remain in place.", "Delay leaving."],
+    "TASTY": ["Having a pleasant flavor.", "Good to eat."],
     "TIP": ["A small piece of advice.", "Also the pointed end of something."],
     "PINT": ["A liquid measure equal to two cups.", "Common size for milk, cream, or a pub pour."],
     "POINT": ["A sharp end, exact location, or main idea.", "A dot on a map or score marker."],
@@ -135,6 +158,7 @@ def choose_chain(
     strict_chain: bool = True,
 ) -> list[dict]:
     target_count = target_count or {"easy": 4, "medium": 5, "hard": 6}.get(difficulty, 4)
+    max_chain_pool = 300
     candidates_by_length: dict[int, list[dict]] = {}
     for entry in source_data:
         word = normalize_word(entry.get("word", ""))
@@ -146,9 +170,14 @@ def choose_chain(
     for options in candidates_by_length.values():
         rng.shuffle(options)
 
-    def extend(chain: list[dict]) -> list[dict] | None:
+    chains: list[list[dict]] = []
+
+    def extend(chain: list[dict]) -> None:
+        if len(chains) >= max_chain_pool:
+            return
         if len(chain) == target_count:
-            return chain
+            chains.append(chain)
+            return
         previous = chain[-1]["word"]
         if strict_chain:
             next_options = [
@@ -160,10 +189,9 @@ def choose_chain(
             next_options = list(candidates_by_length.get(len(previous) + 1, []))
         rng.shuffle(next_options)
         for entry in next_options:
-            result = extend([*chain, entry])
-            if result is not None:
-                return result
-        return None
+            extend([*chain, entry])
+            if len(chains) >= max_chain_pool:
+                return
 
     starts = [
         entry
@@ -175,25 +203,36 @@ def choose_chain(
         starts = [entry for options in candidates_by_length.values() for entry in options]
     rng.shuffle(starts)
     for entry in starts:
-        result = extend([entry])
-        if result is not None:
-            return result
+        extend([entry])
+        if len(chains) >= max_chain_pool:
+            break
+    if chains:
+        return rng.choice(chains)
 
-    best_chain: list[dict] = []
+    best_chains: list[list[dict]] = []
 
     def collect_best(chain: list[dict]) -> None:
-        nonlocal best_chain
-        if len(chain) > len(best_chain):
-            best_chain = chain
+        nonlocal best_chains
+        if best_chains and len(best_chains) >= max_chain_pool:
+            return
+        if not best_chains or len(chain) > len(best_chains[0]):
+            best_chains = [chain]
+        elif len(chain) == len(best_chains[0]):
+            best_chains.append(chain)
         previous = chain[-1]["word"]
-        for entry in candidates_by_length.get(len(previous) + 1, []):
+        next_entries = list(candidates_by_length.get(len(previous) + 1, []))
+        rng.shuffle(next_entries)
+        for entry in next_entries:
             if not strict_chain or extends_by_one_letter(previous, entry["word"]):
                 collect_best([*chain, entry])
+            if best_chains and len(best_chains) >= max_chain_pool:
+                return
 
     for entry in starts:
         collect_best([entry])
-    if len(best_chain) >= 3:
-        return best_chain
+    best_chains = [chain for chain in best_chains if len(chain) >= 3]
+    if best_chains:
+        return rng.choice(best_chains)
     raise ValueError("Word pyramid generation needs at least three words where each row adds one letter to the previous row.")
 
 
