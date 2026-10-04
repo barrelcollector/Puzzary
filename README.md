@@ -129,6 +129,51 @@ curl -X POST http://localhost:8790/api/puzzles/{puzzle_id}/progress \
   --data '{"found_words":["MERIDIAN","PUZZLE"]}'
 ```
 
+Dictionary and content-management endpoints:
+
+```text
+GET    /api/dictionary?search=cloud
+POST   /api/dictionary
+GET    /api/dictionary/{word_id}
+PATCH  /api/dictionary/{word_id}
+DELETE /api/dictionary/{word_id}
+
+POST   /api/dictionary/{word_id}/definitions
+PATCH  /api/dictionary/{word_id}/definitions/{definition_id}
+DELETE /api/dictionary/{word_id}/definitions/{definition_id}
+
+GET    /api/tags
+POST   /api/tags
+GET    /api/tags/{tag_id}
+PATCH  /api/tags/{tag_id}
+DELETE /api/tags/{tag_id}
+
+GET    /api/word-banks
+POST   /api/word-banks
+GET    /api/word-banks/{bank_id}
+PATCH  /api/word-banks/{bank_id}
+DELETE /api/word-banks/{bank_id}
+POST   /api/word-banks/{bank_id}/words
+DELETE /api/word-banks/{bank_id}/words/{link_id}
+```
+
+Smoke-test flow for external dictionary clients:
+
+```bash
+curl -X POST http://localhost:8790/api/tags \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{"name":"API Smoke","tag_type":"Source"}'
+
+curl -X POST http://localhost:8790/api/dictionary \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{"word":"codex","display_text":"Codex","definitions":[{"definition":"A bound set of instructions or writings.","clues":["Instruction book"]}]}'
+
+curl http://localhost:8790/api/dictionary?search=codex \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN"
+```
+
 ## Design Notes
 
 Puzzary is intentionally separate from Home Assistant and Daily Stripe:

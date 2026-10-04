@@ -106,3 +106,44 @@ class DictionaryDefinitionPatch(BaseModel):
     tag_ids: list[int] | None = None
     properties: dict | None = None
     archived: bool | None = None
+
+
+class PuzzleTagWrite(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    tag_type: str = "General"
+    slug: str = ""
+
+
+class PuzzleTagPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    tag_type: str | None = None
+    slug: str | None = None
+
+
+class WordBankWrite(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    slug: str = ""
+    description: str = ""
+    mode: str = "manual"
+    category_id: int | None = None
+    tag_ids: list[int] = Field(default_factory=list)
+    words: list[str] = Field(default_factory=list)
+    properties: dict = Field(default_factory=dict)
+
+
+class WordBankPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    slug: str | None = None
+    description: str | None = None
+    mode: str | None = None
+    category_id: int | None = None
+    tag_ids: list[int] | None = None
+    words: list[str] | None = None
+    properties: dict | None = None
+    archived: bool | None = None
+
+
+class WordBankEntryWrite(BaseModel):
+    word_id: int
+    definition_id: int | None = None
+    position: int | None = None

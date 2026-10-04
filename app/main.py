@@ -51,6 +51,8 @@ from app.schemas import (
     DictionaryDefinitionWrite,
     DictionaryWordPatch,
     DictionaryWordWrite,
+    PuzzleTagPatch,
+    PuzzleTagWrite,
     PuzzleAttemptCreate,
     PuzzleAttemptResponse,
     PuzzleGenerateRequest,
@@ -59,6 +61,9 @@ from app.schemas import (
     PuzzlePrintPreview,
     PuzzleSummary,
     UserCreate,
+    WordBankEntryWrite,
+    WordBankPatch,
+    WordBankWrite,
 )
 
 
@@ -862,6 +867,40 @@ def serialize_dictionary_word(word: DictionaryWord) -> dict:
         "tags": [serialize_tag(tag) for tag in word.tags],
         "definitions": [serialize_definition(definition) for definition in word.definitions],
     }
+
+
+def serialize_word_bank_link(link: WordBankWord) -> dict:
+    return {
+        "id": link.id,
+        "word_id": link.word_id,
+        "definition_id": link.definition_id,
+        "position": link.position,
+        "word": serialize_dictionary_word(link.word) if link.word is not None else None,
+        "definition": serialize_definition(link.definition) if link.definition is not None else None,
+    }
+
+
+def serialize_word_bank(bank: WordBank, include_words: bool = False) -> dict:
+    payload = bank.payload if isinstance(bank.payload, dict) else {}
+    data = {
+        "id": bank.id,
+        "name": bank.name,
+        "slug": bank.slug,
+        "description": bank.description,
+        "mode": word_bank_mode(bank),
+        "category_id": bank.category_id,
+        "category": bank.category.name if bank.category else None,
+        "tags": [serialize_tag(tag) for tag in bank.tags],
+        "properties": payload.get("properties", {}),
+        "archived": bank.archived_at is not None,
+        "archived_at": bank.archived_at.isoformat() if bank.archived_at else None,
+        "created_at": bank.created_at.isoformat() if bank.created_at else None,
+    }
+    if include_words:
+        data["entries"] = [serialize_word_bank_link(link) for link in sorted(bank.word_links, key=lambda item: item.position)]
+    else:
+        data["entry_count"] = len(bank.word_links)
+    return data
 
 
 def slugify(value: str) -> str:
@@ -2969,6 +3008,32 @@ def apply_definition_payload(
         definition.tags = definition_tags_from_form(db, tag_ids, part_of_speech, "\n".join(clues))
 
 
+def apply_word_bank_payload(db: Session, bank: WordBank, payload: WordBankWrite | WordBankPatch) -> None:
+    existing_payload = bank.payload if isinstance(bank.payload, dict) else {}
+    if payload.name is not None:
+        bank.name = payload.name.strip()
+    if payload.slug is not None:
+        bank.slug = unique_slug(db, WordBank, payload.slug or bank.name, bank.id)
+    if payload.description is not None:
+        bank.description = payload.description.strip()
+    if payload.mode is not None:
+        existing_payload["mode"] = payload.mode if payload.mode == "automatic" else "manual"
+    if payload.properties is not None:
+        existing_payload["properties"] = payload.properties
+    if payload.words is not None:
+        parsed_words = parse_words("\n".join(payload.words))
+        existing_payload["words"] = parsed_words
+        if existing_payload.get("mode") != "automatic":
+            sync_word_bank_words(db, bank, parsed_words)
+    if payload.category_id is not None:
+        bank.category_id = payload.category_id or None
+    if payload.tag_ids is not None:
+        bank.tags = tags_for_ids(db, payload.tag_ids)
+    if isinstance(payload, WordBankPatch) and payload.archived is not None:
+        bank.archived_at = datetime.now(timezone.utc) if payload.archived else None
+    bank.payload = existing_payload
+
+
 @app.get("/api/dictionary")
 def api_list_dictionary(
     request: Request,
@@ -3082,6 +3147,9 @@ def api_delete_dictionary_word(word_id: int, request: Request, db: Session = Dep
     word = db.get(DictionaryWord, word_id)
     if word is None:
         raise HTTPException(status_code=404, detail="Dictionary word not found")
+    for definition in word.definitions:
+        definition.tags = []
+    word.tags = []
     db.delete(word)
     db.commit()
     return {"deleted": True, "id": word_id}
@@ -3144,9 +3212,247 @@ def api_delete_dictionary_definition(
     definition = db.get(DictionaryDefinition, definition_id)
     if definition is None or definition.word_id != word_id:
         raise HTTPException(status_code=404, detail="Dictionary definition not found")
+    definition.tags = []
     db.delete(definition)
     db.commit()
     return {"deleted": True, "id": definition_id}
+
+
+@app.get("/api/tags")
+def api_list_tags(
+    request: Request,
+    search: str = "",
+    tag_type: str = "",
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
+    if tag_type.strip():
+        normalized_type = normalize_tag_type(tag_type)
+        tags = [tag for tag in tags if tag.tag_type == normalized_type]
+    if search.strip():
+        search_text = search.strip().lower()
+        tags = [
+            tag for tag in tags
+            if search_text in tag.name.lower() or search_text in tag.slug.lower() or search_text in tag.label.lower()
+        ]
+    total = len(tags)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [serialize_tag(tag) for tag in tags[offset : offset + limit]],
+    }
+
+
+@app.post("/api/tags")
+def api_create_tag(payload: PuzzleTagWrite, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    normalized_type = normalize_tag_type(payload.tag_type)
+    tag = PuzzleTag(
+        name=payload.name.strip(),
+        tag_type=normalized_type,
+        slug=unique_slug(db, PuzzleTag, payload.slug or typed_tag_slug(normalized_type, payload.name)),
+    )
+    db.add(tag)
+    db.commit()
+    db.refresh(tag)
+    return serialize_tag(tag)
+
+
+@app.get("/api/tags/{tag_id}")
+def api_get_tag(tag_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    tag = db.get(PuzzleTag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return serialize_tag(tag)
+
+
+@app.patch("/api/tags/{tag_id}")
+def api_update_tag(tag_id: int, payload: PuzzleTagPatch, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    tag = db.get(PuzzleTag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    new_name = payload.name.strip() if payload.name is not None else tag.name
+    new_type = normalize_tag_type(payload.tag_type) if payload.tag_type is not None else tag.tag_type
+    tag.name = new_name
+    tag.tag_type = new_type
+    if payload.slug is not None or payload.name is not None or payload.tag_type is not None:
+        tag.slug = unique_slug(db, PuzzleTag, payload.slug or typed_tag_slug(new_type, new_name), tag.id)
+    db.commit()
+    db.refresh(tag)
+    return serialize_tag(tag)
+
+
+@app.delete("/api/tags/{tag_id}")
+def api_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    tag = db.get(PuzzleTag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    tag.puzzles = []
+    tag.word_banks = []
+    tag.dictionary_words = []
+    tag.dictionary_definitions = []
+    db.delete(tag)
+    db.commit()
+    return {"deleted": True, "id": tag_id}
+
+
+@app.get("/api/word-banks")
+def api_list_word_banks(
+    request: Request,
+    search: str = "",
+    include_archived: bool = False,
+    include_words: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    query = select(WordBank).order_by(WordBank.name)
+    if not include_archived:
+        query = query.where(WordBank.archived_at.is_(None))
+    banks = db.scalars(query).all()
+    if search.strip():
+        search_text = search.strip().lower()
+        banks = [
+            bank for bank in banks
+            if search_text in bank.name.lower() or search_text in bank.slug.lower() or search_text in bank.description.lower()
+        ]
+    total = len(banks)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [serialize_word_bank(bank, include_words=include_words) for bank in banks[offset : offset + limit]],
+    }
+
+
+@app.post("/api/word-banks")
+def api_create_word_bank(payload: WordBankWrite, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    mode = payload.mode if payload.mode == "automatic" else "manual"
+    bank = WordBank(
+        name=payload.name.strip(),
+        slug=unique_slug(db, WordBank, payload.slug or payload.name),
+        description=payload.description.strip(),
+        category_id=payload.category_id or None,
+        payload={"mode": mode, "words": [], "properties": payload.properties},
+    )
+    bank.tags = tags_for_ids(db, payload.tag_ids)
+    db.add(bank)
+    db.flush()
+    if payload.words:
+        apply_word_bank_payload(db, bank, payload)
+    db.commit()
+    db.refresh(bank)
+    return serialize_word_bank(bank, include_words=True)
+
+
+@app.get("/api/word-banks/{bank_id}")
+def api_get_word_bank(
+    bank_id: int,
+    request: Request,
+    include_words: bool = True,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    bank = db.get(WordBank, bank_id)
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    return serialize_word_bank(bank, include_words=include_words)
+
+
+@app.patch("/api/word-banks/{bank_id}")
+def api_update_word_bank(
+    bank_id: int,
+    payload: WordBankPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    bank = db.get(WordBank, bank_id)
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    apply_word_bank_payload(db, bank, payload)
+    db.commit()
+    db.refresh(bank)
+    return serialize_word_bank(bank, include_words=True)
+
+
+@app.delete("/api/word-banks/{bank_id}")
+def api_delete_word_bank(bank_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    bank = db.get(WordBank, bank_id)
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    for puzzle in bank.puzzles:
+        puzzle.word_bank_id = None
+    bank.tags = []
+    db.delete(bank)
+    db.commit()
+    return {"deleted": True, "id": bank_id}
+
+
+@app.post("/api/word-banks/{bank_id}/words")
+def api_add_word_bank_word(
+    bank_id: int,
+    payload: WordBankEntryWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    bank = db.get(WordBank, bank_id)
+    word = db.get(DictionaryWord, payload.word_id)
+    definition = db.get(DictionaryDefinition, payload.definition_id) if payload.definition_id else None
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    if word is None:
+        raise HTTPException(status_code=404, detail="Dictionary word not found")
+    if definition is not None and definition.word_id != word.id:
+        raise HTTPException(status_code=400, detail="Definition does not belong to the supplied word")
+    existing = db.scalar(
+        select(WordBankWord).where(WordBankWord.word_bank_id == bank_id, WordBankWord.word_id == word.id)
+    )
+    if existing is None:
+        next_position = payload.position if payload.position is not None else len(bank.word_links) + 1
+        existing = WordBankWord(word_bank=bank, word=word, definition=definition, position=next_position)
+        db.add(existing)
+    else:
+        existing.definition = definition
+        if payload.position is not None:
+            existing.position = payload.position
+    bank_payload = bank.payload if isinstance(bank.payload, dict) else {}
+    bank_payload["mode"] = "manual"
+    bank.payload = bank_payload
+    db.commit()
+    db.refresh(existing)
+    return serialize_word_bank_link(existing)
+
+
+@app.delete("/api/word-banks/{bank_id}/words/{link_id}")
+def api_delete_word_bank_word(
+    bank_id: int,
+    link_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    link = db.get(WordBankWord, link_id)
+    if link is None or link.word_bank_id != bank_id:
+        raise HTTPException(status_code=404, detail="Word bank entry not found")
+    db.delete(link)
+    db.commit()
+    return {"deleted": True, "id": link_id}
 
 
 def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: User | None = None) -> PuzzleSummary:
