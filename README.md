@@ -133,6 +133,7 @@ Dictionary and content-management endpoints:
 
 ```text
 GET    /api/dictionary?search=cloud
+POST   /api/dictionary/import
 POST   /api/dictionary
 GET    /api/dictionary/{word_id}
 PATCH  /api/dictionary/{word_id}
@@ -156,6 +157,22 @@ DELETE /api/word-banks/{bank_id}
 POST   /api/word-banks/{bank_id}/words
 DELETE /api/word-banks/{bank_id}/words/{link_id}
 ```
+
+Import from another Puzzary server, a GitHub repo or raw file, Pastebin, or a generic JSON/CSV/text URL:
+
+```bash
+curl -X POST http://localhost:8790/api/dictionary/import \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{
+    "source_url":"https://github.com/example/puzzle-words",
+    "source_type":"auto",
+    "source_label":"Example Word Feed",
+    "dry_run":true
+  }'
+```
+
+Use `"dry_run": false` to apply the import after reviewing the summary. Existing words are merged into the canonical dictionary word. Duplicate definitions are skipped, while new definitions for existing words are preserved.
 
 Smoke-test flow for external dictionary clients:
 

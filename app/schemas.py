@@ -87,6 +87,16 @@ class DictionaryWordWrite(BaseModel):
     definitions: list[DictionaryDefinitionWrite] = Field(default_factory=list)
 
 
+class DictionaryImportRequest(BaseModel):
+    source_url: str = Field(..., min_length=1)
+    source_type: str = "auto"
+    source_label: str = ""
+    source_api_token: str = ""
+    dry_run: bool = True
+    tag_ids: list[int] = Field(default_factory=list)
+    max_items: int = 500
+
+
 class DictionaryWordPatch(BaseModel):
     display_text: str | None = None
     clue: str | None = None

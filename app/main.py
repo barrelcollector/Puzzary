@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
+from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
 from app.models import (
     AppSetting,
     DictionaryDefinition,
@@ -49,6 +50,7 @@ from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
 from app.schemas import (
     DictionaryDefinitionPatch,
     DictionaryDefinitionWrite,
+    DictionaryImportRequest,
     DictionaryWordPatch,
     DictionaryWordWrite,
     PuzzleTagPatch,
@@ -935,6 +937,135 @@ def normalize_word(value: str) -> str:
 
 def normalize_dictionary_word(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", value).lower()
+
+
+def normalize_definition_signature(definition: str, part_of_speech: str = "") -> str:
+    normalized_definition = re.sub(r"\s+", " ", definition.strip().lower())
+    normalized_part = re.sub(r"\s+", " ", part_of_speech.strip().lower())
+    return f"{normalized_part}|{normalized_definition}"
+
+
+def import_dictionary_words(
+    db: Session,
+    imported_words: list[ImportedWord],
+    source_label: str = "",
+    tag_ids: list[int] | None = None,
+    dry_run: bool = True,
+    max_items: int = 500,
+) -> dict:
+    import_label = source_label.strip() or "External Import"
+    imported_at = datetime.now(timezone.utc).isoformat()
+    selected_tags = tags_for_ids(db, tag_ids or [])
+    source_tag = get_or_create_tag(db, "Source", import_label) if not dry_run else None
+    if source_tag is not None and all(tag.id != source_tag.id for tag in selected_tags):
+        selected_tags.append(source_tag)
+
+    result = {
+        "dry_run": dry_run,
+        "source_label": import_label,
+        "fetched_words": len(imported_words),
+        "processed_words": 0,
+        "added_words": 0,
+        "merged_words": 0,
+        "skipped_words": 0,
+        "added_definitions": 0,
+        "skipped_duplicate_definitions": 0,
+        "sample_words": [],
+        "errors": [],
+    }
+
+    for imported in imported_words[: max(1, min(max_items, 5000))]:
+        word_key = normalize_dictionary_word(imported.word)
+        if not word_key:
+            result["skipped_words"] += 1
+            continue
+        result["processed_words"] += 1
+        existing = db.scalar(select(DictionaryWord).where(DictionaryWord.word == word_key))
+        word_exists = existing is not None
+        if not dry_run and existing is None:
+            existing = DictionaryWord(
+                word=word_key,
+                display_text=imported.display_text.strip() or imported.word.strip(),
+                clue=imported.clue.strip(),
+                part_of_speech=imported.part_of_speech.strip(),
+                properties={**(imported.properties or {}), "import_source": import_label, "imported_at": imported_at},
+            )
+            existing.tags = list(selected_tags)
+            db.add(existing)
+            db.flush()
+        elif not dry_run and existing is not None:
+            if not existing.display_text and imported.display_text.strip():
+                existing.display_text = imported.display_text.strip()
+            if not existing.clue and imported.clue.strip():
+                existing.clue = imported.clue.strip()
+            if not existing.part_of_speech and imported.part_of_speech.strip():
+                existing.part_of_speech = imported.part_of_speech.strip()
+            existing_tag_ids = {tag.id for tag in existing.tags}
+            for tag in selected_tags:
+                if tag.id not in existing_tag_ids:
+                    existing.tags.append(tag)
+                    existing_tag_ids.add(tag.id)
+
+        if word_exists:
+            result["merged_words"] += 1
+        else:
+            result["added_words"] += 1
+        if len(result["sample_words"]) < 10:
+            result["sample_words"].append(
+                {
+                    "word": imported.display_text or imported.word,
+                    "action": "merge" if word_exists else "add",
+                    "definitions": len(imported.definitions),
+                }
+            )
+
+        existing_signatures = set()
+        if existing is not None:
+            existing_signatures = {
+                normalize_definition_signature(definition.definition, definition.part_of_speech)
+                for definition in existing.definitions
+            }
+        seen_import_signatures: set[str] = set()
+        for index, imported_definition in enumerate(imported.definitions, start=1):
+            signature = normalize_definition_signature(
+                imported_definition.definition,
+                imported_definition.part_of_speech or imported.part_of_speech,
+            )
+            if not signature.strip("|") or signature in existing_signatures or signature in seen_import_signatures:
+                result["skipped_duplicate_definitions"] += 1
+                continue
+            seen_import_signatures.add(signature)
+            result["added_definitions"] += 1
+            if dry_run or existing is None:
+                continue
+            definition = DictionaryDefinition(
+                word=existing,
+                definition=imported_definition.definition.strip(),
+                part_of_speech=(imported_definition.part_of_speech or imported.part_of_speech).strip(),
+                example=imported_definition.example.strip(),
+                source=import_label[:120],
+                position=max((item.position for item in existing.definitions), default=0) + index,
+                properties={
+                    **(imported_definition.properties or {}),
+                    "import_source": import_label,
+                    "imported_at": imported_at,
+                },
+            )
+            definition.tags = definition_tags_from_form(
+                db,
+                [tag.id for tag in selected_tags],
+                definition.part_of_speech,
+                "\n".join(imported_definition.clues),
+            )
+            for tag_name in imported_definition.tags:
+                tag = get_or_create_tag(db, "Imported", tag_name)
+                if tag is not None and all(existing_tag.id != tag.id for existing_tag in definition.tags):
+                    definition.tags.append(tag)
+            db.add(definition)
+
+    if not dry_run:
+        db.commit()
+    return result
 
 
 def normalize_seed(value: str | None) -> str:
@@ -2464,6 +2595,47 @@ def admin_create_dictionary_word(
     return RedirectResponse(url=f"/admin/dictionary/{entry.id}" if entry is not None else "/admin/dictionary", status_code=303)
 
 
+@app.post("/admin/dictionary/import")
+def admin_import_dictionary(
+    request: Request,
+    source_url: str = Form(...),
+    source_type: str = Form("auto"),
+    source_label: str = Form(""),
+    source_api_token: str = Form(""),
+    dry_run: bool = Form(True),
+    tag_ids: list[int] = Form(default=[]),
+    max_items: int = Form(500),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    context = admin_context(request, db, user, "dictionary")
+    try:
+        sources = fetch_dictionary_source(source_url, source_type, source_api_token)
+        imported_words = parse_imported_words(sources)
+        result = import_dictionary_words(
+            db,
+            imported_words,
+            source_label=source_label or source_url,
+            tag_ids=tag_ids,
+            dry_run=dry_run,
+            max_items=max_items,
+        )
+        result["source_count"] = len(sources)
+        result["source_url"] = source_url
+        result["source_type"] = source_type
+    except ValueError as error:
+        result = {
+            "dry_run": dry_run,
+            "source_url": source_url,
+            "source_type": source_type,
+            "errors": [str(error)],
+        }
+    context["dictionary_import_result"] = result
+    return templates.TemplateResponse("admin.html", context)
+
+
 @app.post("/admin/dictionary/{word_id}")
 def admin_update_dictionary_word(
     word_id: int,
@@ -3063,6 +3235,28 @@ def api_list_dictionary(
         "offset": offset,
         "items": [serialize_dictionary_word(word) for word in words[offset : offset + limit]],
     }
+
+
+@app.post("/api/dictionary/import")
+def api_import_dictionary(payload: DictionaryImportRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    try:
+        sources = fetch_dictionary_source(payload.source_url, payload.source_type, payload.source_api_token)
+        imported_words = parse_imported_words(sources)
+        result = import_dictionary_words(
+            db,
+            imported_words,
+            source_label=payload.source_label or payload.source_url,
+            tag_ids=payload.tag_ids,
+            dry_run=payload.dry_run,
+            max_items=payload.max_items,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    result["source_count"] = len(sources)
+    result["source_url"] = payload.source_url
+    result["source_type"] = payload.source_type
+    return result
 
 
 @app.post("/api/dictionary")

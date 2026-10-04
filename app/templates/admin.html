@@ -443,6 +443,65 @@
           <label>Properties / notes <textarea name="properties" rows="3"></textarea></label>
           <button type="submit">Save Word</button>
         </form>
+        <form class="panel" method="post" action="/admin/dictionary/import">
+          <h2>Import Words</h2>
+          <p class="muted">Import from another Puzzary server, a GitHub repo or raw file, Pastebin, or any public JSON/CSV/text URL.</p>
+          <label>Source URL <input name="source_url" type="url" required placeholder="https://github.com/owner/repo"></label>
+          <label>Source type
+            <select name="source_type">
+              <option value="auto">Auto-detect</option>
+              <option value="puzzary">Puzzary server</option>
+              <option value="github">GitHub repo or file</option>
+              <option value="generic">Generic URL</option>
+            </select>
+          </label>
+          <label>Source label <input name="source_label" placeholder="Shared household dictionary"></label>
+          <label>Source API token <input name="source_api_token" type="password" autocomplete="off" placeholder="Only needed for private Puzzary feeds"></label>
+          <label>Maximum words <input name="max_items" type="number" min="1" max="5000" value="500"></label>
+          <fieldset>
+            <legend>Apply tags to imported words and definitions</legend>
+            <div class="check-list">
+              {% for tag in assignable_tags %}
+                <label><input type="checkbox" name="tag_ids" value="{{ tag.id }}">{{ tag.label }}</label>
+              {% else %}
+                <small>No tags yet.</small>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <label>Import mode
+            <select name="dry_run">
+              <option value="true" selected>Review only</option>
+              <option value="false">Apply import</option>
+            </select>
+          </label>
+          <button type="submit">Run Import</button>
+        </form>
+        {% if dictionary_import_result %}
+          <article class="panel">
+            <h2>Import Summary</h2>
+            {% if dictionary_import_result.errors %}
+              {% for error in dictionary_import_result.errors %}
+                <p class="danger-text">{{ error }}</p>
+              {% endfor %}
+            {% else %}
+              <p class="muted">{{ "Review only" if dictionary_import_result.dry_run else "Applied" }} from {{ dictionary_import_result.source_url }}.</p>
+              <div class="metric-grid">
+                <div class="metric-card"><strong>{{ dictionary_import_result.processed_words }}</strong><span>Processed</span></div>
+                <div class="metric-card"><strong>{{ dictionary_import_result.added_words }}</strong><span>New words</span></div>
+                <div class="metric-card"><strong>{{ dictionary_import_result.merged_words }}</strong><span>Merged words</span></div>
+                <div class="metric-card"><strong>{{ dictionary_import_result.added_definitions }}</strong><span>New definitions</span></div>
+                <div class="metric-card"><strong>{{ dictionary_import_result.skipped_duplicate_definitions }}</strong><span>Duplicates skipped</span></div>
+              </div>
+              <div class="list compact">
+                {% for item in dictionary_import_result.sample_words %}
+                  <div class="row">
+                    <span><strong>{{ item.word }}</strong><small>{{ item.action }} / {{ item.definitions }} definition{% if item.definitions != 1 %}s{% endif %}</small></span>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </article>
+        {% endif %}
         <div class="admin-list">
           {% for word in dictionary_words %}
             <a class="word-row" href="/admin/dictionary/{{ word.id }}">
