@@ -546,6 +546,38 @@ button {
   background: transparent;
 }
 
+.preview-maze {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: min(150px, 100%);
+  aspect-ratio: 1;
+  padding: 12px;
+  border: 2px solid var(--ink);
+  background:
+    linear-gradient(90deg, transparent 47%, #282828 47%, #282828 53%, transparent 53%),
+    linear-gradient(0deg, transparent 47%, #282828 47%, #282828 53%, transparent 53%),
+    #ffffff;
+}
+
+.preview-maze span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  aspect-ratio: 1;
+  border: 1px solid var(--ink);
+  background: #ffffff;
+  font-weight: 900;
+}
+
+.preview-maze small {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  font-weight: 800;
+}
+
 .preview-pyramid {
   display: grid;
   gap: 5px;
@@ -1171,6 +1203,67 @@ legend {
 
 .sudoku-cell.incorrect {
   background: #f4d1ca;
+}
+
+.maze-play {
+  display: grid;
+  gap: 14px;
+}
+
+.maze-board {
+  display: block;
+  width: min(100%, 720px);
+  height: auto;
+  margin: 18px 0;
+  background: #ffffff;
+}
+
+.maze-board .maze-paper {
+  fill: #ffffff;
+}
+
+.maze-board line {
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linecap: square;
+  vector-effect: non-scaling-stroke;
+}
+
+.maze-label {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+  dominant-baseline: middle;
+}
+
+.maze-play.complete .maze-board {
+  outline: 3px solid #2d7f6f;
+  outline-offset: 4px;
+}
+
+.maze-solution-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.maze-solution {
+  width: min(100%, 280px);
+}
+
+.maze-solution-path {
+  fill: none;
+  stroke: #2d7f6f;
+  stroke-width: 5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.75;
+  vector-effect: non-scaling-stroke;
+}
+
+.print-maze .maze-board {
+  width: 100%;
+  max-width: 680px;
+  margin: 18px auto;
 }
 
 .cross-equations-play {

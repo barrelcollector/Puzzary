@@ -217,6 +217,12 @@
                   </div>
                 {% endfor %}
               </div>
+            {% elif preview.kind == "maze" %}
+              <div class="preview-maze">
+                <span>S</span>
+                <small>{{ preview.width }}x{{ preview.height }}</small>
+                <span>F</span>
+              </div>
             {% else %}
               <div class="preview-fallback">
                 <strong>{{ preview.icon }}</strong>
