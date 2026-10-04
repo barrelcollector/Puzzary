@@ -140,7 +140,7 @@ Each type owns its generator, source adapter, answer checker, and progress logic
 To add a type, drop a new Python file into `app/puzzle_types/`. Files whose names start with `_` are ignored. The module must call `register_puzzle_type(...)` at import time:
 
 ```python
-from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, PrintLayout, PuzzleType, register_puzzle_type
 
 
 def generate(theme, difficulty, source_data=None, seed=None) -> GeneratedPuzzle:
@@ -177,6 +177,12 @@ register_puzzle_type(
         supports_web_play=True,
         digital_only=False,
         source_requirements=("word_bank",),
+        print_layout=PrintLayout(
+            slug="example",
+            sheet_class="print-layout-example",
+            instructions="Print-facing instructions for paper solving.",
+            notes=("Optional review notes for print tools.",),
+        ),
         supports_gimmes=False,
         gimme_modes=(),
     )
@@ -187,6 +193,14 @@ Optional templates:
 
 - `app/templates/puzzle_types/{slug}.html` for custom web play.
 - `app/templates/puzzle_solutions/{slug}.html` for admin solution display.
+
+Print support:
+
+- `GeneratedPuzzle.print_payload` is the stable paper-rendering data for an individual generated puzzle.
+- `PuzzleType.print_layout` describes how that module should be printed: CSS class, receipt/page sizing, visible instructions, review notes, and whether to include the online solve link.
+- `GET /puzzles/{id}/print` shows a browser print preview.
+- `GET /puzzles/{id}/print/render` shows the same layout without app chrome for external PDF/print renderers.
+- `GET /api/puzzles/{id}/print-preview` returns the module layout metadata and print/render URLs for Home Assistant, Daily Stripe, or other clients.
 
 If a registered type has no web template, Puzzary falls back to the puzzle prompt and answer submission form. If it has no solution template, admins see the raw solution payload.
 

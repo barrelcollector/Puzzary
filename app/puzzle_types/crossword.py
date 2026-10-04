@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from app.content import words_for_theme
-from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, normalize_answer, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, normalize_answer, register_puzzle_type
 
 
 def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
@@ -607,6 +607,12 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),
+        print_layout=PrintLayout(
+            slug="crossword",
+            sheet_class="print-layout-crossword",
+            instructions="Fill the crossword from the clues.",
+            notes=("Clues are grouped by direction and gimme letters are shaded.",),
+        ),
         supports_gimmes=True,
         gimme_modes=("entries", "letters"),
         generation_fields=(

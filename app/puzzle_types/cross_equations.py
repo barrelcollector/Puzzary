@@ -5,7 +5,7 @@ import random
 from itertools import product
 from typing import Any
 
-from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
 
 
 DigitGrid = list[list[int]]
@@ -607,6 +607,12 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         theme_mode="none",
+        print_layout=PrintLayout(
+            slug="cross_equations",
+            sheet_class="print-layout-cross-equations",
+            instructions="Fill the shared number cells so every across and down equation is true.",
+            notes=("Number cells are boxed; operation/result cells stay unboxed for paper solving.",),
+        ),
         generation_fields=(
             GenerationField(
                 name="grid_size",

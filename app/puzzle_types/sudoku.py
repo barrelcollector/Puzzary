@@ -4,7 +4,7 @@ import json
 import random
 from typing import Any
 
-from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
 
 
 Grid = list[list[int]]
@@ -365,6 +365,12 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         theme_mode="none",
+        print_layout=PrintLayout(
+            slug="sudoku",
+            sheet_class="print-layout-sudoku",
+            instructions="Fill every row, column, and box with the required digits.",
+            notes=("Box boundaries are emphasized for print review.",),
+        ),
         generation_fields=(
             GenerationField(
                 name="grid_size",

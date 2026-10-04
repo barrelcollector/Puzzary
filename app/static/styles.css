@@ -1499,7 +1499,7 @@ legend {
 }
 
 .print-sheet {
-  max-width: 760px;
+  max-width: var(--print-max-width, 760px);
   margin: 0 auto;
   padding: 22px;
   background: white;
@@ -1525,11 +1525,15 @@ legend {
   font-size: 13px;
 }
 
+.print-instructions {
+  margin: 0 0 16px;
+}
+
 .print-word-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), var(--word-grid-cell, 22px));
+  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
   box-sizing: border-box;
-  width: fit-content;
+  width: min(100%, calc(var(--grid-size) * var(--word-grid-target-cell, 28px)));
   max-width: 100%;
   margin: 0 0 18px;
   border: 2px solid var(--ink);
@@ -1553,16 +1557,21 @@ legend {
 
 .print-word-grid span {
   font-size: var(--word-grid-font, 20px);
+  min-width: 0;
 }
 
 .print-word-grid.compact {
+  display: flex;
+  flex-wrap: wrap;
   border: 0;
   background: transparent;
   gap: 0;
+  width: min(100%, calc(var(--grid-size) * var(--word-grid-target-cell, 22px)));
 }
 
 .print-word-grid.compact span {
   aspect-ratio: auto;
+  flex: 0 0 calc(100% / var(--grid-size));
   min-height: 0;
   border: 0;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
@@ -1625,8 +1634,8 @@ legend {
 
 .print-crossword-grid {
   display: grid;
-  grid-template-columns: repeat(var(--grid-size), 34px);
-  width: fit-content;
+  grid-template-columns: repeat(var(--grid-size), minmax(0, 1fr));
+  width: min(100%, calc(var(--grid-size) * var(--crossword-target-cell, 34px)));
   max-width: 100%;
   margin-bottom: 18px;
 }
@@ -1708,6 +1717,28 @@ legend {
 .print-generic pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.print-open-link {
+  display: grid;
+  gap: 2px;
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.print-open-link strong {
+  color: var(--ink);
+}
+
+.print-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .print-footer {

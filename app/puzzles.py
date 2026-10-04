@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
@@ -32,6 +32,25 @@ class GeneratedPuzzle:
 
 
 @dataclass(frozen=True)
+class PrintLayout:
+    slug: str = "default"
+    sheet_class: str = "print-layout-default"
+    page_size: str = "receipt"
+    fit_to_width: bool = True
+    include_open_link: bool = True
+    include_solution: bool = False
+    show_prompt: bool = True
+    instructions: str = ""
+    notes: tuple[str, ...] = ()
+    max_width_px: int = 760
+
+    def as_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["notes"] = list(self.notes)
+        return data
+
+
+@dataclass(frozen=True)
 class PuzzleType:
     slug: str
     label: str
@@ -45,6 +64,8 @@ class PuzzleType:
     supports_web_play: bool = True
     digital_only: bool = False
     source_requirements: tuple[str, ...] = ()
+    print_layout: PrintLayout = field(default_factory=PrintLayout)
+    print_layout_builder: Callable[[dict, dict, dict], dict] | None = None
     supports_gimmes: bool = False
     gimme_modes: tuple[str, ...] = ()
     generation_fields: tuple[GenerationField, ...] = ()

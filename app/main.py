@@ -51,6 +51,7 @@ from app.schemas import (
     PuzzleGenerateRequest,
     PuzzleProgressResponse,
     PuzzleProgressUpdate,
+    PuzzlePrintPreview,
     PuzzleSummary,
     UserCreate,
 )
@@ -162,6 +163,43 @@ async def shutdown() -> None:
 
 def puzzle_url(puzzle_id: str) -> str:
     return f"{APP_BASE_URL}/puzzles/{puzzle_id}"
+
+
+def puzzle_print_url(puzzle_id: str) -> str:
+    return f"{APP_BASE_URL}/puzzles/{puzzle_id}/print"
+
+
+def puzzle_print_render_url(puzzle_id: str) -> str:
+    return f"{APP_BASE_URL}/puzzles/{puzzle_id}/print/render"
+
+
+def print_layout_context(puzzle: Puzzle, puzzle_type) -> dict:
+    layout = puzzle_type.print_layout.as_dict()
+    if puzzle_type.print_layout_builder is not None:
+        try:
+            override = puzzle_type.print_layout_builder(
+                puzzle.print_payload or {},
+                puzzle.play_payload or {},
+                puzzle.puzzle_metadata or {},
+            )
+        except Exception:
+            override = {}
+        if isinstance(override, dict):
+            layout.update(override)
+    layout.setdefault("slug", puzzle.puzzle_type)
+    layout.setdefault("sheet_class", "print-layout-default")
+    layout.setdefault("page_size", "receipt")
+    layout.setdefault("fit_to_width", True)
+    layout.setdefault("include_open_link", True)
+    layout.setdefault("include_solution", False)
+    layout.setdefault("show_prompt", True)
+    layout.setdefault("instructions", "")
+    layout.setdefault("notes", [])
+    layout.setdefault("max_width_px", 760)
+    layout["url"] = puzzle_url(puzzle.id)
+    layout["print_url"] = puzzle_print_url(puzzle.id)
+    layout["render_url"] = puzzle_print_render_url(puzzle.id)
+    return layout
 
 
 def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
@@ -2621,6 +2659,7 @@ def render_puzzle_print_page(
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
         raise HTTPException(status_code=404, detail="This puzzle does not support printing")
+    print_layout = print_layout_context(puzzle, puzzle_type)
     return templates.TemplateResponse(
         "print.html",
         {
@@ -2629,6 +2668,7 @@ def render_puzzle_print_page(
             "current_user": user,
             "puzzle_type_definition": puzzle_type,
             "print_payload": puzzle.print_payload or {},
+            "print_layout": print_layout,
             "print_gimme_cells": printable_gimme_cells(puzzle),
             "print_gimme_words": printable_gimme_words(puzzle),
             "show_print_toolbar": show_toolbar,
@@ -2999,6 +3039,28 @@ def get_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) 
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
     return serialize_puzzle(puzzle)
+
+
+@app.get("/api/puzzles/{puzzle_id}/print-preview", response_model=PuzzlePrintPreview)
+def get_puzzle_print_preview(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzlePrintPreview:
+    require_api_user(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    printable = bool(puzzle_type is not None and puzzle_type.supports_print and not puzzle_type.digital_only)
+    if not printable or puzzle_type is None:
+        raise HTTPException(status_code=404, detail="This puzzle does not support printing")
+    return PuzzlePrintPreview(
+        id=puzzle.id,
+        puzzle_type=puzzle.puzzle_type,
+        title=puzzle.title,
+        printable=printable,
+        layout=print_layout_context(puzzle, puzzle_type),
+        url=puzzle_url(puzzle.id),
+        print_url=puzzle_print_url(puzzle.id),
+        render_url=puzzle_print_render_url(puzzle.id),
+    )
 
 
 @app.get("/api/puzzles/{puzzle_id}/progress", response_model=PuzzleProgressResponse)

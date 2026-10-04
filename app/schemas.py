@@ -56,6 +56,17 @@ class PuzzleSummary(BaseModel):
     hints: list[str] = []
 
 
+class PuzzlePrintPreview(BaseModel):
+    id: str
+    puzzle_type: str
+    title: str
+    printable: bool
+    layout: dict = Field(default_factory=dict)
+    url: str
+    print_url: str
+    render_url: str
+
+
 class DictionaryDefinitionWrite(BaseModel):
     definition: str = Field(..., min_length=1)
     part_of_speech: str = ""

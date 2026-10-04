@@ -8,15 +8,24 @@
   </section>
 {% endif %}
 
-<article class="print-sheet">
+{% set layout_class = print_layout.sheet_class | default('print-layout-default') %}
+<article
+  class="print-sheet {{ layout_class }} {% if print_layout.fit_to_width | default(true) %}print-fit-width{% endif %}"
+  style="--print-max-width: {{ print_layout.max_width_px | default(760) }}px"
+  data-print-layout="{{ print_layout.slug | default(print_payload.kind | default('default')) }}"
+>
   <header class="print-header">
     <h1>{{ puzzle.title }}</h1>
     <p>{{ puzzle.puzzle_type }}{% if puzzle.theme %} / {{ puzzle.theme }}{% endif %} / {{ puzzle.difficulty }}</p>
   </header>
 
+  {% if print_layout.show_prompt | default(true) and (print_layout.instructions or puzzle.prompt) %}
+    <p class="print-instructions">{{ print_layout.instructions or puzzle.prompt }}</p>
+  {% endif %}
+
   {% if print_payload.kind == "word_search" %}
     <section class="print-word-search">
-      <div class="print-word-grid {% if print_payload.settings.print_style | default('boxed') == 'compact' %}compact{% endif %}" style="--grid-size: {{ print_payload.grid | length }}; --word-grid-cell: {% if print_payload.grid | length >= 22 %}20px{% elif print_payload.grid | length >= 18 %}24px{% else %}28px{% endif %}; --word-grid-font: {% if print_payload.grid | length >= 22 %}16px{% elif print_payload.grid | length >= 18 %}18px{% else %}20px{% endif %}">
+      <div class="print-word-grid {% if print_payload.settings.print_style | default('boxed') == 'compact' %}compact{% endif %}" style="--grid-size: {{ print_payload.grid | length }}; --word-grid-target-cell: {% if print_payload.grid | length >= 22 %}22px{% elif print_payload.grid | length >= 18 %}25px{% else %}31px{% endif %}; --word-grid-font: {% if print_payload.grid | length >= 22 %}15px{% elif print_payload.grid | length >= 18 %}17px{% else %}20px{% endif %}">
         {% for row in print_payload.grid %}
           {% set y = loop.index0 %}
           {% for letter in row %}
@@ -43,7 +52,7 @@
       {% set gimme_entries = puzzle.solution_payload.gimmes.entries %}
     {% endif %}
     <section class="print-crossword">
-      <div class="print-crossword-grid" style="--grid-size: {{ print_payload.grid[0] | length if print_payload.grid else 1 }}">
+      <div class="print-crossword-grid" style="--grid-size: {{ print_payload.grid[0] | length if print_payload.grid else 1 }}; --crossword-target-cell: {% if print_payload.grid and print_payload.grid[0] | length >= 14 %}28px{% elif print_payload.grid and print_payload.grid[0] | length >= 10 %}32px{% else %}36px{% endif %}">
         {% for row in print_payload.grid %}
           {% set y = loop.index0 %}
           {% for cell in row %}
@@ -164,6 +173,21 @@
       <p>{{ puzzle.prompt }}</p>
       <pre>{{ print_payload | tojson(indent=2) }}</pre>
     </section>
+  {% endif %}
+
+  {% if print_layout.include_open_link | default(true) %}
+    <section class="print-open-link">
+      <strong>Open online</strong>
+      <span>{{ print_layout.url }}</span>
+    </section>
+  {% endif %}
+
+  {% if print_layout.notes %}
+    <ul class="print-notes">
+      {% for note in print_layout.notes %}
+        <li>{{ note }}</li>
+      {% endfor %}
+    </ul>
   {% endif %}
 
   <footer class="print-footer">

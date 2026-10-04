@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Any
 
 from app.content import words_for_theme
-from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
 
 
 GUARANTEED_CHAINS = [
@@ -384,6 +384,12 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),
+        print_layout=PrintLayout(
+            slug="word_pyramid",
+            sheet_class="print-layout-word-pyramid",
+            instructions="Fill the pyramid from top to bottom.",
+            notes=("Rows can print alternating with clues or as a pyramid with numbered clues below.",),
+        ),
         supports_gimmes=True,
         gimme_modes=("starting_rows",),
         generation_fields=(

@@ -5,7 +5,7 @@ import string
 from typing import Any
 
 from app.content import words_for_theme
-from app.puzzles import GeneratedPuzzle, GenerationField, PuzzleType, normalize_answer, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, normalize_answer, register_puzzle_type
 
 
 DIRECTION_PRESETS: dict[str, list[tuple[int, int]]] = {
@@ -307,6 +307,12 @@ register_puzzle_type(
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank",),
+        print_layout=PrintLayout(
+            slug="word_search",
+            sheet_class="print-layout-word-search",
+            instructions="Find all listed words.",
+            notes=("Supports boxed grids for pencil solving and compact letters for narrow receipts.",),
+        ),
         supports_gimmes=True,
         gimme_modes=("found_words",),
         generation_fields=(
