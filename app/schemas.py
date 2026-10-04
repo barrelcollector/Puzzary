@@ -76,6 +76,20 @@ class PuzzleImportRequest(BaseModel):
     import_ids: list[str] = Field(default_factory=list)
 
 
+class PuzzleManualWrite(BaseModel):
+    puzzle_type: str = Field(..., min_length=1, max_length=40)
+    title: str = Field(..., min_length=1, max_length=160)
+    theme: str = Field("manual", max_length=80)
+    difficulty: str = Field("manual", max_length=40)
+    prompt: str = ""
+    print_payload: dict = Field(default_factory=dict)
+    play_payload: dict = Field(default_factory=dict)
+    solution_payload: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+    hints: list[str] = Field(default_factory=list)
+    draft: bool = True
+
+
 class DictionaryDefinitionWrite(BaseModel):
     definition: str = Field(..., min_length=1)
     part_of_speech: str = ""

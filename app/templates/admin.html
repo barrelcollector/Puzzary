@@ -5,7 +5,7 @@
   <nav class="admin-nav" aria-label="Admin">
     <a class="{% if section == 'dashboard' %}active{% endif %}" href="/admin">Dashboard</a>
     <a class="{% if section == 'generate' %}active{% endif %}" href="/admin/generate">Generate</a>
-    <a class="{% if section == 'puzzles' %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
+    <a class="{% if section in ['puzzles', 'puzzle_edit'] %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
     <a class="{% if section in ['dictionary', 'word_detail'] %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
     <a class="{% if section in ['word_banks', 'word_bank_detail'] %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
     <a class="{% if section in ['tags', 'tag_detail'] %}active{% endif %}" href="/admin/tags">Tags</a>
@@ -63,9 +63,11 @@
         </div>
         <span class="action-row">
           <a class="ghost-button" href="/api/puzzles/export">Export Active Bundle</a>
+          <a class="ghost-button" href="/admin/puzzles/manual">Manual Puzzle</a>
           <a class="button-link" href="/admin/generate">Generate</a>
         </span>
       </section>
+      {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
       <section class="admin-grid two">
         <form class="panel" method="post" action="/admin/puzzles/import" enctype="multipart/form-data">
           <h2>Import Puzzle</h2>
@@ -124,6 +126,7 @@
               <strong>{{ puzzle.title }}</strong>
               <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }} / {{ puzzle.id }}</small>
               {% if puzzle.word_bank %}<small>Word bank: {{ puzzle.word_bank.name }}</small>{% endif %}
+              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") %}<span class="status-pill">Draft</span>{% endif %}
               {% if puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
               {% if puzzle.auto_archive_at %}
                 <small>Auto-archives at {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
@@ -158,7 +161,11 @@
             </form>
             <div class="action-row">
               <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
+              <a class="ghost-link" href="/admin/puzzles/{{ puzzle.id }}/edit">Edit</a>
               <a class="ghost-link" href="/api/puzzles/{{ puzzle.id }}/export">Export</a>
+              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") %}
+                <form method="post" action="/admin/puzzles/{{ puzzle.id }}/publish"><button type="submit" class="ghost-button">Publish</button></form>
+              {% endif %}
               {% if puzzle.archived_at %}
                 <form method="post" action="/admin/puzzles/{{ puzzle.id }}/unarchive"><button type="submit" class="ghost-button">Unarchive</button></form>
               {% else %}
@@ -171,6 +178,76 @@
           <p class="muted">No puzzles yet.</p>
         {% endfor %}
       </div>
+    {% endif %}
+
+    {% if section == "puzzle_edit" %}
+      {% set is_edit = selected_puzzle is not none %}
+      {% set manual_meta = selected_puzzle.puzzle_metadata if is_edit and selected_puzzle.puzzle_metadata else {} %}
+      {% set is_draft = (not is_edit) or manual_meta.get("draft") %}
+      <section class="puzzle-head">
+        <div>
+          <a class="ghost-link" href="/admin/puzzles">Back to Puzzles</a>
+          <h1>{{ "Edit Puzzle" if is_edit else "Manual Puzzle" }}</h1>
+          <p class="muted">Create, resume, preview, and publish a puzzle without running a generator.</p>
+          {% if is_edit %}
+            {% if is_draft %}<span class="status-pill">Draft</span>{% endif %}
+            {% if selected_puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
+          {% endif %}
+        </div>
+        {% if is_edit %}
+          <span class="action-row">
+            <a class="ghost-button" href="/puzzles/{{ selected_puzzle.id }}">Preview</a>
+            <a class="ghost-button" href="/api/puzzles/{{ selected_puzzle.id }}/export">Export</a>
+            {% if is_draft %}
+              <form method="post" action="/admin/puzzles/{{ selected_puzzle.id }}/publish"><button type="submit">Publish</button></form>
+            {% endif %}
+          </span>
+        {% endif %}
+      </section>
+      {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
+      {% if manual_form_error %}<p class="notice danger">{{ manual_form_error }}</p>{% endif %}
+      <form
+        class="panel narrow-panel"
+        method="post"
+        action="{% if is_edit %}/admin/puzzles/{{ selected_puzzle.id }}/edit{% else %}/admin/puzzles/manual{% endif %}"
+      >
+        <h2>Puzzle Details</h2>
+        <label>
+          Puzzle type
+          <select name="puzzle_type" required>
+            {% for puzzle_type in puzzle_types %}
+              <option value="{{ puzzle_type.slug }}" {% if is_edit and selected_puzzle.puzzle_type == puzzle_type.slug %}selected{% endif %}>{{ puzzle_type.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Title <input name="title" required value="{{ selected_puzzle.title if is_edit else '' }}" placeholder="Manual Crossword"></label>
+        <label>Theme <input name="theme" value="{{ selected_puzzle.theme if is_edit else 'manual' }}"></label>
+        <label>Difficulty <input name="difficulty" value="{{ selected_puzzle.difficulty if is_edit else 'manual' }}"></label>
+        <label>Prompt <textarea name="prompt" rows="2">{{ selected_puzzle.prompt if is_edit else '' }}</textarea></label>
+        <label>
+          Save mode
+          <select name="draft">
+            <option value="true" {% if is_draft %}selected{% endif %}>Draft: hide from library, allow preview</option>
+            <option value="false" {% if not is_draft %}selected{% endif %}>Publish: show in library</option>
+          </select>
+        </label>
+
+        <h2>Puzzle Payloads</h2>
+        <p class="muted">Drafts can be incomplete. Publishing requires print, play, and solution payload JSON objects with a matching kind.</p>
+        <label>Print payload <textarea name="print_payload" rows="10" spellcheck="false">{{ selected_puzzle.print_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+        <label>Play payload <textarea name="play_payload" rows="10" spellcheck="false">{{ selected_puzzle.play_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+        <label>Solution payload <textarea name="solution_payload" rows="10" spellcheck="false">{{ selected_puzzle.solution_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+        <label>Metadata <textarea name="metadata" rows="6" spellcheck="false">{{ selected_puzzle.puzzle_metadata | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+        <label>Hints <textarea name="hints" rows="5" placeholder="One hint per line">{% if is_edit %}{% for hint in selected_puzzle.hints | sort(attribute="order") %}{{ hint.text }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea></label>
+
+        <div class="action-row">
+          <button type="submit">Save</button>
+          {% if is_edit %}
+            <a class="ghost-button" href="/puzzles/{{ selected_puzzle.id }}">Preview</a>
+          {% endif %}
+        </div>
+      </form>
     {% endif %}
 
     {% if section == "generate" %}

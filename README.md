@@ -133,6 +133,33 @@ curl -X POST http://localhost:8790/api/puzzles/import \
 
 Portable puzzle manifests use `schema: "puzzary.puzzle.item.v1"` for one puzzle or `schema: "puzzary.puzzle.bundle.v1"` with an `items` array for bundles. Imports validate that the puzzle type is installed locally and never install executable plugin code from a remote source. Supported import sources include another Puzzary export endpoint, pasted JSON, uploaded JSON, Pastebin/raw URLs, GitHub raw files, GitHub repo files, and Gists.
 
+Create or update a manual puzzle:
+
+```bash
+curl -X POST http://localhost:8790/api/puzzles/manual \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{
+    "puzzle_type":"word_search",
+    "title":"Manual Word Search",
+    "theme":"manual",
+    "difficulty":"manual",
+    "print_payload":{"kind":"word_search"},
+    "play_payload":{"kind":"word_search"},
+    "solution_payload":{"kind":"word_search"},
+    "metadata":{},
+    "hints":["Look for the theme words."],
+    "draft":true
+  }'
+
+curl -X PATCH http://localhost:8790/api/puzzles/{puzzle_id}/manual \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{"puzzle_type":"word_search","title":"Manual Word Search","print_payload":{"kind":"word_search"},"play_payload":{"kind":"word_search"},"solution_payload":{"kind":"word_search"},"draft":false}'
+```
+
+Manual puzzles can also be created in **Admin -> Puzzles -> Manual Puzzle**. Drafts are hidden from the library but can be opened from admin for preview. Publishing requires non-empty print, play, and solution payload objects whose `kind` matches the selected puzzle type.
+
 Submit an answer:
 
 ```bash

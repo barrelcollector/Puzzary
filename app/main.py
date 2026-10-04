@@ -65,6 +65,7 @@ from app.schemas import (
     PuzzleProgressResponse,
     PuzzleProgressUpdate,
     PuzzleImportRequest,
+    PuzzleManualWrite,
     PuzzlePrintPreview,
     PuzzleSummary,
     UserCreate,
@@ -481,6 +482,128 @@ def validate_portable_puzzle_item(db: Session, item: dict) -> tuple[bool, str]:
         if not isinstance(item.get(key), dict):
             return False, f"{key} must be an object"
     return True, ""
+
+
+def validate_manual_puzzle_payload(db: Session, payload: PuzzleManualWrite, allow_draft: bool = True) -> tuple[bool, str]:
+    item = {
+        "puzzle_type": payload.puzzle_type,
+        "print_payload": payload.print_payload,
+        "play_payload": payload.play_payload,
+        "solution_payload": payload.solution_payload,
+    }
+    valid, error = validate_portable_puzzle_item(db, item)
+    if not valid:
+        return False, error
+    if payload.draft and allow_draft:
+        return True, ""
+    for key in ("print_payload", "play_payload", "solution_payload"):
+        value = getattr(payload, key)
+        if not value:
+            return False, f"{key} is required before publishing"
+        kind = str(value.get("kind") or "").strip()
+        if not kind:
+            return False, f"{key}.kind is required before publishing"
+        if kind != payload.puzzle_type:
+            return False, f"{key}.kind must match puzzle_type"
+    return True, ""
+
+
+def parse_json_object_field(value: str, field_name: str) -> dict:
+    text = value.strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{field_name} must be valid JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return parsed
+
+
+def manual_payload_from_form(
+    puzzle_type: str,
+    title: str,
+    theme: str,
+    difficulty: str,
+    prompt: str,
+    print_payload: str,
+    play_payload: str,
+    solution_payload: str,
+    metadata: str,
+    hints: str,
+    draft: str,
+) -> PuzzleManualWrite:
+    hint_lines = [line.strip() for line in hints.splitlines() if line.strip()]
+    return PuzzleManualWrite(
+        puzzle_type=puzzle_type.strip(),
+        title=title.strip(),
+        theme=(theme.strip() or "manual")[:80],
+        difficulty=(difficulty.strip() or "manual")[:40],
+        prompt=prompt.strip(),
+        print_payload=parse_json_object_field(print_payload, "Print payload"),
+        play_payload=parse_json_object_field(play_payload, "Play payload"),
+        solution_payload=parse_json_object_field(solution_payload, "Solution payload"),
+        metadata=parse_json_object_field(metadata, "Metadata"),
+        hints=hint_lines,
+        draft=draft == "true",
+    )
+
+
+def write_manual_puzzle(
+    db: Session,
+    payload: PuzzleManualWrite,
+    creator: User | None,
+    puzzle: Puzzle | None = None,
+) -> Puzzle:
+    valid, error = validate_manual_puzzle_payload(db, payload)
+    if not valid:
+        raise ValueError(error)
+    metadata = dict(payload.metadata or {})
+    metadata["manual"] = True
+    metadata["draft"] = bool(payload.draft)
+    metadata["manual_updated_at"] = utcnow().isoformat()
+    now = datetime.now(timezone.utc)
+    if puzzle is None:
+        puzzle = Puzzle(
+            id=uuid.uuid4().hex[:12],
+            puzzle_type=payload.puzzle_type,
+            title=payload.title[:160],
+            theme=payload.theme[:80],
+            difficulty=payload.difficulty[:40],
+            prompt=payload.prompt,
+            print_payload=payload.print_payload,
+            play_payload=payload.play_payload,
+            solution_payload=payload.solution_payload,
+            puzzle_metadata=metadata,
+            source="manual",
+            auto_archive_at=None if payload.draft else default_auto_archive_at(),
+            archived_at=now if payload.draft else None,
+            created_by_id=creator.id if creator is not None else None,
+        )
+        db.add(puzzle)
+        db.flush()
+    else:
+        puzzle.puzzle_type = payload.puzzle_type
+        puzzle.title = payload.title[:160]
+        puzzle.theme = payload.theme[:80]
+        puzzle.difficulty = payload.difficulty[:40]
+        puzzle.prompt = payload.prompt
+        puzzle.print_payload = payload.print_payload
+        puzzle.play_payload = payload.play_payload
+        puzzle.solution_payload = payload.solution_payload
+        puzzle.puzzle_metadata = metadata
+        puzzle.source = "manual"
+        puzzle.archived_at = now if payload.draft else None
+        if not payload.draft and puzzle.auto_archive_at is None:
+            puzzle.auto_archive_at = default_auto_archive_at()
+    puzzle.hints.clear()
+    db.flush()
+    for index, hint_text in enumerate(payload.hints, start=1):
+        db.add(PuzzleHint(puzzle_id=puzzle.id, order=index, text=hint_text))
+    db.commit()
+    db.refresh(puzzle)
+    return puzzle
 
 
 def import_portable_puzzles(
@@ -2368,6 +2491,8 @@ def admin_context(
     selected_word: DictionaryWord | None = None,
     selected_word_bank: WordBank | None = None,
     selected_tag: PuzzleTag | None = None,
+    selected_puzzle: Puzzle | None = None,
+    manual_form_error: str = "",
 ) -> dict:
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
     all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
@@ -2421,6 +2546,8 @@ def admin_context(
         "selected_word": selected_word,
         "selected_word_bank": selected_word_bank,
         "selected_tag": selected_tag,
+        "selected_puzzle": selected_puzzle,
+        "manual_form_error": manual_form_error,
         "puzzle_types": list_enabled_puzzle_types(db),
         "all_puzzle_types": list_puzzle_types(),
         "generation_schemas": puzzle_type_generation_schemas(db),
@@ -2434,13 +2561,25 @@ def render_admin(
     selected_word: DictionaryWord | None = None,
     selected_word_bank: WordBank | None = None,
     selected_tag: PuzzleTag | None = None,
+    selected_puzzle: Puzzle | None = None,
+    manual_form_error: str = "",
 ):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
         "admin.html",
-        admin_context(request, db, user, section, selected_word, selected_word_bank, selected_tag),
+        admin_context(
+            request,
+            db,
+            user,
+            section,
+            selected_word,
+            selected_word_bank,
+            selected_tag,
+            selected_puzzle,
+            manual_form_error,
+        ),
     )
 
 
@@ -2452,6 +2591,19 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/puzzles", response_class=HTMLResponse)
 def admin_puzzles_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "puzzles")
+
+
+@app.get("/admin/puzzles/manual", response_class=HTMLResponse)
+def admin_manual_puzzle_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "puzzle_edit")
+
+
+@app.get("/admin/puzzles/{puzzle_id}/edit", response_class=HTMLResponse)
+def admin_edit_puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    return render_admin(request, db, "puzzle_edit", selected_puzzle=puzzle)
 
 
 @app.get("/admin/generate", response_class=HTMLResponse)
@@ -2644,6 +2796,124 @@ def admin_revoke_user_sessions(user_id: int, request: Request, db: Session = Dep
     user.session_version = (user.session_version or 1) + 1
     db.commit()
     return RedirectResponse(url="/admin/users?message=Sessions%20revoked.", status_code=303)
+
+
+@app.post("/admin/puzzles/manual")
+def admin_create_manual_puzzle(
+    request: Request,
+    puzzle_type: str = Form(...),
+    title: str = Form(...),
+    theme: str = Form("manual"),
+    difficulty: str = Form("manual"),
+    prompt: str = Form(""),
+    print_payload: str = Form("{}"),
+    play_payload: str = Form("{}"),
+    solution_payload: str = Form("{}"),
+    metadata: str = Form("{}"),
+    hints: str = Form(""),
+    draft: str = Form("true"),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        payload = manual_payload_from_form(
+            puzzle_type,
+            title,
+            theme,
+            difficulty,
+            prompt,
+            print_payload,
+            play_payload,
+            solution_payload,
+            metadata,
+            hints,
+            draft,
+        )
+        puzzle = write_manual_puzzle(db, payload, user)
+    except ValueError as error:
+        return render_admin(request, db, "puzzle_edit", manual_form_error=str(error))
+    return RedirectResponse(url=f"/admin/puzzles/{puzzle.id}/edit?message=Manual%20puzzle%20saved.", status_code=303)
+
+
+@app.post("/admin/puzzles/{puzzle_id}/edit")
+def admin_update_manual_puzzle(
+    puzzle_id: str,
+    request: Request,
+    puzzle_type: str = Form(...),
+    title: str = Form(...),
+    theme: str = Form("manual"),
+    difficulty: str = Form("manual"),
+    prompt: str = Form(""),
+    print_payload: str = Form("{}"),
+    play_payload: str = Form("{}"),
+    solution_payload: str = Form("{}"),
+    metadata: str = Form("{}"),
+    hints: str = Form(""),
+    draft: str = Form("true"),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    try:
+        payload = manual_payload_from_form(
+            puzzle_type,
+            title,
+            theme,
+            difficulty,
+            prompt,
+            print_payload,
+            play_payload,
+            solution_payload,
+            metadata,
+            hints,
+            draft,
+        )
+        puzzle = write_manual_puzzle(db, payload, user, puzzle)
+    except ValueError as error:
+        return render_admin(request, db, "puzzle_edit", selected_puzzle=puzzle, manual_form_error=str(error))
+    return RedirectResponse(url=f"/admin/puzzles/{puzzle.id}/edit?message=Manual%20puzzle%20saved.", status_code=303)
+
+
+@app.post("/admin/puzzles/{puzzle_id}/publish")
+def admin_publish_manual_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    payload = PuzzleManualWrite(
+        puzzle_type=puzzle.puzzle_type,
+        title=puzzle.title,
+        theme=puzzle.theme,
+        difficulty=puzzle.difficulty,
+        prompt=puzzle.prompt,
+        print_payload=puzzle.print_payload or {},
+        play_payload=puzzle.play_payload or {},
+        solution_payload=puzzle.solution_payload or {},
+        metadata=puzzle.puzzle_metadata or {},
+        hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
+        draft=False,
+    )
+    valid, error = validate_manual_puzzle_payload(db, payload, allow_draft=False)
+    if not valid:
+        return render_admin(request, db, "puzzle_edit", selected_puzzle=puzzle, manual_form_error=error)
+    metadata = dict(puzzle.puzzle_metadata or {})
+    metadata["manual"] = True
+    metadata["draft"] = False
+    metadata["manual_published_at"] = utcnow().isoformat()
+    puzzle.puzzle_metadata = metadata
+    puzzle.archived_at = None
+    if puzzle.auto_archive_at is None:
+        puzzle.auto_archive_at = default_auto_archive_at()
+    db.commit()
+    return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/api-token")
@@ -4347,6 +4617,34 @@ def api_import_puzzles(payload: PuzzleImportRequest, request: Request, db: Sessi
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/api/puzzles/manual", response_model=PuzzleSummary)
+def api_create_manual_puzzle(payload: PuzzleManualWrite, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
+    user = require_admin_api(request, db)
+    try:
+        puzzle = write_manual_puzzle(db, payload, user)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return serialize_puzzle(puzzle, db)
+
+
+@app.patch("/api/puzzles/{puzzle_id}/manual", response_model=PuzzleSummary)
+def api_update_manual_puzzle(
+    puzzle_id: str,
+    payload: PuzzleManualWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PuzzleSummary:
+    user = require_admin_api(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    try:
+        puzzle = write_manual_puzzle(db, payload, user, puzzle)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return serialize_puzzle(puzzle, db)
 
 
 @app.get("/api/puzzles/{puzzle_id}/export")
