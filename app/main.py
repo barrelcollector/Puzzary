@@ -9,13 +9,16 @@ import hashlib
 import hmac
 import secrets
 import time
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import qrcode
+from qrcode.image.svg import SvgPathImage
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import TemplateNotFound
@@ -173,6 +176,14 @@ def puzzle_print_render_url(puzzle_id: str) -> str:
     return f"{APP_BASE_URL}/puzzles/{puzzle_id}/print/render"
 
 
+def puzzle_qr_short_url(puzzle_id: str) -> str:
+    return f"{APP_BASE_URL}/q/{puzzle_id}"
+
+
+def puzzle_qr_svg_url(puzzle_id: str) -> str:
+    return f"{APP_BASE_URL}/puzzles/{puzzle_id}/qr.svg"
+
+
 def print_layout_context(puzzle: Puzzle, puzzle_type) -> dict:
     layout = puzzle_type.print_layout.as_dict()
     if puzzle_type.print_layout_builder is not None:
@@ -199,6 +210,9 @@ def print_layout_context(puzzle: Puzzle, puzzle_type) -> dict:
     layout["url"] = puzzle_url(puzzle.id)
     layout["print_url"] = puzzle_print_url(puzzle.id)
     layout["render_url"] = puzzle_print_render_url(puzzle.id)
+    layout["short_url"] = puzzle_qr_short_url(puzzle.id)
+    layout["qr_url"] = puzzle_qr_svg_url(puzzle.id)
+    layout["qr_target_url"] = puzzle_qr_short_url(puzzle.id)
     return layout
 
 
@@ -421,6 +435,15 @@ def safe_library_return_to(value: str) -> str:
         return "/library"
     if "://" in value or value.startswith("//"):
         return "/library"
+    return value
+
+
+def safe_return_to(value: str, default: str = "/library") -> str:
+    if not value or "://" in value or value.startswith("//"):
+        return default
+    allowed_prefixes = ("/library", "/puzzles/", "/generate", "/admin", "/account")
+    if not value.startswith(allowed_prefixes):
+        return default
     return value
 
 
@@ -1371,7 +1394,8 @@ def current_user(request: Request, db: Session) -> User | None:
 def require_web_user(request: Request, db: Session) -> User | RedirectResponse:
     user = current_user(request, db)
     if user is None:
-        return RedirectResponse(url="/login", status_code=303)
+        target = safe_return_to(str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""))
+        return RedirectResponse(url=f"/login?return_to={quote(target)}", status_code=303)
     return user
 
 
@@ -1412,8 +1436,48 @@ def health() -> dict[str, str]:
     return {"status": "ok", "app": "puzzary"}
 
 
+def qr_svg_bytes(value: str) -> bytes:
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=1, box_size=8)
+    qr.add_data(value)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=SvgPathImage, attrib={"class": "puzzary-qr"})
+    buffer = BytesIO()
+    image.save(buffer)
+    return buffer.getvalue()
+
+
+@app.get("/puzzles/{puzzle_id}/qr.svg")
+def puzzle_qr_svg(puzzle_id: str, db: Session = Depends(get_db)) -> Response:
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    return Response(
+        content=qr_svg_bytes(puzzle_qr_short_url(puzzle.id)),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/q/{puzzle_id}")
+def puzzle_qr_redirect(puzzle_id: str, db: Session = Depends(get_db)) -> RedirectResponse:
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    metadata = dict(puzzle.puzzle_metadata or {})
+    qr_stats = metadata.get("qr")
+    if not isinstance(qr_stats, dict):
+        qr_stats = {}
+    qr_stats["scan_count"] = int(qr_stats.get("scan_count") or 0) + 1
+    qr_stats["last_scanned_at"] = utcnow().isoformat()
+    metadata["qr"] = qr_stats
+    puzzle.puzzle_metadata = metadata
+    db.commit()
+    return RedirectResponse(url=f"/puzzles/{puzzle.id}?source=qr", status_code=303)
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)):
+    return_to = safe_return_to(request.query_params.get("return_to", ""))
     return templates.TemplateResponse(
         "login.html",
         {
@@ -1421,6 +1485,7 @@ def login_page(request: Request, db: Session = Depends(get_db)):
             "current_user": current_user(request, db),
             "error": request.query_params.get("error", ""),
             "message": request.query_params.get("message", ""),
+            "return_to": return_to,
         },
     )
 
@@ -1430,14 +1495,17 @@ def login(
     request: Request,
     username: str = Form(""),
     password: str = Form(""),
+    return_to: str = Form("/library"),
     db: Session = Depends(get_db),
 ):
+    safe_target = safe_return_to(return_to)
+    login_error_suffix = f"&return_to={quote(safe_target)}" if safe_target != "/library" else ""
     if login_limited(request, username):
-        return RedirectResponse(url="/login?error=Too%20many%20attempts.%20Try%20again%20soon.", status_code=303)
+        return RedirectResponse(url=f"/login?error=Too%20many%20attempts.%20Try%20again%20soon.{login_error_suffix}", status_code=303)
     user = find_login_user(db, username)
     if user is None or not user.is_active or not verify_password(password, user.password_hash):
         record_login_failure(request, username)
-        return RedirectResponse(url="/login?error=Invalid%20username%20or%20password.", status_code=303)
+        return RedirectResponse(url=f"/login?error=Invalid%20username%20or%20password.{login_error_suffix}", status_code=303)
 
     request.session["user_id"] = user.id
     request.session["session_version"] = user.session_version or 1
@@ -1446,7 +1514,7 @@ def login(
     clear_login_failures(request, username)
     if user.must_change_password:
         return RedirectResponse(url="/account/password?message=Please%20set%20a%20new%20password.", status_code=303)
-    return RedirectResponse(url="/library", status_code=303)
+    return RedirectResponse(url=safe_target, status_code=303)
 
 
 @app.post("/logout")

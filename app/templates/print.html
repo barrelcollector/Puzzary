@@ -176,9 +176,12 @@
   {% endif %}
 
   {% if print_layout.include_open_link | default(true) %}
-    <section class="print-open-link">
-      <strong>Open online</strong>
-      <span>{{ print_layout.url }}</span>
+    <section class="print-interaction">
+      <img src="{{ print_layout.qr_url }}" alt="QR code for {{ puzzle.title }}">
+      <div class="print-open-link">
+        <strong>Open online</strong>
+        <span>{{ print_layout.short_url | default(print_layout.url) }}</span>
+      </div>
     </section>
   {% endif %}
 

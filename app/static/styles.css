@@ -1719,12 +1719,25 @@ legend {
   overflow-wrap: anywhere;
 }
 
-.print-open-link {
+.print-interaction {
   display: grid;
-  gap: 2px;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
   margin-top: 16px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
+}
+
+.print-interaction img {
+  width: 74px;
+  height: 74px;
+  image-rendering: pixelated;
+}
+
+.print-open-link {
+  display: grid;
+  gap: 2px;
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;

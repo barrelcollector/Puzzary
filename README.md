@@ -201,6 +201,8 @@ Print support:
 - `GET /puzzles/{id}/print` shows a browser print preview.
 - `GET /puzzles/{id}/print/render` shows the same layout without app chrome for external PDF/print renderers.
 - `GET /api/puzzles/{id}/print-preview` returns the module layout metadata and print/render URLs for Home Assistant, Daily Stripe, or other clients.
+- Printed layouts include a QR code by default. The QR points to `/q/{id}`, records a lightweight scan count, and redirects to the matching puzzle page.
+- If the user is not logged in after scanning, the login flow preserves the puzzle URL and returns them there after sign-in.
 
 If a registered type has no web template, Puzzary falls back to the puzzle prompt and answer submission form. If it has no solution template, admins see the raw solution payload.
 
