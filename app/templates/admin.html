@@ -829,6 +829,23 @@
           <input name="public_base_url" value="{{ app_settings.public_base_url }}" placeholder="https://puzzary.example.com">
           <small class="muted">Current default from environment: {{ app_settings.default_base_url }}</small>
         </label>
+
+        <h2>Puzzle Modules</h2>
+        <p class="muted">Disable a module to remove it from generation screens and API generation while keeping existing puzzles playable.</p>
+        <div class="check-list module-list">
+          {% for puzzle_type in all_puzzle_types %}
+            <label>
+              <input
+                type="checkbox"
+                name="disabled_puzzle_types"
+                value="{{ puzzle_type.slug }}"
+                {% if puzzle_type.slug in app_settings.disabled_puzzle_types %}checked{% endif %}
+              >
+              Disable {{ puzzle_type.label }}
+              <small class="muted">{{ puzzle_type.slug }}{% if puzzle_type.digital_only %} / digital only{% endif %}{% if puzzle_type.supports_print %} / printable{% endif %}</small>
+            </label>
+          {% endfor %}
+        </div>
         <button type="submit">Save Settings</button>
       </form>
     {% endif %}

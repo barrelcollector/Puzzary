@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -189,6 +190,33 @@ def set_app_setting(db: Session, key: str, value: str) -> None:
         db.add(setting)
     else:
         setting.value = value
+
+
+def disabled_puzzle_type_slugs(db: Session) -> set[str]:
+    raw_value = app_setting(db, "disabled_puzzle_types", "[]")
+    try:
+        values = json.loads(raw_value)
+    except json.JSONDecodeError:
+        values = []
+    if not isinstance(values, list):
+        return set()
+    registered = {puzzle_type.slug for puzzle_type in list_puzzle_types()}
+    return {str(value) for value in values if str(value) in registered}
+
+
+def set_disabled_puzzle_type_slugs(db: Session, slugs: list[str]) -> None:
+    registered = {puzzle_type.slug for puzzle_type in list_puzzle_types()}
+    disabled = sorted({str(slug) for slug in slugs if str(slug) in registered})
+    set_app_setting(db, "disabled_puzzle_types", json.dumps(disabled))
+
+
+def is_puzzle_type_enabled(db: Session, slug: str) -> bool:
+    return slug not in disabled_puzzle_type_slugs(db)
+
+
+def list_enabled_puzzle_types(db: Session) -> list:
+    disabled = disabled_puzzle_type_slugs(db)
+    return [puzzle_type for puzzle_type in list_puzzle_types() if puzzle_type.slug not in disabled]
 
 
 def app_base_url(db: Session | None = None) -> str:
@@ -651,6 +679,15 @@ def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, pr
 
 
 def serialize_generation_field(field) -> dict:
+    validation = {}
+    if field.required:
+        validation["required"] = True
+    if field.minimum is not None:
+        validation["minimum"] = field.minimum
+    if field.maximum is not None:
+        validation["maximum"] = field.maximum
+    if field.options:
+        validation["allowed_values"] = [option["value"] for option in field.options]
     return {
         "name": field.name,
         "label": field.label,
@@ -661,22 +698,69 @@ def serialize_generation_field(field) -> dict:
         "options": list(field.options),
         "minimum": field.minimum,
         "maximum": field.maximum,
+        "validation": validation,
     }
 
 
-def puzzle_type_generation_schemas() -> dict[str, dict]:
+def validate_generation_options(puzzle_type, options: dict) -> dict:
+    validated = dict(options or {})
+    for field in puzzle_type.generation_fields:
+        raw_value = validated.get(field.name)
+        raw_values = raw_value if isinstance(raw_value, list) else ([raw_value] if raw_value not in (None, "") else [])
+        values = [str(value).strip() for value in raw_values if str(value).strip()]
+        if field.required and not values:
+            raise HTTPException(status_code=400, detail=f"{field.label} is required")
+
+        allowed_values = {str(option["value"]) for option in field.options}
+        if allowed_values and values:
+            invalid_values = [value for value in values if value not in allowed_values]
+            if invalid_values:
+                raise HTTPException(status_code=400, detail=f"{field.label} has an unsupported value")
+
+        if field.field_type == "number" and values:
+            try:
+                numeric_value = int(values[0])
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=f"{field.label} must be a number") from error
+            if field.minimum is not None and numeric_value < field.minimum:
+                raise HTTPException(status_code=400, detail=f"{field.label} must be at least {field.minimum}")
+            if field.maximum is not None and numeric_value > field.maximum:
+                raise HTTPException(status_code=400, detail=f"{field.label} must be no more than {field.maximum}")
+    return validated
+
+
+def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
+    needs_word_bank = "word_bank" in puzzle_type.source_requirements
+    return {
+        "slug": puzzle_type.slug,
+        "label": puzzle_type.label,
+        "description": puzzle_type.description,
+        "enabled": enabled,
+        "supports_print": puzzle_type.supports_print,
+        "supports_web_play": puzzle_type.supports_web_play,
+        "digital_only": puzzle_type.digital_only,
+        "supports_gimmes": puzzle_type.supports_gimmes,
+        "gimme_modes": list(puzzle_type.gimme_modes),
+        "needs_word_bank": needs_word_bank,
+        "theme_mode": puzzle_type.theme_mode,
+        "source_requirements": list(puzzle_type.source_requirements),
+        "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
+        "print_layout": puzzle_type.print_layout.as_dict(),
+        "templates": {
+            "play": f"puzzle_types/{puzzle_type.slug}.html",
+            "solution": f"puzzle_solutions/{puzzle_type.slug}.html",
+        },
+    }
+
+
+def puzzle_type_generation_schemas(db: Session | None = None, include_disabled: bool = False) -> dict[str, dict]:
     schemas = {}
+    disabled = disabled_puzzle_type_slugs(db) if db is not None else set()
     for puzzle_type in list_puzzle_types():
-        needs_word_bank = "word_bank" in puzzle_type.source_requirements
-        schemas[puzzle_type.slug] = {
-            "slug": puzzle_type.slug,
-            "label": puzzle_type.label,
-            "description": puzzle_type.description,
-            "needs_word_bank": needs_word_bank,
-            "theme_mode": puzzle_type.theme_mode,
-            "source_requirements": list(puzzle_type.source_requirements),
-            "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
-        }
+        enabled = puzzle_type.slug not in disabled
+        if not enabled and not include_disabled:
+            continue
+        schemas[puzzle_type.slug] = serialize_puzzle_type_contract(puzzle_type, enabled)
     return schemas
 
 
@@ -1695,8 +1779,8 @@ def generate_page(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "current_user": user,
             "word_banks": word_bank_options(db),
-            "puzzle_types": list_puzzle_types(),
-            "generation_schemas": puzzle_type_generation_schemas(),
+            "puzzle_types": list_enabled_puzzle_types(db),
+            "generation_schemas": puzzle_type_generation_schemas(db),
         },
     )
 
@@ -1717,6 +1801,8 @@ async def web_generate_puzzle(
         return user
     form = await request.form()
     puzzle_type_config = get_puzzle_type(puzzle_type)
+    if puzzle_type_config is None or not is_puzzle_type_enabled(db, puzzle_type):
+        raise HTTPException(status_code=400, detail="Unsupported puzzle type")
     needs_word_bank = bool(puzzle_type_config and "word_bank" in puzzle_type_config.source_requirements)
     selected_banks = word_banks_for_slugs(db, word_bank_slugs) if needs_word_bank else []
     generation_theme = word_bank_source_theme(selected_banks, theme) if needs_word_bank else (
@@ -1786,6 +1872,7 @@ def admin_context(
         "app_settings": {
             "public_base_url": app_base_url(db),
             "default_base_url": DEFAULT_APP_BASE_URL,
+            "disabled_puzzle_types": sorted(disabled_puzzle_type_slugs(db)),
         },
         "puzzles": puzzles,
         "live_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is None],
@@ -1807,8 +1894,9 @@ def admin_context(
         "selected_word": selected_word,
         "selected_word_bank": selected_word_bank,
         "selected_tag": selected_tag,
-        "puzzle_types": list_puzzle_types(),
-        "generation_schemas": puzzle_type_generation_schemas(),
+        "puzzle_types": list_enabled_puzzle_types(db),
+        "all_puzzle_types": list_puzzle_types(),
+        "generation_schemas": puzzle_type_generation_schemas(db),
     }
 
 
@@ -1924,6 +2012,7 @@ def admin_settings_page(request: Request, db: Session = Depends(get_db)):
 def admin_update_settings(
     request: Request,
     public_base_url: str = Form(""),
+    disabled_puzzle_types: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -1934,6 +2023,7 @@ def admin_update_settings(
     except ValueError as error:
         return RedirectResponse(url=f"/admin/settings?error={quote(str(error))}", status_code=303)
     set_app_setting(db, "public_base_url", base_url)
+    set_disabled_puzzle_type_slugs(db, disabled_puzzle_types)
     db.commit()
     return RedirectResponse(url="/admin/settings?message=Settings%20saved.", status_code=303)
 
@@ -2123,7 +2213,7 @@ async def admin_generate_puzzle(
     if isinstance(user, RedirectResponse):
         return user
     puzzle_type_config = get_puzzle_type(puzzle_type)
-    if puzzle_type_config is None:
+    if puzzle_type_config is None or not is_puzzle_type_enabled(db, puzzle_type):
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
     needs_word_bank = "word_bank" in puzzle_type_config.source_requirements
     selected_bank_ids = bank_ids or ([bank_id] if bank_id else [])
@@ -3063,6 +3153,9 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
     puzzle_type = get_puzzle_type(payload.puzzle_type)
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
+    if not is_puzzle_type_enabled(db, payload.puzzle_type):
+        raise HTTPException(status_code=400, detail="This puzzle type is disabled")
+    generation_options = validate_generation_options(puzzle_type, payload.generation_options)
 
     needs_word_bank = "word_bank" in puzzle_type.source_requirements
     selected_banks = []
@@ -3087,7 +3180,7 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         }
     generation_seed = normalize_seed(payload.seed)
     try:
-        generated = puzzle_type.generator(generation_theme, payload.difficulty, source_data, generation_seed, payload.generation_options)
+        generated = puzzle_type.generator(generation_theme, payload.difficulty, source_data, generation_seed, generation_options)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     generated.metadata["excluded_tag_ids"] = sorted(excluded_tag_ids)
@@ -3124,6 +3217,16 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
 def create_puzzle(payload: PuzzleGenerateRequest, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
     user = require_admin_api(request, db)
     return create_puzzle_record(payload, db, creator=user)
+
+
+@app.get("/api/puzzle-types")
+def list_puzzle_type_contracts(
+    request: Request,
+    include_disabled: bool = False,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    return {"puzzle_types": list(puzzle_type_generation_schemas(db, include_disabled=include_disabled).values())}
 
 
 @app.get("/api/puzzles")

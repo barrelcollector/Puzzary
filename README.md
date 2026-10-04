@@ -143,13 +143,15 @@ Puzzle types are auto-discovered modules under `app/puzzle_types`.
 
 Each type owns its generator, source adapter, answer checker, and progress logic. Browser UI lives in `app/templates/puzzle_types/{slug}.html`, with optional admin solution display in `app/templates/puzzle_solutions/{slug}.html`.
 
+The full contributor contract is documented in [`docs/puzzle-modules.md`](docs/puzzle-modules.md). Admins can enable or disable modules from **Admin -> Settings**; disabled modules stay playable for existing puzzles but disappear from generation screens and API generation.
+
 To add a type, drop a new Python file into `app/puzzle_types/`. Files whose names start with `_` are ignored. The module must call `register_puzzle_type(...)` at import time:
 
 ```python
-from app.puzzles import GeneratedPuzzle, PrintLayout, PuzzleType, register_puzzle_type
+from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
 
 
-def generate(theme, difficulty, source_data=None, seed=None) -> GeneratedPuzzle:
+def generate(theme, difficulty, source_data=None, seed=None, generation_options=None) -> GeneratedPuzzle:
     ...
 
 
@@ -191,6 +193,17 @@ register_puzzle_type(
         ),
         supports_gimmes=False,
         gimme_modes=(),
+        generation_fields=(
+            GenerationField(
+                name="answer_count",
+                label="Answer count",
+                field_type="number",
+                default=5,
+                minimum=1,
+                maximum=20,
+                help_text="Server-side validation uses these limits before generation runs.",
+            ),
+        ),
     )
 )
 ```
