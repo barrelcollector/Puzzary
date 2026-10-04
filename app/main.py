@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -17,6 +18,7 @@ from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import qrcode
+from qrcode.image.pure import PyPNGImage
 from qrcode.image.svg import SvgPathImage
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -262,6 +264,17 @@ def puzzle_qr_svg_url(puzzle_id: str, db: Session | None = None) -> str:
     return f"{app_base_url(db)}/puzzles/{puzzle_id}/qr.svg"
 
 
+def qr_png_data_uri(value: str) -> str:
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=2, box_size=8)
+    qr.add_data(value)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=PyPNGImage)
+    buffer = BytesIO()
+    image.save(buffer)
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def print_layout_context(puzzle: Puzzle, puzzle_type, db: Session | None = None) -> dict:
     layout = puzzle_type.print_layout.as_dict()
     if puzzle_type.print_layout_builder is not None:
@@ -291,6 +304,7 @@ def print_layout_context(puzzle: Puzzle, puzzle_type, db: Session | None = None)
     layout["short_url"] = puzzle_qr_short_url(puzzle.id, db)
     layout["qr_url"] = puzzle_qr_svg_url(puzzle.id, db)
     layout["qr_target_url"] = puzzle_qr_short_url(puzzle.id, db)
+    layout["qr_data_uri"] = qr_png_data_uri(layout["qr_target_url"])
     return layout
 
 
