@@ -61,7 +61,61 @@
           <h1>Puzzles</h1>
           <p class="muted">Generated playable and printable puzzle instances.</p>
         </div>
-        <a class="button-link" href="/admin/generate">Generate</a>
+        <span class="action-row">
+          <a class="ghost-button" href="/api/puzzles/export">Export Active Bundle</a>
+          <a class="button-link" href="/admin/generate">Generate</a>
+        </span>
+      </section>
+      <section class="admin-grid two">
+        <form class="panel" method="post" action="/admin/puzzles/import" enctype="multipart/form-data">
+          <h2>Import Puzzle</h2>
+          <p class="muted">Import a portable Puzzary puzzle or bundle from another Puzzary server, GitHub, Pastebin, uploaded JSON, or pasted JSON.</p>
+          <label>Source URL <input name="source_url" type="url" placeholder="https://puzzary.example.com/api/puzzles/export"></label>
+          <label>Source API token <input name="source_api_token" type="password" autocomplete="off" placeholder="Only needed for private Puzzary sources"></label>
+          <label>Upload file <input name="upload" type="file" accept=".json,.puzzary,application/json"></label>
+          <label>Pasted JSON <textarea name="source_text" rows="6" placeholder='{"schema":"puzzary.puzzle.item.v1", ...}'></textarea></label>
+          <label>Duplicate policy
+            <select name="duplicate_policy">
+              <option value="skip" selected>Skip matching origin</option>
+              <option value="copy">Import as copy</option>
+            </select>
+          </label>
+          <label>Import mode
+            <select name="dry_run">
+              <option value="true" selected>Preview only</option>
+              <option value="false">Apply import</option>
+            </select>
+          </label>
+          <button type="submit">Run Import</button>
+        </form>
+        {% if puzzle_import_result %}
+          <article class="panel">
+            <h2>Puzzle Import Summary</h2>
+            {% if puzzle_import_result.errors %}
+              {% for error in puzzle_import_result.errors %}
+                <p class="danger-text">{{ error }}</p>
+              {% endfor %}
+            {% else %}
+              <div class="metric-grid">
+                <div class="metric-card"><strong>{{ puzzle_import_result.processed }}</strong><span>Processed</span></div>
+                <div class="metric-card"><strong>{{ puzzle_import_result.imported }}</strong><span>Imported</span></div>
+                <div class="metric-card"><strong>{{ puzzle_import_result.duplicates }}</strong><span>Duplicates</span></div>
+                <div class="metric-card"><strong>{{ puzzle_import_result.unsupported }}</strong><span>Unsupported</span></div>
+              </div>
+              <div class="list compact">
+                {% for item in puzzle_import_result.items %}
+                  <div class="row">
+                    <span>
+                      <strong>{{ item.title }}</strong>
+                      <small>{{ item.puzzle_type }} / {{ item.action }}{% if item.error %} / {{ item.error }}{% endif %}</small>
+                    </span>
+                    {% if item.local_id %}<a class="ghost-link" href="/puzzles/{{ item.local_id }}">Open</a>{% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </article>
+        {% endif %}
       </section>
       <div class="admin-list">
         {% for puzzle in puzzles %}
@@ -104,6 +158,7 @@
             </form>
             <div class="action-row">
               <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
+              <a class="ghost-link" href="/api/puzzles/{{ puzzle.id }}/export">Export</a>
               {% if puzzle.archived_at %}
                 <form method="post" action="/admin/puzzles/{{ puzzle.id }}/unarchive"><button type="submit" class="ghost-button">Unarchive</button></form>
               {% else %}

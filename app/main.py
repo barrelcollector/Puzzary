@@ -62,6 +62,7 @@ from app.schemas import (
     PuzzleGenerateRequest,
     PuzzleProgressResponse,
     PuzzleProgressUpdate,
+    PuzzleImportRequest,
     PuzzlePrintPreview,
     PuzzleSummary,
     UserCreate,
@@ -306,6 +307,252 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         metadata=puzzle.puzzle_metadata or {},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
     )
+
+
+def portable_puzzle_item(puzzle: Puzzle, db: Session | None = None) -> dict:
+    return {
+        "schema": "puzzary.puzzle.item.v1",
+        "origin": {
+            "id": puzzle.id,
+            "url": puzzle_url(puzzle.id, db),
+            "exported_from": app_base_url(db),
+        },
+        "puzzle_type": puzzle.puzzle_type,
+        "title": puzzle.title,
+        "theme": puzzle.theme,
+        "difficulty": puzzle.difficulty,
+        "prompt": puzzle.prompt,
+        "print_payload": puzzle.print_payload or {},
+        "play_payload": puzzle.play_payload or {},
+        "solution_payload": puzzle.solution_payload or {},
+        "metadata": puzzle.puzzle_metadata or {},
+        "hints": [hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
+        "category": puzzle.category.name if puzzle.category else "",
+        "tags": [tag.label for tag in puzzle.tags],
+        "source": puzzle.source,
+        "created_at": puzzle.created_at.isoformat() if puzzle.created_at else None,
+        "attribution": {
+            "creator": creator_label(puzzle),
+            "license": (puzzle.puzzle_metadata or {}).get("license", ""),
+        },
+    }
+
+
+def portable_puzzle_bundle(puzzles: list[Puzzle], db: Session | None = None) -> dict:
+    return {
+        "schema": "puzzary.puzzle.bundle.v1",
+        "exported_at": utcnow().isoformat(),
+        "exported_from": app_base_url(db),
+        "count": len(puzzles),
+        "items": [portable_puzzle_item(puzzle, db) for puzzle in puzzles],
+    }
+
+
+def puzzle_import_sources_from_github(url: str, api_token: str = "") -> list[dict[str, str]]:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host == "gist.github.com":
+        gist_id = parsed.path.strip("/").split("/")[-1]
+        if not gist_id:
+            raise ValueError("GitHub Gist URL is missing a gist id")
+        gist_api_url = f"https://api.github.com/gists/{gist_id}"
+        gist_payload = json.loads(fetch_dictionary_source(gist_api_url, "generic", api_token)[0]["text"])
+        sources = []
+        for file_data in gist_payload.get("files", {}).values():
+            raw_url = file_data.get("raw_url")
+            filename = str(file_data.get("filename", "")).lower()
+            if raw_url and filename.endswith((".json", ".puzzary")):
+                sources.extend(fetch_dictionary_source(raw_url, "generic", api_token))
+        if not sources:
+            raise ValueError("No JSON puzzle files were found in that Gist")
+        return sources
+    sources = fetch_dictionary_source(url, "github", api_token)
+    if len(sources) > 1:
+        sources = [
+            source for source in sources
+            if str(source.get("url", "")).lower().endswith((".json", ".puzzary"))
+        ]
+    if not sources:
+        raise ValueError("No JSON puzzle files were found in that GitHub source")
+    return sources
+
+
+def fetch_puzzle_import_sources(source_url: str, api_token: str = "") -> list[dict[str, str]]:
+    url = source_url.strip()
+    if not url:
+        return []
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Puzzle import source must be an http or https URL")
+    if parsed.netloc.lower() == "pastebin.com" or parsed.netloc.lower().endswith("github.com"):
+        if "github.com" in parsed.netloc.lower():
+            return puzzle_import_sources_from_github(url, api_token)
+        return fetch_dictionary_source(url, "generic", api_token)
+    if parsed.path.rstrip("/").endswith("/api/puzzles/export"):
+        return fetch_dictionary_source(url, "generic", api_token)
+    if re.search(r"/api/puzzles/[^/]+/export$", parsed.path.rstrip("/")):
+        return fetch_dictionary_source(url, "generic", api_token)
+    if parsed.path.rstrip("/") and parsed.path.rstrip("/") != "/":
+        return fetch_dictionary_source(url, "generic", api_token)
+    export_url = f"{parsed.scheme}://{parsed.netloc}/api/puzzles/export"
+    return fetch_dictionary_source(export_url, "generic", api_token)
+
+
+def puzzle_items_from_manifest(payload: object) -> list[dict]:
+    if not isinstance(payload, dict):
+        raise ValueError("Puzzle import must be a JSON object")
+    schema = str(payload.get("schema", ""))
+    if schema == "puzzary.puzzle.bundle.v1":
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            raise ValueError("Puzzle bundle items must be a list")
+        return [item for item in items if isinstance(item, dict)]
+    if schema == "puzzary.puzzle.item.v1" or {"puzzle_type", "print_payload", "play_payload", "solution_payload"} <= set(payload.keys()):
+        return [payload]
+    if "items" in payload and isinstance(payload["items"], list):
+        return [item for item in payload["items"] if isinstance(item, dict)]
+    raise ValueError("Unsupported puzzle import schema")
+
+
+def parse_puzzle_import_items(source_text: str = "", source_url: str = "", api_token: str = "") -> list[dict]:
+    sources: list[dict[str, str]] = []
+    if source_text.strip():
+        sources.append({"url": "pasted-content", "content_type": "application/json", "text": source_text})
+    sources.extend(fetch_puzzle_import_sources(source_url, api_token))
+    if not sources:
+        raise ValueError("Provide pasted JSON, an uploaded file, or a source URL")
+    items: list[dict] = []
+    for source in sources:
+        try:
+            payload = json.loads(source["text"])
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Puzzle source is not valid JSON: {error}") from error
+        source_items = puzzle_items_from_manifest(payload)
+        for item in source_items:
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            item["metadata"] = {**metadata, "import_source_url": source.get("url", source_url)}
+            items.append(item)
+    return items
+
+
+def normalize_import_id(item: dict) -> str:
+    origin = item.get("origin") if isinstance(item.get("origin"), dict) else {}
+    return str(origin.get("id") or item.get("id") or "").strip()
+
+
+def existing_imported_puzzle(db: Session, item: dict) -> Puzzle | None:
+    origin = item.get("origin") if isinstance(item.get("origin"), dict) else {}
+    origin_id = normalize_import_id(item)
+    origin_url = str(origin.get("url") or "").strip()
+    imported = db.scalars(select(Puzzle).where(Puzzle.source == "imported")).all()
+    for puzzle in imported:
+        metadata = puzzle.puzzle_metadata if isinstance(puzzle.puzzle_metadata, dict) else {}
+        imported_origin = metadata.get("import_origin") if isinstance(metadata.get("import_origin"), dict) else {}
+        if origin_id and str(imported_origin.get("id") or "") == origin_id:
+            return puzzle
+        if origin_url and str(imported_origin.get("url") or "") == origin_url:
+            return puzzle
+    return None
+
+
+def validate_portable_puzzle_item(db: Session, item: dict) -> tuple[bool, str]:
+    puzzle_type_slug = str(item.get("puzzle_type") or "").strip()
+    if not puzzle_type_slug:
+        return False, "Missing puzzle_type"
+    if get_puzzle_type(puzzle_type_slug) is None:
+        return False, f"Puzzle type '{puzzle_type_slug}' is not installed"
+    if not is_puzzle_type_enabled(db, puzzle_type_slug):
+        return False, f"Puzzle type '{puzzle_type_slug}' is disabled"
+    for key in ("print_payload", "play_payload", "solution_payload"):
+        if not isinstance(item.get(key), dict):
+            return False, f"{key} must be an object"
+    return True, ""
+
+
+def import_portable_puzzles(
+    db: Session,
+    items: list[dict],
+    creator: User | None = None,
+    dry_run: bool = True,
+    duplicate_policy: str = "skip",
+    import_ids: list[str] | None = None,
+) -> dict:
+    selected_ids = {str(item_id) for item_id in (import_ids or []) if str(item_id).strip()}
+    result = {
+        "dry_run": dry_run,
+        "total": len(items),
+        "processed": 0,
+        "imported": 0,
+        "skipped": 0,
+        "duplicates": 0,
+        "unsupported": 0,
+        "items": [],
+        "errors": [],
+    }
+    for index, item in enumerate(items, start=1):
+        origin_id = normalize_import_id(item) or f"item-{index}"
+        if selected_ids and origin_id not in selected_ids:
+            continue
+        result["processed"] += 1
+        valid, error = validate_portable_puzzle_item(db, item)
+        row = {
+            "origin_id": origin_id,
+            "title": str(item.get("title") or "Imported Puzzle"),
+            "puzzle_type": str(item.get("puzzle_type") or ""),
+            "action": "preview",
+            "error": error,
+        }
+        if not valid:
+            result["unsupported"] += 1
+            result["skipped"] += 1
+            row["action"] = "unsupported"
+            result["items"].append(row)
+            continue
+        duplicate = existing_imported_puzzle(db, item)
+        if duplicate is not None and duplicate_policy != "copy":
+            result["duplicates"] += 1
+            result["skipped"] += 1
+            row["action"] = "duplicate"
+            row["existing_id"] = duplicate.id
+            result["items"].append(row)
+            continue
+        row["action"] = "import" if not dry_run else "ready"
+        result["items"].append(row)
+        if dry_run:
+            continue
+        origin = item.get("origin") if isinstance(item.get("origin"), dict) else {}
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        metadata = {
+            **metadata,
+            "imported_at": utcnow().isoformat(),
+            "import_origin": origin,
+            "import_schema": str(item.get("schema") or "puzzary.puzzle.item.v1"),
+        }
+        puzzle = Puzzle(
+            id=uuid.uuid4().hex[:12],
+            puzzle_type=str(item.get("puzzle_type")),
+            title=str(item.get("title") or "Imported Puzzle")[:160],
+            theme=str(item.get("theme") or "imported")[:80],
+            difficulty=str(item.get("difficulty") or "imported")[:40],
+            prompt=str(item.get("prompt") or ""),
+            print_payload=item.get("print_payload") or {},
+            play_payload=item.get("play_payload") or {},
+            solution_payload=item.get("solution_payload") or {},
+            puzzle_metadata=metadata,
+            source="imported",
+            auto_archive_at=default_auto_archive_at(),
+            created_by_id=creator.id if creator is not None else None,
+        )
+        db.add(puzzle)
+        db.flush()
+        for hint_index, hint_text in enumerate(item.get("hints") if isinstance(item.get("hints"), list) else [], start=1):
+            if str(hint_text).strip():
+                db.add(PuzzleHint(puzzle_id=puzzle.id, order=hint_index, text=str(hint_text).strip()))
+        result["imported"] += 1
+        row["local_id"] = puzzle.id
+    if not dry_run:
+        db.commit()
+    return result
 
 
 def puzzle_preview(puzzle: Puzzle) -> dict:
@@ -2439,6 +2686,52 @@ def admin_delete_puzzle(puzzle_id: str, request: Request, db: Session = Depends(
     return RedirectResponse(url="/admin/puzzles", status_code=303)
 
 
+@app.post("/admin/puzzles/import")
+async def admin_import_puzzles(
+    request: Request,
+    source_url: str = Form(""),
+    source_text: str = Form(""),
+    source_api_token: str = Form(""),
+    dry_run: bool = Form(True),
+    duplicate_policy: str = Form("skip"),
+    upload: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    uploaded_text = ""
+    if upload is not None and upload.filename:
+        uploaded_text = (await upload.read(1_000_000 + 1)).decode("utf-8", errors="replace")
+        if len(uploaded_text) > 1_000_000:
+            raise HTTPException(status_code=400, detail="Uploaded puzzle file is too large")
+    context = admin_context(request, db, user, "puzzles")
+    try:
+        items = parse_puzzle_import_items(
+            source_text=uploaded_text or source_text,
+            source_url=source_url,
+            api_token=source_api_token,
+        )
+        result = import_portable_puzzles(
+            db,
+            items,
+            creator=user,
+            dry_run=dry_run,
+            duplicate_policy=duplicate_policy,
+        )
+    except ValueError as error:
+        result = {
+            "dry_run": dry_run,
+            "errors": [str(error)],
+            "items": [],
+            "processed": 0,
+            "imported": 0,
+            "skipped": 0,
+        }
+    context["puzzle_import_result"] = result
+    return templates.TemplateResponse("admin.html", context)
+
+
 @app.post("/admin/puzzles/{puzzle_id}/metadata")
 def admin_update_puzzle_metadata(
     puzzle_id: str,
@@ -4002,6 +4295,53 @@ def get_latest_puzzle(request: Request, printable: bool = False, db: Session = D
             continue
         return serialize_puzzle(puzzle, db)
     raise HTTPException(status_code=404, detail="No printable puzzle found" if printable else "No puzzle found")
+
+
+@app.get("/api/puzzles/export")
+def api_export_puzzles(
+    request: Request,
+    ids: str = "",
+    include_archived: bool = False,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
+    if ids.strip():
+        selected = {item.strip() for item in ids.split(",") if item.strip()}
+        puzzles = [puzzle for puzzle in puzzles if puzzle.id in selected]
+    if not include_archived:
+        puzzles = [puzzle for puzzle in puzzles if puzzle.archived_at is None]
+    return portable_puzzle_bundle(puzzles, db)
+
+
+@app.post("/api/puzzles/import")
+def api_import_puzzles(payload: PuzzleImportRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    try:
+        items = parse_puzzle_import_items(
+            source_text=payload.source_text,
+            source_url=payload.source_url,
+            api_token=payload.source_api_token,
+        )
+        return import_portable_puzzles(
+            db,
+            items,
+            creator=user,
+            dry_run=payload.dry_run,
+            duplicate_policy=payload.duplicate_policy,
+            import_ids=payload.import_ids,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/api/puzzles/{puzzle_id}/export")
+def api_export_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    return portable_puzzle_item(puzzle, db)
 
 
 @app.get("/api/puzzles/{puzzle_id}", response_model=PuzzleSummary)

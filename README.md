@@ -111,6 +111,28 @@ curl http://localhost:8790/api/puzzles/{puzzle_id} \
   -H "Authorization: Bearer $PUZZARY_API_TOKEN"
 ```
 
+Export or import portable puzzles:
+
+```bash
+curl http://localhost:8790/api/puzzles/{puzzle_id}/export \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN"
+
+curl http://localhost:8790/api/puzzles/export?ids=abc123,def456 \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN"
+
+curl -X POST http://localhost:8790/api/puzzles/import \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{
+    "source_url":"https://puzzary.example.com/api/puzzles/export",
+    "source_api_token":"REMOTE_PUZZARY_API_TOKEN",
+    "dry_run":true,
+    "duplicate_policy":"skip"
+  }'
+```
+
+Portable puzzle manifests use `schema: "puzzary.puzzle.item.v1"` for one puzzle or `schema: "puzzary.puzzle.bundle.v1"` with an `items` array for bundles. Imports validate that the puzzle type is installed locally and never install executable plugin code from a remote source. Supported import sources include another Puzzary export endpoint, pasted JSON, uploaded JSON, Pastebin/raw URLs, GitHub raw files, GitHub repo files, and Gists.
+
 Submit an answer:
 
 ```bash

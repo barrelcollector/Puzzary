@@ -67,6 +67,15 @@ class PuzzlePrintPreview(BaseModel):
     render_url: str
 
 
+class PuzzleImportRequest(BaseModel):
+    source_url: str = ""
+    source_text: str = ""
+    source_api_token: str = ""
+    dry_run: bool = True
+    duplicate_policy: str = "skip"
+    import_ids: list[str] = Field(default_factory=list)
+
+
 class DictionaryDefinitionWrite(BaseModel):
     definition: str = Field(..., min_length=1)
     part_of_speech: str = ""
