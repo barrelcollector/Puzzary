@@ -133,7 +133,12 @@ Dictionary and content-management endpoints:
 
 ```text
 GET    /api/dictionary?search=cloud
+GET    /api/dictionary/export
 POST   /api/dictionary/import
+GET    /api/dictionary/import-sources
+POST   /api/dictionary/import-sources
+POST   /api/dictionary/import-sources/{source_id}/sync
+DELETE /api/dictionary/import-sources/{source_id}
 POST   /api/dictionary
 GET    /api/dictionary/{word_id}
 PATCH  /api/dictionary/{word_id}
@@ -173,6 +178,30 @@ curl -X POST http://localhost:8790/api/dictionary/import \
 ```
 
 Use `"dry_run": false` to apply the import after reviewing the summary. Existing words are merged into the canonical dictionary word. Duplicate definitions are skipped, while new definitions for existing words are preserved.
+
+Export a dictionary for another Puzzary server:
+
+```bash
+curl http://localhost:8790/api/dictionary/export \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN"
+```
+
+Create a periodic Puzzary-to-Puzzary sync source:
+
+```bash
+curl -X POST http://localhost:8790/api/dictionary/import-sources \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
+  --data '{
+    "name":"Main Puzzary Dictionary",
+    "source_url":"https://puzzary.example.com",
+    "source_type":"puzzary",
+    "source_api_token":"REMOTE_PUZZARY_API_TOKEN",
+    "sync_interval_hours":24,
+    "dry_run":false,
+    "sync_now":true
+  }'
+```
 
 Smoke-test flow for external dictionary clients:
 

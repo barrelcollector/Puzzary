@@ -298,3 +298,21 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DictionaryImportSource(Base):
+    __tablename__ = "dictionary_import_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    source_url: Mapped[str] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(String(40), default="auto")
+    source_label: Mapped[str] = mapped_column(String(160), default="")
+    source_api_token: Mapped[str] = mapped_column(Text, default="")
+    sync_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
+    max_items: Mapped[int] = mapped_column(Integer, default=500)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_result: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -124,3 +124,25 @@ def ensure_schema() -> None:
             word_bank_tag_columns = {column["name"] for column in inspector.get_columns("word_bank_tag_links")}
             if "content_source_id" in word_bank_tag_columns and "word_bank_id" not in word_bank_tag_columns:
                 connection.execute(text("ALTER TABLE word_bank_tag_links RENAME COLUMN content_source_id TO word_bank_id"))
+
+        if "dictionary_import_sources" not in table_names:
+            connection.execute(text("""
+                CREATE TABLE dictionary_import_sources (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(120) NOT NULL,
+                    source_url TEXT NOT NULL,
+                    source_type VARCHAR(40) NOT NULL DEFAULT 'auto',
+                    source_label VARCHAR(160) NOT NULL DEFAULT '',
+                    source_api_token TEXT NOT NULL DEFAULT '',
+                    sync_interval_hours INTEGER NOT NULL DEFAULT 24,
+                    max_items INTEGER NOT NULL DEFAULT 500,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    last_synced_at TIMESTAMP WITH TIME ZONE,
+                    next_sync_at TIMESTAMP WITH TIME ZONE,
+                    last_result JSON,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+                )
+            """))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dictionary_import_sources_enabled ON dictionary_import_sources (enabled)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dictionary_import_sources_last_synced_at ON dictionary_import_sources (last_synced_at)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dictionary_import_sources_next_sync_at ON dictionary_import_sources (next_sync_at)"))

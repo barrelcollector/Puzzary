@@ -33,6 +33,7 @@ from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_
 from app.models import (
     AppSetting,
     DictionaryDefinition,
+    DictionaryImportSource,
     DictionaryWord,
     Puzzle,
     PuzzleAttempt,
@@ -51,6 +52,7 @@ from app.schemas import (
     DictionaryDefinitionPatch,
     DictionaryDefinitionWrite,
     DictionaryImportRequest,
+    DictionaryImportSourceWrite,
     DictionaryWordPatch,
     DictionaryWordWrite,
     PuzzleTagPatch,
@@ -79,6 +81,8 @@ app = FastAPI(title="Puzzary", version="0.1.0")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+DICTIONARY_SYNC_CHECK_SECONDS = 15 * 60
 
 PASSWORD_SCHEME = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 390000
@@ -163,7 +167,9 @@ async def startup() -> None:
         seed_word_banks(db)
         seed_word_definitions(db)
         apply_due_auto_archives(db)
+        run_due_dictionary_import_sources(db)
     app.state.auto_archive_task = asyncio.create_task(auto_archive_loop())
+    app.state.dictionary_sync_task = asyncio.create_task(dictionary_import_source_loop())
 
 
 @app.on_event("shutdown")
@@ -171,6 +177,9 @@ async def shutdown() -> None:
     task = getattr(app.state, "auto_archive_task", None)
     if task is not None:
         task.cancel()
+    sync_task = getattr(app.state, "dictionary_sync_task", None)
+    if sync_task is not None:
+        sync_task.cancel()
 
 
 def normalize_base_url(value: str) -> str:
@@ -871,6 +880,15 @@ def serialize_dictionary_word(word: DictionaryWord) -> dict:
     }
 
 
+def dictionary_export_payload(words: list[DictionaryWord]) -> dict:
+    return {
+        "schema": "puzzary.dictionary.v1",
+        "exported_at": utcnow().isoformat(),
+        "total": len(words),
+        "items": [serialize_dictionary_word(word) for word in words],
+    }
+
+
 def serialize_word_bank_link(link: WordBankWord) -> dict:
     return {
         "id": link.id,
@@ -1212,11 +1230,87 @@ def apply_due_auto_archives(db: Session) -> int:
     return len(due_puzzles)
 
 
+def dictionary_import_source_summary(source: DictionaryImportSource) -> dict:
+    return {
+        "id": source.id,
+        "name": source.name,
+        "source_url": source.source_url,
+        "source_type": source.source_type,
+        "source_label": source.source_label,
+        "sync_interval_hours": source.sync_interval_hours,
+        "max_items": source.max_items,
+        "enabled": source.enabled,
+        "has_api_token": bool(source.source_api_token),
+        "last_synced_at": source.last_synced_at.isoformat() if source.last_synced_at else None,
+        "next_sync_at": source.next_sync_at.isoformat() if source.next_sync_at else None,
+        "last_result": source.last_result or {},
+        "created_at": source.created_at.isoformat() if source.created_at else None,
+    }
+
+
+def schedule_next_dictionary_import(source: DictionaryImportSource, now: datetime | None = None) -> None:
+    base = now or utcnow()
+    interval = max(1, min(int(source.sync_interval_hours or 24), 24 * 30))
+    source.next_sync_at = base + timedelta(hours=interval)
+
+
+def run_dictionary_import_source(db: Session, source: DictionaryImportSource, dry_run: bool = False) -> dict:
+    now = utcnow()
+    try:
+        sources = fetch_dictionary_source(source.source_url, source.source_type, source.source_api_token)
+        imported_words = parse_imported_words(sources)
+        result = import_dictionary_words(
+            db,
+            imported_words,
+            source_label=source.source_label or source.name or source.source_url,
+            tag_ids=[],
+            dry_run=dry_run,
+            max_items=source.max_items,
+        )
+        result["source_count"] = len(sources)
+        result["source_url"] = source.source_url
+        result["source_type"] = source.source_type
+        result["synced_at"] = now.isoformat()
+    except ValueError as error:
+        result = {
+            "dry_run": dry_run,
+            "source_url": source.source_url,
+            "source_type": source.source_type,
+            "errors": [str(error)],
+            "synced_at": now.isoformat(),
+        }
+    source.last_synced_at = now
+    source.last_result = result
+    schedule_next_dictionary_import(source, now)
+    db.commit()
+    return result
+
+
+def run_due_dictionary_import_sources(db: Session) -> int:
+    now = utcnow()
+    sources = db.scalars(
+        select(DictionaryImportSource).where(
+            DictionaryImportSource.enabled == True,  # noqa: E712
+            (DictionaryImportSource.next_sync_at.is_(None)) | (DictionaryImportSource.next_sync_at <= now),
+        )
+    ).all()
+    for source in sources:
+        run_dictionary_import_source(db, source, dry_run=False)
+    return len(sources)
+
+
 async def auto_archive_loop() -> None:
     while True:
         with SessionLocal() as db:
             apply_due_auto_archives(db)
         await asyncio.sleep(60)
+
+
+async def dictionary_import_source_loop() -> None:
+    while True:
+        with SessionLocal() as db:
+            run_due_dictionary_import_sources(db)
+        await asyncio.sleep(DICTIONARY_SYNC_CHECK_SECONDS)
 
 
 def hash_secret(value: str) -> str:
@@ -2034,6 +2128,7 @@ def admin_context(
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
     dictionary_words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+    dictionary_import_sources = db.scalars(select(DictionaryImportSource).order_by(DictionaryImportSource.name)).all()
     admin_users = db.scalars(select(User).order_by(User.display_name)).all()
     return {
         "request": request,
@@ -2060,6 +2155,7 @@ def admin_context(
         "progress_rows": progress_rows,
         "photos": photos,
         "dictionary_words": dictionary_words,
+        "dictionary_import_sources": dictionary_import_sources,
         "admin_users": admin_users,
         "selected_word": selected_word,
         "selected_word_bank": selected_word_bank,
@@ -2634,6 +2730,79 @@ def admin_import_dictionary(
         }
     context["dictionary_import_result"] = result
     return templates.TemplateResponse("admin.html", context)
+
+
+@app.post("/admin/dictionary/import-sources")
+def admin_create_dictionary_import_source(
+    request: Request,
+    name: str = Form(...),
+    source_url: str = Form(...),
+    source_type: str = Form("puzzary"),
+    source_label: str = Form(""),
+    source_api_token: str = Form(""),
+    sync_interval_hours: int = Form(24),
+    max_items: int = Form(500),
+    enabled: bool = Form(True),
+    sync_now: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = DictionaryImportSource(
+        name=name.strip(),
+        source_url=source_url.strip(),
+        source_type=source_type.strip() or "auto",
+        source_label=source_label.strip(),
+        source_api_token=source_api_token.strip(),
+        sync_interval_hours=max(1, min(sync_interval_hours, 24 * 30)),
+        max_items=max(1, min(max_items, 5000)),
+        enabled=enabled,
+    )
+    schedule_next_dictionary_import(source, utcnow())
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    if sync_now:
+        run_dictionary_import_source(db, source, dry_run=False)
+    return RedirectResponse(url="/admin/dictionary", status_code=303)
+
+
+@app.post("/admin/dictionary/import-sources/{source_id}/sync")
+def admin_sync_dictionary_import_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(DictionaryImportSource, source_id)
+    if source is not None:
+        run_dictionary_import_source(db, source, dry_run=False)
+    return RedirectResponse(url="/admin/dictionary", status_code=303)
+
+
+@app.post("/admin/dictionary/import-sources/{source_id}/toggle")
+def admin_toggle_dictionary_import_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(DictionaryImportSource, source_id)
+    if source is not None:
+        source.enabled = not source.enabled
+        if source.enabled and source.next_sync_at is None:
+            schedule_next_dictionary_import(source, utcnow())
+        db.commit()
+    return RedirectResponse(url="/admin/dictionary", status_code=303)
+
+
+@app.post("/admin/dictionary/import-sources/{source_id}/delete")
+def admin_delete_dictionary_import_source(source_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    source = db.get(DictionaryImportSource, source_id)
+    if source is not None:
+        db.delete(source)
+        db.commit()
+    return RedirectResponse(url="/admin/dictionary", status_code=303)
 
 
 @app.post("/admin/dictionary/{word_id}")
@@ -3257,6 +3426,77 @@ def api_import_dictionary(payload: DictionaryImportRequest, request: Request, db
     result["source_url"] = payload.source_url
     result["source_type"] = payload.source_type
     return result
+
+
+@app.get("/api/dictionary/export")
+def api_export_dictionary(
+    request: Request,
+    include_archived: bool = False,
+    include_banned: bool = False,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+    if not include_archived:
+        words = [word for word in words if word.archived_at is None]
+    if not include_banned:
+        words = [word for word in words if word.banned_at is None]
+    return dictionary_export_payload(words)
+
+
+@app.get("/api/dictionary/import-sources")
+def api_list_dictionary_import_sources(request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    sources = db.scalars(select(DictionaryImportSource).order_by(DictionaryImportSource.name)).all()
+    return {"items": [dictionary_import_source_summary(source) for source in sources]}
+
+
+@app.post("/api/dictionary/import-sources")
+def api_create_dictionary_import_source(
+    payload: DictionaryImportSourceWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin_api(request, db)
+    source = DictionaryImportSource(
+        name=payload.name.strip(),
+        source_url=payload.source_url.strip(),
+        source_type=payload.source_type.strip() or "auto",
+        source_label=payload.source_label.strip(),
+        source_api_token=payload.source_api_token.strip(),
+        sync_interval_hours=max(1, min(payload.sync_interval_hours, 24 * 30)),
+        max_items=max(1, min(payload.max_items, 5000)),
+        enabled=payload.enabled,
+    )
+    schedule_next_dictionary_import(source, utcnow())
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    if payload.sync_now:
+        run_dictionary_import_source(db, source, dry_run=False)
+        db.refresh(source)
+    return dictionary_import_source_summary(source)
+
+
+@app.post("/api/dictionary/import-sources/{source_id}/sync")
+def api_sync_dictionary_import_source(source_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    source = db.get(DictionaryImportSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Dictionary import source not found")
+    result = run_dictionary_import_source(db, source, dry_run=False)
+    return {"source": dictionary_import_source_summary(source), "result": result}
+
+
+@app.delete("/api/dictionary/import-sources/{source_id}")
+def api_delete_dictionary_import_source(source_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    source = db.get(DictionaryImportSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Dictionary import source not found")
+    db.delete(source)
+    db.commit()
+    return {"deleted": True, "id": source_id}
 
 
 @app.post("/api/dictionary")

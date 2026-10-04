@@ -100,10 +100,16 @@ def fetch_url(url: str, bearer_token: str = "") -> dict[str, str]:
 def fetch_puzzary_dictionary(base_url: str, api_token: str = "") -> list[dict[str, str]]:
     parsed = urllib.parse.urlparse(base_url)
     path = parsed.path.rstrip("/")
+    if path.endswith("/api/dictionary/export"):
+        return [fetch_url(base_url, api_token)]
     if path.endswith("/api/dictionary"):
         endpoint = base_url
     else:
-        endpoint = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/api/dictionary", "", "", ""))
+        export_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/api/dictionary/export", "", "", ""))
+        try:
+            return [fetch_url(export_url, api_token)]
+        except ValueError:
+            endpoint = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/api/dictionary", "", "", ""))
     fetched: list[dict[str, str]] = []
     offset = 0
     while offset < 5000:

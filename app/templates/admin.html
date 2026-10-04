@@ -422,6 +422,7 @@
           <h1>Dictionary</h1>
           <p class="muted">Canonical words. Each word exists once, can have tags, and can appear in many word banks.</p>
         </div>
+        <a class="ghost-button" href="/api/dictionary/export">Export Dictionary</a>
       </section>
       <section class="admin-grid two">
         <form class="panel" method="post" action="/admin/dictionary">
@@ -502,6 +503,63 @@
             {% endif %}
           </article>
         {% endif %}
+        <form class="panel" method="post" action="/admin/dictionary/import-sources">
+          <h2>Periodic Sync Source</h2>
+          <p class="muted">Save another Puzzary server or feed and Puzzary will pull it on a schedule.</p>
+          <label>Name <input name="name" required placeholder="Family Puzzary"></label>
+          <label>Source URL <input name="source_url" type="url" required placeholder="https://puzzary.example.com"></label>
+          <label>Source type
+            <select name="source_type">
+              <option value="puzzary" selected>Puzzary server</option>
+              <option value="github">GitHub repo or file</option>
+              <option value="generic">Generic URL</option>
+              <option value="auto">Auto-detect</option>
+            </select>
+          </label>
+          <label>Source label <input name="source_label" placeholder="Remote Puzzary"></label>
+          <label>Source API token <input name="source_api_token" type="password" autocomplete="off" placeholder="Only needed for private sources"></label>
+          <label>Sync every
+            <select name="sync_interval_hours">
+              <option value="1">1 hour</option>
+              <option value="6">6 hours</option>
+              <option value="12">12 hours</option>
+              <option value="24" selected>24 hours</option>
+              <option value="168">7 days</option>
+            </select>
+          </label>
+          <label>Maximum words <input name="max_items" type="number" min="1" max="5000" value="500"></label>
+          <label class="inline-check"><input type="checkbox" name="sync_now" value="true"> Sync once immediately</label>
+          <button type="submit">Save Source</button>
+        </form>
+        <article class="panel">
+          <h2>Saved Sync Sources</h2>
+          <div class="list compact">
+            {% for source in dictionary_import_sources %}
+              <div class="row">
+                <span>
+                  <strong>{{ source.name }}</strong>
+                  <small>{{ source.source_type }} / every {{ source.sync_interval_hours }}h{% if source.enabled %} / enabled{% else %} / paused{% endif %}</small>
+                  <small>
+                    {% if source.last_synced_at %}Last {{ local_datetime_label(source.last_synced_at) }}{% else %}Not synced yet{% endif %}
+                    {% if source.next_sync_at %} / Next {{ local_datetime_label(source.next_sync_at) }}{% endif %}
+                  </small>
+                  {% if source.last_result and source.last_result.errors %}
+                    <small class="danger-text">{{ source.last_result.errors | join(", ") }}</small>
+                  {% elif source.last_result %}
+                    <small>{{ source.last_result.processed_words | default(0) }} processed / {{ source.last_result.added_words | default(0) }} new / {{ source.last_result.merged_words | default(0) }} merged</small>
+                  {% endif %}
+                </span>
+                <span class="action-row">
+                  <form method="post" action="/admin/dictionary/import-sources/{{ source.id }}/sync"><button type="submit" class="ghost-button">Sync now</button></form>
+                  <form method="post" action="/admin/dictionary/import-sources/{{ source.id }}/toggle"><button type="submit" class="ghost-button">{{ "Pause" if source.enabled else "Enable" }}</button></form>
+                  <form method="post" action="/admin/dictionary/import-sources/{{ source.id }}/delete"><button type="submit" class="danger-button">Delete</button></form>
+                </span>
+              </div>
+            {% else %}
+              <p class="muted">No periodic import sources yet.</p>
+            {% endfor %}
+          </div>
+        </article>
         <div class="admin-list">
           {% for word in dictionary_words %}
             <a class="word-row" href="/admin/dictionary/{{ word.id }}">

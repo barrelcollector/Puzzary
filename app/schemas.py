@@ -97,6 +97,13 @@ class DictionaryImportRequest(BaseModel):
     max_items: int = 500
 
 
+class DictionaryImportSourceWrite(DictionaryImportRequest):
+    name: str = Field(..., min_length=1, max_length=120)
+    sync_interval_hours: int = 24
+    enabled: bool = True
+    sync_now: bool = False
+
+
 class DictionaryWordPatch(BaseModel):
     display_text: str | None = None
     clue: str | None = None
