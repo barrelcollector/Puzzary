@@ -7,16 +7,155 @@
     <p class="muted">Browse saved puzzles or start a new generated puzzle.</p>
     <a class="button-link" href="/generate">Generate Puzzle</a>
   </div>
-
 </section>
 
+<form class="panel library-filter-panel" method="get" action="/library">
+  <div class="library-search-row">
+    <label>
+      Search
+      <input name="q" value="{{ filters.q }}" placeholder="Title, tag, creator, theme">
+    </label>
+    <label>
+      Sort
+      <select name="sort">
+        {% for sort in filter_options.sorts %}
+          <option value="{{ sort.value }}" {% if filters.sort == sort.value %}selected{% endif %}>{{ sort.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Availability
+      <select name="availability">
+        <option value="active" {% if filters.availability == "active" %}selected{% endif %}>Playable now</option>
+        <option value="archived" {% if filters.availability == "archived" %}selected{% endif %}>Archived</option>
+        <option value="scheduled" {% if filters.availability == "scheduled" %}selected{% endif %}>Has archive date</option>
+        <option value="any" {% if filters.availability == "any" %}selected{% endif %}>Any</option>
+      </select>
+    </label>
+  </div>
+
+  <details class="library-filter-details" {% if active_chips %}open{% endif %}>
+    <summary>Filters</summary>
+    <div class="library-filter-grid">
+      <label>
+        Type
+        <select name="type" multiple size="5">
+          {% for type in filter_options.types %}
+            <option value="{{ type.value }}" {% if type.value in filters.types %}selected{% endif %}>{{ type.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Tags
+        <select name="tag" multiple size="5">
+          {% for tag in filter_options.tags %}
+            <option value="{{ tag.value }}" {% if tag.value in filters.tags %}selected{% endif %}>{{ tag.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Theme
+        <select name="theme" multiple size="5">
+          {% for theme in filter_options.themes %}
+            <option value="{{ theme.value }}" {% if theme.value in filters.themes %}selected{% endif %}>{{ theme.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Difficulty
+        <select name="difficulty" multiple size="3">
+          {% for difficulty in filter_options.difficulty %}
+            <option value="{{ difficulty.value }}" {% if difficulty.value in filters.difficulty %}selected{% endif %}>{{ difficulty.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Play status
+        <select name="status">
+          <option value="any" {% if filters.status == "any" %}selected{% endif %}>Any</option>
+          <option value="not_started" {% if filters.status == "not_started" %}selected{% endif %}>Not started</option>
+          <option value="in_progress" {% if filters.status == "in_progress" %}selected{% endif %}>In progress</option>
+          <option value="completed" {% if filters.status == "completed" %}selected{% endif %}>Completed</option>
+        </select>
+        <small class="muted">Personal to {{ current_user.display_name }}.</small>
+      </label>
+      <label>
+        Completed
+        <select name="completed">
+          <option value="any" {% if filters.completed == "any" %}selected{% endif %}>Any</option>
+          <option value="completed" {% if filters.completed == "completed" %}selected{% endif %}>Completed</option>
+          <option value="not_completed" {% if filters.completed == "not_completed" %}selected{% endif %}>Not completed</option>
+        </select>
+      </label>
+      <label>
+        Started
+        <select name="started">
+          <option value="any" {% if filters.started == "any" %}selected{% endif %}>Any</option>
+          <option value="started" {% if filters.started == "started" %}selected{% endif %}>Started</option>
+          <option value="not_started" {% if filters.started == "not_started" %}selected{% endif %}>Not started</option>
+        </select>
+      </label>
+      <label>
+        Created by
+        <select name="created_by">
+          <option value="any" {% if filters.created_by == "any" %}selected{% endif %}>Anyone</option>
+          {% for creator in filter_options.creators %}
+            <option value="{{ creator.value }}" {% if filters.created_by == creator.value %}selected{% endif %}>{{ creator.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Created from
+        <input type="date" name="created_from" value="{{ filters.created_from }}">
+      </label>
+      <label>
+        Created to
+        <input type="date" name="created_to" value="{{ filters.created_to }}">
+      </label>
+      <label>
+        Archive status
+        <select name="archive_status">
+          <option value="any" {% if filters.archive_status == "any" %}selected{% endif %}>Any</option>
+          <option value="soon" {% if filters.archive_status == "soon" %}selected{% endif %}>Archiving soon</option>
+          <option value="scheduled" {% if filters.archive_status == "scheduled" %}selected{% endif %}>Scheduled</option>
+          <option value="none" {% if filters.archive_status == "none" %}selected{% endif %}>No archive scheduled</option>
+        </select>
+      </label>
+      <label>
+        Archive from
+        <input type="date" name="archive_from" value="{{ filters.archive_from }}">
+      </label>
+      <label>
+        Archive to
+        <input type="date" name="archive_to" value="{{ filters.archive_to }}">
+      </label>
+    </div>
+  </details>
+
+  <div class="library-filter-actions">
+    <button type="submit">Apply</button>
+    <a class="ghost-link" href="/library">Clear All</a>
+  </div>
+
+  {% if active_chips %}
+    <div class="active-filter-chips" aria-label="Active filters">
+      {% for chip in active_chips %}
+        <a href="{{ chip.remove_url }}">{{ chip.label }} ×</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</form>
+
 <section>
-  <h1>Puzzles</h1>
+  <div class="result-head">
+    <h1>Puzzles</h1>
+    <p class="muted">{{ result_count }} of {{ all_count }} shown</p>
+  </div>
   {% if puzzles %}
     <div class="puzzle-card-grid">
       {% for puzzle in puzzles %}
         {% set preview = previews_by_puzzle[puzzle.id] %}
-        <a class="puzzle-card" href="/puzzles/{{ puzzle.id }}" aria-label="Open {{ puzzle.title }}">
+        <a class="puzzle-card" href="/puzzles/{{ puzzle.id }}?return_to={{ library_return_to }}" aria-label="Open {{ puzzle.title }}">
           <div class="puzzle-preview puzzle-preview-{{ preview.kind }}">
             {% if preview.kind == "word_search" %}
               <div class="preview-word-grid" style="--preview-grid-size: {{ preview.grid | length if preview.grid else 1 }}">
@@ -97,13 +236,24 @@
                 <span>Not started</span>
               {% endif %}
             </div>
+            <small class="muted">Created by {{ puzzle.creator.display_name if puzzle.creator else "Unknown" }}</small>
+            {% if puzzle.auto_archive_at %}
+              <small class="muted">Archives {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
+            {% endif %}
             <code>{{ puzzle.id }}</code>
           </div>
         </a>
       {% endfor %}
     </div>
+    {% if has_more %}
+      <p class="load-more-row"><a class="button-link" href="{{ next_url }}">Show more</a></p>
+    {% endif %}
   {% else %}
-    <p class="muted">No puzzles yet. Generate the first one to get started.</p>
+    <div class="panel empty-state">
+      <h2>No puzzles match those filters</h2>
+      <p class="muted">Try clearing a filter or broadening your search.</p>
+      <a class="button-link" href="/library">Clear All</a>
+    </div>
   {% endif %}
 </section>
 {% endblock %}

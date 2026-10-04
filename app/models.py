@@ -63,6 +63,7 @@ class User(Base):
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="user")
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="user")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="user")
+    created_puzzles: Mapped[list[Puzzle]] = relationship(back_populates="creator")
 
 
 class Puzzle(Base):
@@ -75,6 +76,7 @@ class Puzzle(Base):
     difficulty: Mapped[str] = mapped_column(String(40), index=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("puzzle_categories.id"), nullable=True, index=True)
     word_bank_id: Mapped[int | None] = mapped_column(ForeignKey("word_banks.id"), nullable=True, index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     prompt: Mapped[str] = mapped_column(Text, default="")
     print_payload: Mapped[dict] = mapped_column(JSON)
     play_payload: Mapped[dict] = mapped_column(JSON)
@@ -87,6 +89,7 @@ class Puzzle(Base):
 
     category: Mapped[PuzzleCategory | None] = relationship(back_populates="puzzles")
     word_bank: Mapped[WordBank | None] = relationship(back_populates="puzzles")
+    creator: Mapped[User | None] = relationship(back_populates="created_puzzles")
     tags: Mapped[list[PuzzleTag]] = relationship(secondary=puzzle_tag_links, back_populates="puzzles")
     hints: Mapped[list[PuzzleHint]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")

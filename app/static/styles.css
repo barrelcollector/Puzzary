@@ -295,6 +295,78 @@ button {
   text-align: right;
 }
 
+.library-filter-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.library-search-row,
+.library-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.library-filter-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfbf8;
+}
+
+.library-filter-details summary {
+  width: fit-content;
+}
+
+.library-filter-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.library-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.library-filter-actions button {
+  width: auto;
+  min-width: 120px;
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.active-filter-chips a {
+  padding: 5px 9px;
+  border: 1px solid #a8d3ca;
+  border-radius: 999px;
+  color: #174e45;
+  background: #eef8f5;
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.result-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.result-head h1,
+.result-head p {
+  margin: 0;
+}
+
 .puzzle-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -513,6 +585,18 @@ button {
   border-radius: 8px;
   color: var(--accent);
   font-size: 28px;
+}
+
+.load-more-row {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0 0;
+}
+
+.empty-state {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
 }
 
 .action-row {
@@ -1661,6 +1745,8 @@ summary {
   .puzzle-layout,
   .history,
   .clue-board,
+  .library-search-row,
+  .library-filter-grid,
   .admin-grid,
   .admin-grid.two,
   .word-entry-grid,
@@ -1678,6 +1764,10 @@ summary {
   .topbar {
     display: grid;
     gap: 2px;
+  }
+
+  .result-head {
+    display: grid;
   }
 
   .word-pyramid-answer {

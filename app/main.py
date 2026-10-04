@@ -11,7 +11,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -193,6 +193,367 @@ def puzzle_preview(puzzle: Puzzle) -> dict:
     preview.setdefault("label", label)
     preview.setdefault("meta", puzzle.puzzle_type.replace("_", " "))
     return preview
+
+
+def parse_date_boundary(value: str, end_of_day: bool = False) -> datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        if "T" in text:
+            parsed = datetime.fromisoformat(text)
+        else:
+            parsed = datetime.fromisoformat(f"{text}T{'23:59:59' if end_of_day else '00:00:00'}")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Date filter is not valid") from error
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=app_timezone())
+    return parsed.astimezone(timezone.utc)
+
+
+def progress_map_for_user(db: Session, user: User, puzzles: list[Puzzle]) -> dict[str, dict[str, int | str]]:
+    progress_by_puzzle = {
+        puzzle.id: {
+            "found": 0,
+            "total": progress_response(puzzle, user, None).expected_count,
+            "status": "not_started",
+        }
+        for puzzle in puzzles
+        if get_puzzle_type(puzzle.puzzle_type) is not None
+    }
+    if not progress_by_puzzle:
+        return progress_by_puzzle
+    progress_rows = db.scalars(
+        select(PuzzleProgress).where(PuzzleProgress.user_id == user.id, PuzzleProgress.puzzle_id.in_(list(progress_by_puzzle.keys())))
+    ).all()
+    puzzles_by_id = {puzzle.id: puzzle for puzzle in puzzles}
+    for progress in progress_rows:
+        puzzle = puzzles_by_id.get(progress.puzzle_id)
+        if puzzle is None:
+            continue
+        response = progress_response(puzzle, user, progress)
+        status = "completed" if response.expected_count and response.found_count >= response.expected_count else "in_progress"
+        progress_by_puzzle[progress.puzzle_id] = {
+            "found": response.found_count,
+            "total": response.expected_count,
+            "status": status,
+        }
+    return progress_by_puzzle
+
+
+def library_filter_state(request: Request, current_user: User) -> dict:
+    params = request.query_params
+    status = params.get("status", "any")
+    if status not in {"any", "not_started", "in_progress", "completed"}:
+        status = "any"
+    completed = params.get("completed", "any")
+    if completed not in {"any", "completed", "not_completed"}:
+        completed = "any"
+    started = params.get("started", "any")
+    if started not in {"any", "started", "not_started"}:
+        started = "any"
+    archive_status = params.get("archive_status", "any")
+    if archive_status not in {"any", "soon", "scheduled", "none"}:
+        archive_status = "any"
+    availability = params.get("availability", "active")
+    if availability not in {"active", "archived", "scheduled", "any"}:
+        availability = "active"
+    sort = params.get("sort", "created_desc")
+    valid_sorts = {
+        "created_desc",
+        "created_asc",
+        "archive_asc",
+        "archive_desc",
+        "title_asc",
+        "title_desc",
+        "type_asc",
+        "difficulty_asc",
+        "creator_asc",
+        "progress_desc",
+        "progress_asc",
+    }
+    if sort not in valid_sorts:
+        sort = "created_desc"
+    return {
+        "q": params.get("q", "").strip(),
+        "types": params.getlist("type"),
+        "tags": params.getlist("tag"),
+        "themes": params.getlist("theme"),
+        "difficulty": params.getlist("difficulty"),
+        "status": status,
+        "completed": completed,
+        "started": started,
+        "created_from": params.get("created_from", ""),
+        "created_to": params.get("created_to", ""),
+        "archive_from": params.get("archive_from", ""),
+        "archive_to": params.get("archive_to", ""),
+        "archive_status": archive_status,
+        "created_by": params.get("created_by", "any"),
+        "availability": availability,
+        "sort": sort,
+        "limit": max(12, min(200, int(params.get("limit", "60") or 60))) if str(params.get("limit", "60")).isdigit() else 60,
+        "current_user_id": current_user.id,
+    }
+
+
+def library_theme_label(value: str) -> str:
+    return value.replace("_", " ").replace("-", " ").title()
+
+
+def library_theme_value(value: str) -> str:
+    return slugify(library_theme_label(value))
+
+
+def puzzle_theme_keys(puzzle: Puzzle) -> set[str]:
+    keys = {puzzle.theme, slugify(puzzle.theme) if puzzle.theme else "", library_theme_value(puzzle.theme) if puzzle.theme else ""}
+    if puzzle.category is not None:
+        keys |= {str(puzzle.category.id), puzzle.category.slug, puzzle.category.name, library_theme_value(puzzle.category.name)}
+    if puzzle.word_bank is not None:
+        keys |= {puzzle.word_bank.slug, puzzle.word_bank.name, library_theme_value(puzzle.word_bank.name)}
+    return {key for key in keys if key}
+
+
+def creator_label(puzzle: Puzzle) -> str:
+    return puzzle.creator.display_name if puzzle.creator is not None else "Unknown"
+
+
+def puzzle_search_text(puzzle: Puzzle) -> str:
+    parts = [
+        puzzle.title,
+        puzzle.prompt,
+        puzzle.puzzle_type,
+        puzzle.theme,
+        puzzle.difficulty,
+        puzzle.category.name if puzzle.category else "",
+        puzzle.word_bank.name if puzzle.word_bank else "",
+        creator_label(puzzle),
+    ]
+    parts.extend(tag.label for tag in puzzle.tags)
+    return " ".join(part for part in parts if part).lower()
+
+
+def active_filter_chips(filters: dict, options: dict) -> list[dict[str, str]]:
+    chips: list[dict[str, str]] = []
+    param_map = {
+        "types": ("type", "Type", {item["value"]: item["label"] for item in options["types"]}),
+        "tags": ("tag", "Tag", {item["value"]: item["label"] for item in options["tags"]}),
+        "themes": ("theme", "Theme", {item["value"]: item["label"] for item in options["themes"]}),
+        "difficulty": ("difficulty", "Difficulty", {item["value"]: item["label"] for item in options["difficulty"]}),
+    }
+    for key, (param, label, labels) in param_map.items():
+        for value in filters[key]:
+            chips.append({"param": param, "value": value, "label": f"{label}: {labels.get(value, value)}"})
+    single_filters = [
+        ("q", "Search", ""),
+        ("status", "Status", "any"),
+        ("completed", "Completed", "any"),
+        ("started", "Started", "any"),
+        ("created_from", "Created after", ""),
+        ("created_to", "Created before", ""),
+        ("archive_from", "Archives after", ""),
+        ("archive_to", "Archives before", ""),
+        ("archive_status", "Archive", "any"),
+        ("created_by", "Creator", "any"),
+        ("availability", "Availability", "active"),
+        ("sort", "Sort", "created_desc"),
+    ]
+    creator_labels = {item["value"]: item["label"] for item in options["creators"]}
+    sort_labels = {item["value"]: item["label"] for item in options["sorts"]}
+    for key, label, default in single_filters:
+        value = filters[key]
+        if value == default or value == "":
+            continue
+        label_value = creator_labels.get(value, value) if key == "created_by" else sort_labels.get(value, value) if key == "sort" else value.replace("_", " ").title()
+        chips.append({"param": key, "value": value, "label": f"{label}: {label_value}"})
+    return chips
+
+
+def query_without(request: Request, param: str, value: str | None = None) -> str:
+    pairs = []
+    for key, item in request.query_params.multi_items():
+        if key == param and (value is None or item == value):
+            continue
+        pairs.append((key, item))
+    query = urlencode(pairs, doseq=True)
+    return f"/library?{query}" if query else "/library"
+
+
+def safe_library_return_to(value: str) -> str:
+    if not value.startswith("/library"):
+        return "/library"
+    if "://" in value or value.startswith("//"):
+        return "/library"
+    return value
+
+
+def library_options(db: Session, puzzles: list[Puzzle], current_user: User) -> dict:
+    tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
+    users = db.scalars(select(User).order_by(User.display_name)).all()
+    theme_values: dict[str, str] = {}
+    for puzzle in puzzles:
+        if puzzle.theme:
+            theme_values.setdefault(library_theme_value(puzzle.theme), library_theme_label(puzzle.theme))
+        if puzzle.category is not None:
+            theme_values.setdefault(library_theme_value(puzzle.category.name), puzzle.category.name)
+        if puzzle.word_bank is not None:
+            theme_values.setdefault(library_theme_value(puzzle.word_bank.name), puzzle.word_bank.name)
+    return {
+        "types": [{"value": puzzle_type.slug, "label": puzzle_type.label} for puzzle_type in list_puzzle_types()],
+        "tags": [{"value": str(tag.id), "label": tag.label} for tag in tags],
+        "themes": [{"value": value, "label": label} for value, label in sorted(theme_values.items(), key=lambda item: item[1].lower())],
+        "difficulty": [{"value": value, "label": value.title()} for value in ("easy", "medium", "hard")],
+        "creators": [
+            {"value": "me", "label": "Created by me"},
+            {"value": "unknown", "label": "Unknown creator"},
+        ] + [{"value": str(user.id), "label": user.display_name} for user in users],
+        "sorts": [
+            {"value": "created_desc", "label": "Newest first"},
+            {"value": "created_asc", "label": "Oldest first"},
+            {"value": "archive_asc", "label": "Archive soonest"},
+            {"value": "archive_desc", "label": "Archive latest"},
+            {"value": "title_asc", "label": "Title A-Z"},
+            {"value": "title_desc", "label": "Title Z-A"},
+            {"value": "type_asc", "label": "Puzzle type"},
+            {"value": "difficulty_asc", "label": "Difficulty"},
+            {"value": "creator_asc", "label": "Creator"},
+            {"value": "progress_desc", "label": "Most progress"},
+            {"value": "progress_asc", "label": "Least progress"},
+        ],
+    }
+
+
+def filtered_library(
+    db: Session,
+    request: Request,
+    current_user: User,
+    include_archived_for_admin: bool = True,
+) -> dict:
+    all_puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
+    filters = library_filter_state(request, current_user)
+    options = library_options(db, all_puzzles, current_user)
+    progress_by_puzzle = progress_map_for_user(db, current_user, all_puzzles)
+    now = utcnow()
+    soon_cutoff = now + timedelta(hours=48)
+    created_from = parse_date_boundary(filters["created_from"]) if filters["created_from"] else None
+    created_to = parse_date_boundary(filters["created_to"], end_of_day=True) if filters["created_to"] else None
+    archive_from = parse_date_boundary(filters["archive_from"]) if filters["archive_from"] else None
+    archive_to = parse_date_boundary(filters["archive_to"], end_of_day=True) if filters["archive_to"] else None
+    selected_tags = {int(tag_id) for tag_id in filters["tags"] if str(tag_id).isdigit()}
+
+    def matches(puzzle: Puzzle) -> bool:
+        if filters["availability"] == "active" and puzzle.archived_at is not None:
+            return False
+        if filters["availability"] == "archived" and puzzle.archived_at is None:
+            return False
+        if filters["availability"] == "scheduled" and puzzle.auto_archive_at is None:
+            return False
+        if not include_archived_for_admin and puzzle.archived_at is not None:
+            return False
+        if filters["types"] and puzzle.puzzle_type not in filters["types"]:
+            return False
+        if filters["difficulty"] and puzzle.difficulty not in filters["difficulty"]:
+            return False
+        if filters["themes"] and not (puzzle_theme_keys(puzzle) & set(filters["themes"])):
+            return False
+        if selected_tags and not ({tag.id for tag in puzzle.tags} & selected_tags):
+            return False
+        progress = progress_by_puzzle.get(puzzle.id, {"found": 0, "total": 0, "status": "not_started"})
+        status = str(progress.get("status", "not_started"))
+        if filters["status"] != "any" and status != filters["status"]:
+            return False
+        if filters["completed"] == "completed" and status != "completed":
+            return False
+        if filters["completed"] == "not_completed" and status == "completed":
+            return False
+        if filters["started"] == "started" and status == "not_started":
+            return False
+        if filters["started"] == "not_started" and status != "not_started":
+            return False
+        if created_from and puzzle.created_at < created_from:
+            return False
+        if created_to and puzzle.created_at > created_to:
+            return False
+        if archive_from and (puzzle.auto_archive_at is None or puzzle.auto_archive_at < archive_from):
+            return False
+        if archive_to and (puzzle.auto_archive_at is None or puzzle.auto_archive_at > archive_to):
+            return False
+        if filters["archive_status"] == "scheduled" and puzzle.auto_archive_at is None:
+            return False
+        if filters["archive_status"] == "none" and puzzle.auto_archive_at is not None:
+            return False
+        if filters["archive_status"] == "soon" and not (puzzle.archived_at is None and puzzle.auto_archive_at is not None and now <= puzzle.auto_archive_at <= soon_cutoff):
+            return False
+        if filters["created_by"] == "me" and puzzle.created_by_id != current_user.id:
+            return False
+        if filters["created_by"] == "unknown" and puzzle.created_by_id is not None:
+            return False
+        if filters["created_by"].isdigit() and puzzle.created_by_id != int(filters["created_by"]):
+            return False
+        if filters["q"] and filters["q"].lower() not in puzzle_search_text(puzzle):
+            return False
+        return True
+
+    filtered = [puzzle for puzzle in all_puzzles if matches(puzzle)]
+    sort = filters["sort"]
+    difficulty_rank = {"easy": 1, "medium": 2, "hard": 3}
+
+    def archive_key(puzzle: Puzzle) -> datetime:
+        return puzzle.auto_archive_at or datetime.max.replace(tzinfo=timezone.utc)
+
+    sorters = {
+        "created_asc": lambda puzzle: (puzzle.created_at, puzzle.id),
+        "archive_asc": lambda puzzle: (archive_key(puzzle), puzzle.title.lower()),
+        "archive_desc": lambda puzzle: (archive_key(puzzle), puzzle.title.lower()),
+        "title_asc": lambda puzzle: (puzzle.title.lower(), puzzle.id),
+        "title_desc": lambda puzzle: (puzzle.title.lower(), puzzle.id),
+        "type_asc": lambda puzzle: (puzzle.puzzle_type, puzzle.title.lower()),
+        "difficulty_asc": lambda puzzle: (difficulty_rank.get(puzzle.difficulty, 99), puzzle.title.lower()),
+        "creator_asc": lambda puzzle: (creator_label(puzzle).lower(), puzzle.title.lower()),
+        "progress_desc": lambda puzzle: (int(progress_by_puzzle.get(puzzle.id, {}).get("found", 0)), puzzle.created_at),
+        "progress_asc": lambda puzzle: (int(progress_by_puzzle.get(puzzle.id, {}).get("found", 0)), puzzle.created_at),
+        "created_desc": lambda puzzle: (puzzle.created_at, puzzle.id),
+    }
+    reverse = sort in {"created_desc", "archive_desc", "title_desc", "progress_desc"}
+    filtered.sort(key=sorters.get(sort, sorters["created_desc"]), reverse=reverse)
+    limit = filters["limit"]
+    visible = filtered[:limit]
+    return {
+        "puzzles": visible,
+        "all_count": len(all_puzzles),
+        "result_count": len(filtered),
+        "has_more": len(filtered) > limit,
+        "next_limit": min(200, limit + 24),
+        "filters": filters,
+        "options": options,
+        "progress_by_puzzle": {puzzle.id: progress_by_puzzle[puzzle.id] for puzzle in visible if puzzle.id in progress_by_puzzle},
+        "previews_by_puzzle": {puzzle.id: puzzle_preview(puzzle) for puzzle in visible},
+        "labels_by_type": {puzzle_type.slug: puzzle_type.label for puzzle_type in list_puzzle_types()},
+    }
+
+
+def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, progress: dict | None) -> dict:
+    progress = progress or {"found": 0, "total": progress_response(puzzle, current_user, None).expected_count, "status": "not_started"}
+    return {
+        "id": puzzle.id,
+        "title": puzzle.title,
+        "puzzle_type": puzzle.puzzle_type,
+        "puzzle_type_label": get_puzzle_type(puzzle.puzzle_type).label if get_puzzle_type(puzzle.puzzle_type) else puzzle.puzzle_type,
+        "theme": puzzle.theme,
+        "difficulty": puzzle.difficulty,
+        "category": puzzle.category.name if puzzle.category else None,
+        "tags": [serialize_tag(tag) for tag in puzzle.tags],
+        "created_by": {
+            "id": puzzle.creator.id if puzzle.creator else None,
+            "display_name": creator_label(puzzle),
+        },
+        "created_at": puzzle.created_at.isoformat() if puzzle.created_at else None,
+        "auto_archive_at": puzzle.auto_archive_at.isoformat() if puzzle.auto_archive_at else None,
+        "archived_at": puzzle.archived_at.isoformat() if puzzle.archived_at else None,
+        "source": puzzle.source,
+        "progress": progress,
+        "preview": preview,
+        "url": puzzle_url(puzzle.id),
+    }
 
 
 def serialize_generation_field(field) -> dict:
@@ -1155,30 +1516,31 @@ def library(request: Request, db: Session = Depends(get_db)):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at)).limit(50)).all()
-    puzzles = [puzzle for puzzle in puzzles if puzzle.archived_at is None]
-    progress_rows = db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id)).all()
-    progress_by_puzzle = {
-        puzzle.id: {"found": 0, "total": progress_response(puzzle, user, None).expected_count}
-        for puzzle in puzzles
-        if get_puzzle_type(puzzle.puzzle_type) is not None
-    }
-    previews_by_puzzle = {puzzle.id: puzzle_preview(puzzle) for puzzle in puzzles}
-    labels_by_type = {puzzle_type.slug: puzzle_type.label for puzzle_type in list_puzzle_types()}
-    for progress in progress_rows:
-        if progress.puzzle_id in progress_by_puzzle:
-            puzzle = next((item for item in puzzles if item.id == progress.puzzle_id), None)
-            if puzzle is not None:
-                progress_by_puzzle[progress.puzzle_id]["found"] = progress_response(puzzle, user, progress).found_count
+    library_data = filtered_library(db, request, user, include_archived_for_admin=user.is_admin)
+    active_chips = active_filter_chips(library_data["filters"], library_data["options"])
+    for chip in active_chips:
+        chip["remove_url"] = query_without(request, chip["param"], chip["value"])
+    next_pairs = list(request.query_params.multi_items())
+    next_pairs = [(key, value) for key, value in next_pairs if key != "limit"]
+    next_pairs.append(("limit", str(library_data["next_limit"])))
+    next_url = f"/library?{urlencode(next_pairs, doseq=True)}"
     return templates.TemplateResponse(
         "home.html",
         {
             "request": request,
-            "puzzles": puzzles,
+            "puzzles": library_data["puzzles"],
             "current_user": user,
-            "progress_by_puzzle": progress_by_puzzle,
-            "previews_by_puzzle": previews_by_puzzle,
-            "labels_by_type": labels_by_type,
+            "progress_by_puzzle": library_data["progress_by_puzzle"],
+            "previews_by_puzzle": library_data["previews_by_puzzle"],
+            "labels_by_type": library_data["labels_by_type"],
+            "filters": library_data["filters"],
+            "filter_options": library_data["options"],
+            "active_chips": active_chips,
+            "result_count": library_data["result_count"],
+            "all_count": library_data["all_count"],
+            "has_more": library_data["has_more"],
+            "next_url": next_url,
+            "library_return_to": quote(str(request.url.path) + (f"?{request.url.query}" if request.url.query else "")),
         },
     )
 
@@ -1231,6 +1593,7 @@ async def web_generate_puzzle(
             generation_options=generation_options_from_form(form),
         ),
         db,
+        creator=user,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle:
@@ -1618,6 +1981,7 @@ async def admin_generate_puzzle(
             generation_options=generation_options_from_form(form),
         ),
         db,
+        creator=user,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle is not None:
@@ -2207,6 +2571,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     solution_template_name = f"puzzle_solutions/{puzzle.puzzle_type}.html"
     has_puzzle_template = template_exists(puzzle_template_name)
     has_solution_template = template_exists(solution_template_name)
+    return_to = safe_library_return_to(request.query_params.get("return_to", "/library"))
     return templates.TemplateResponse(
         "puzzle.html",
         {
@@ -2225,6 +2590,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "has_puzzle_template": has_puzzle_template,
             "has_solution_template": has_solution_template,
             "playable_puzzle_type": puzzle_type is not None and puzzle_type.supports_web_play and has_puzzle_template,
+            "return_to": return_to,
         },
     )
 
@@ -2525,7 +2891,7 @@ def api_delete_dictionary_definition(
     return {"deleted": True, "id": definition_id}
 
 
-def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session) -> PuzzleSummary:
+def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: User | None = None) -> PuzzleSummary:
     puzzle_type = get_puzzle_type(payload.puzzle_type)
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
@@ -2575,6 +2941,7 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session) -> PuzzleS
         solution_payload=generated.solution_payload,
         puzzle_metadata=generated.metadata,
         auto_archive_at=default_auto_archive_at(),
+        created_by_id=creator.id if creator is not None else None,
     )
     db.add(puzzle)
     db.flush()
@@ -2587,8 +2954,30 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session) -> PuzzleS
 
 @app.post("/api/puzzles/generate", response_model=PuzzleSummary)
 def create_puzzle(payload: PuzzleGenerateRequest, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
-    require_admin_api(request, db)
-    return create_puzzle_record(payload, db)
+    user = require_admin_api(request, db)
+    return create_puzzle_record(payload, db, creator=user)
+
+
+@app.get("/api/puzzles")
+def list_puzzles(request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_api_user(request, db)
+    library_data = filtered_library(db, request, user, include_archived_for_admin=user.is_admin)
+    return {
+        "items": [
+            serialize_library_item(
+                puzzle,
+                user,
+                library_data["previews_by_puzzle"].get(puzzle.id, fallback_preview(puzzle.puzzle_type, puzzle.puzzle_type)),
+                library_data["progress_by_puzzle"].get(puzzle.id),
+            )
+            for puzzle in library_data["puzzles"]
+        ],
+        "count": library_data["result_count"],
+        "returned": len(library_data["puzzles"]),
+        "has_more": library_data["has_more"],
+        "next_limit": library_data["next_limit"] if library_data["has_more"] else None,
+        "filters": library_data["filters"],
+    }
 
 
 @app.get("/api/puzzles/latest", response_model=PuzzleSummary)
