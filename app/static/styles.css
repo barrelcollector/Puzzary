@@ -1216,6 +1216,9 @@ legend {
   height: auto;
   margin: 18px 0;
   background: #ffffff;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
 }
 
 .maze-board .maze-paper {
@@ -1234,6 +1237,18 @@ legend {
   font-size: 13px;
   font-weight: 900;
   dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.maze-trace-path {
+  fill: none;
+  stroke: #2d7f6f;
+  stroke-width: 6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.65;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 .maze-play.complete .maze-board {

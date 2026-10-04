@@ -3,6 +3,11 @@
   class="maze-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-completed="{{ 'true' if progress_answers.completed | default('') == 'true' else 'false' }}"
+  data-grid='{{ puzzle.play_payload.grid | tojson }}'
+  data-width="{{ puzzle.play_payload.settings.width | default(10) }}"
+  data-height="{{ puzzle.play_payload.settings.height | default(10) }}"
+  data-cell-size="{{ puzzle.play_payload.settings.cell_size | default(24) }}"
+  data-path='{{ progress_answers.path | default("[]") }}'
 >
   {% set cell = puzzle.play_payload.settings.cell_size | default(24) %}
   {% set width = puzzle.play_payload.settings.width | default(10) %}
@@ -14,6 +19,7 @@
     aria-label="{{ width }} by {{ height }} maze"
   >
     <rect class="maze-paper" x="0" y="0" width="{{ width * cell }}" height="{{ height * cell }}"></rect>
+    <polyline class="maze-trace-path" points=""></polyline>
     {% for row in puzzle.play_payload.grid %}
       {% for maze_cell in row %}
         {% set x = maze_cell.x * cell %}
@@ -31,11 +37,11 @@
     {% if progress_answers.completed | default('') == 'true' %}
       Maze marked complete.
     {% else %}
-      Mark complete once you solve it on paper or screen.
+      Drag from S to F. Backtrack over your path to undo.
     {% endif %}
   </p>
   <div class="action-row">
     <button type="button" class="ghost-button" id="maze-complete">Mark Complete</button>
-    <button type="button" class="ghost-button" id="maze-clear">Clear Completion</button>
+    <button type="button" class="ghost-button" id="maze-clear">Clear Path</button>
   </div>
 </div>

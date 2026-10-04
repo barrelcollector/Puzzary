@@ -158,16 +158,89 @@ def parse_answer(answer: Any) -> dict[str, Any]:
     return {}
 
 
-def check_answer(answer: str, _solution_payload: dict) -> tuple[bool, int, int]:
+def normalize_trace_path(raw_path: Any) -> list[dict[str, int]]:
+    if isinstance(raw_path, str):
+        try:
+            raw_path = json.loads(raw_path)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw_path, list):
+        return []
+    path = []
+    for point in raw_path:
+        if not isinstance(point, dict):
+            continue
+        try:
+            path.append({"x": int(point.get("x")), "y": int(point.get("y"))})
+        except (TypeError, ValueError):
+            continue
+    return path
+
+
+def trace_is_valid(path: list[dict[str, int]], solution_payload: dict) -> bool:
+    grid = solution_payload.get("grid", [])
+    height = len(grid)
+    width = len(grid[0]) if height else 0
+    if not path:
+        return False
+    if path[0] != {"x": 0, "y": 0}:
+        return False
+    seen = set()
+    previous = None
+    for point in path:
+        x, y = point["x"], point["y"]
+        if not (0 <= x < width and 0 <= y < height):
+            return False
+        key = (x, y)
+        if key in seen:
+            return False
+        seen.add(key)
+        if previous is not None:
+            px, py = previous
+            dx, dy = x - px, y - py
+            direction = None
+            for name, (step_x, step_y, _opposite) in DIRECTIONS.items():
+                if (dx, dy) == (step_x, step_y):
+                    direction = name
+                    break
+            if direction is None or grid[py][px]["walls"].get(direction):
+                return False
+        previous = key
+    return True
+
+
+def trace_is_complete(path: list[dict[str, int]], solution_payload: dict) -> bool:
+    grid = solution_payload.get("grid", [])
+    height = len(grid)
+    width = len(grid[0]) if height else 0
+    return bool(path and trace_is_valid(path, solution_payload) and path[-1] == {"x": width - 1, "y": height - 1})
+
+
+def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     payload = parse_answer(answer)
-    completed = str(payload.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
+    path = normalize_trace_path(payload.get("path", []))
+    completed = (
+        str(payload.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
+        or trace_is_complete(path, solution_payload)
+    )
     return completed, 1, 1 if completed else 0
 
 
-def normalize_progress(payload: Any, _solution_payload: dict) -> dict:
+def normalize_progress(payload: Any, solution_payload: dict) -> dict:
     raw_answers = getattr(payload, "answers", {}) if payload is not None else {}
-    completed = str(raw_answers.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
-    return {"answers": {"completed": "true" if completed else ""}}
+    path = normalize_trace_path(raw_answers.get("path", []))
+    if path and not trace_is_valid(path, solution_payload):
+        path = []
+    completed = (
+        str(raw_answers.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
+        or trace_is_complete(path, solution_payload)
+    )
+    return {
+        "answers": {
+            "completed": "true" if completed else "",
+            "path": json.dumps(path, separators=(",", ":")) if path else "",
+        }
+    }
 
 
 def count_progress(progress_payload: dict, _solution_payload: dict) -> tuple[int, int]:
