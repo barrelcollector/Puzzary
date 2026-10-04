@@ -46,6 +46,12 @@ Open:
 http://localhost:8790
 ```
 
+For Cloudflare Tunnel or reverse-proxy use, configure the public URL that printed QR codes and API links should use. You can set it with `APP_BASE_URL` before the first run, or change it later in **Admin -> Settings** without rebuilding the container.
+
+```bash
+APP_BASE_URL=https://puzzary.example.com docker compose up -d --build
+```
+
 Admin panel:
 
 ```text
@@ -203,6 +209,7 @@ Print support:
 - `GET /api/puzzles/{id}/print-preview` returns the module layout metadata and print/render URLs for Home Assistant, Daily Stripe, or other clients.
 - Printed layouts include a QR code by default. The QR points to `/q/{id}`, records a lightweight scan count, and redirects to the matching puzzle page.
 - If the user is not logged in after scanning, the login flow preserves the puzzle URL and returns them there after sign-in.
+- Set **Admin -> Settings -> Public base URL** so printed QR codes use your public HTTPS address instead of a LAN URL.
 
 If a registered type has no web template, Puzzary falls back to the puzzle prompt and answer submission form. If it has no solution template, admins see the raw solution payload.
 

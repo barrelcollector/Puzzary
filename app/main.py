@@ -12,7 +12,7 @@ import time
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import qrcode
@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.models import (
+    AppSetting,
     DictionaryDefinition,
     DictionaryWord,
     Puzzle,
@@ -60,7 +61,7 @@ from app.schemas import (
 )
 
 
-APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
+DEFAULT_APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-local-session-secret")
 PUZZARY_TIMEZONE = os.getenv("PUZZARY_TIMEZONE", "America/New_York")
@@ -164,27 +165,59 @@ async def shutdown() -> None:
         task.cancel()
 
 
-def puzzle_url(puzzle_id: str) -> str:
-    return f"{APP_BASE_URL}/puzzles/{puzzle_id}"
+def normalize_base_url(value: str) -> str:
+    text = value.strip().rstrip("/")
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Base URL must start with http:// or https:// and include a host.")
+    return text
 
 
-def puzzle_print_url(puzzle_id: str) -> str:
-    return f"{APP_BASE_URL}/puzzles/{puzzle_id}/print"
+def app_setting(db: Session, key: str, default: str = "") -> str:
+    setting = db.get(AppSetting, key)
+    if setting is None or not setting.value:
+        return default
+    return setting.value
 
 
-def puzzle_print_render_url(puzzle_id: str) -> str:
-    return f"{APP_BASE_URL}/puzzles/{puzzle_id}/print/render"
+def set_app_setting(db: Session, key: str, value: str) -> None:
+    setting = db.get(AppSetting, key)
+    if setting is None:
+        setting = AppSetting(key=key, value=value)
+        db.add(setting)
+    else:
+        setting.value = value
 
 
-def puzzle_qr_short_url(puzzle_id: str) -> str:
-    return f"{APP_BASE_URL}/q/{puzzle_id}"
+def app_base_url(db: Session | None = None) -> str:
+    if db is None:
+        return DEFAULT_APP_BASE_URL
+    return app_setting(db, "public_base_url", DEFAULT_APP_BASE_URL).rstrip("/")
 
 
-def puzzle_qr_svg_url(puzzle_id: str) -> str:
-    return f"{APP_BASE_URL}/puzzles/{puzzle_id}/qr.svg"
+def puzzle_url(puzzle_id: str, db: Session | None = None) -> str:
+    return f"{app_base_url(db)}/puzzles/{puzzle_id}"
 
 
-def print_layout_context(puzzle: Puzzle, puzzle_type) -> dict:
+def puzzle_print_url(puzzle_id: str, db: Session | None = None) -> str:
+    return f"{app_base_url(db)}/puzzles/{puzzle_id}/print"
+
+
+def puzzle_print_render_url(puzzle_id: str, db: Session | None = None) -> str:
+    return f"{app_base_url(db)}/puzzles/{puzzle_id}/print/render"
+
+
+def puzzle_qr_short_url(puzzle_id: str, db: Session | None = None) -> str:
+    return f"{app_base_url(db)}/q/{puzzle_id}"
+
+
+def puzzle_qr_svg_url(puzzle_id: str, db: Session | None = None) -> str:
+    return f"{app_base_url(db)}/puzzles/{puzzle_id}/qr.svg"
+
+
+def print_layout_context(puzzle: Puzzle, puzzle_type, db: Session | None = None) -> dict:
     layout = puzzle_type.print_layout.as_dict()
     if puzzle_type.print_layout_builder is not None:
         try:
@@ -207,23 +240,23 @@ def print_layout_context(puzzle: Puzzle, puzzle_type) -> dict:
     layout.setdefault("instructions", "")
     layout.setdefault("notes", [])
     layout.setdefault("max_width_px", 760)
-    layout["url"] = puzzle_url(puzzle.id)
-    layout["print_url"] = puzzle_print_url(puzzle.id)
-    layout["render_url"] = puzzle_print_render_url(puzzle.id)
-    layout["short_url"] = puzzle_qr_short_url(puzzle.id)
-    layout["qr_url"] = puzzle_qr_svg_url(puzzle.id)
-    layout["qr_target_url"] = puzzle_qr_short_url(puzzle.id)
+    layout["url"] = puzzle_url(puzzle.id, db)
+    layout["print_url"] = puzzle_print_url(puzzle.id, db)
+    layout["render_url"] = puzzle_print_render_url(puzzle.id, db)
+    layout["short_url"] = puzzle_qr_short_url(puzzle.id, db)
+    layout["qr_url"] = puzzle_qr_svg_url(puzzle.id, db)
+    layout["qr_target_url"] = puzzle_qr_short_url(puzzle.id, db)
     return layout
 
 
-def serialize_puzzle(puzzle: Puzzle) -> PuzzleSummary:
+def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary:
     return PuzzleSummary(
         id=puzzle.id,
         puzzle_type=puzzle.puzzle_type,
         title=puzzle.title,
         theme=puzzle.theme,
         difficulty=puzzle.difficulty,
-        url=puzzle_url(puzzle.id),
+        url=puzzle_url(puzzle.id, db),
         print_payload=puzzle.print_payload,
         play_payload=puzzle.play_payload,
         metadata=puzzle.puzzle_metadata or {},
@@ -592,7 +625,7 @@ def filtered_library(
     }
 
 
-def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, progress: dict | None) -> dict:
+def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, progress: dict | None, db: Session | None = None) -> dict:
     progress = progress or {"found": 0, "total": progress_response(puzzle, current_user, None).expected_count, "status": "not_started"}
     return {
         "id": puzzle.id,
@@ -613,7 +646,7 @@ def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, pr
         "source": puzzle.source,
         "progress": progress,
         "preview": preview,
-        "url": puzzle_url(puzzle.id),
+        "url": puzzle_url(puzzle.id, db),
     }
 
 
@@ -995,8 +1028,8 @@ def api_token_from_request(request: Request) -> str:
     return request.headers.get("x-puzzary-api-token", "").strip()
 
 
-def setup_url(token: str) -> str:
-    return f"{APP_BASE_URL}/password/setup?token={token}"
+def setup_url(token: str, db: Session | None = None) -> str:
+    return f"{app_base_url(db)}/password/setup?token={token}"
 
 
 def write_bootstrap_setup_link(user: User, token: str) -> None:
@@ -1452,7 +1485,7 @@ def puzzle_qr_svg(puzzle_id: str, db: Session = Depends(get_db)) -> Response:
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
     return Response(
-        content=qr_svg_bytes(puzzle_qr_short_url(puzzle.id)),
+        content=qr_svg_bytes(puzzle_qr_short_url(puzzle.id, db)),
         media_type="image/svg+xml",
         headers={"Cache-Control": "public, max-age=3600"},
     )
@@ -1750,6 +1783,10 @@ def admin_context(
         "request": request,
         "current_user": user,
         "section": section,
+        "app_settings": {
+            "public_base_url": app_base_url(db),
+            "default_base_url": DEFAULT_APP_BASE_URL,
+        },
         "puzzles": puzzles,
         "live_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is None],
         "archived_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is not None],
@@ -1876,6 +1913,29 @@ def admin_publishing_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/users", response_class=HTMLResponse)
 def admin_users_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "users")
+
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+def admin_settings_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "settings")
+
+
+@app.post("/admin/settings")
+def admin_update_settings(
+    request: Request,
+    public_base_url: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        base_url = normalize_base_url(public_base_url) or DEFAULT_APP_BASE_URL
+    except ValueError as error:
+        return RedirectResponse(url=f"/admin/settings?error={quote(str(error))}", status_code=303)
+    set_app_setting(db, "public_base_url", base_url)
+    db.commit()
+    return RedirectResponse(url="/admin/settings?message=Settings%20saved.", status_code=303)
 
 
 @app.post("/admin/users")
@@ -2727,7 +2787,7 @@ def render_puzzle_print_page(
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
         raise HTTPException(status_code=404, detail="This puzzle does not support printing")
-    print_layout = print_layout_context(puzzle, puzzle_type)
+    print_layout = print_layout_context(puzzle, puzzle_type, db)
     return templates.TemplateResponse(
         "print.html",
         {
@@ -2791,7 +2851,7 @@ def create_user(payload: UserCreate, request: Request, db: Session = Depends(get
         "id": user.id,
         "display_name": user.display_name,
         "requires_password_setup": bool(setup_token),
-        "setup_url": setup_url(setup_token) if setup_token else "",
+        "setup_url": setup_url(setup_token, db) if setup_token else "",
     }
 
 
@@ -3057,7 +3117,7 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         db.add(PuzzleHint(puzzle_id=puzzle.id, order=index, text=hint_text))
     db.commit()
     db.refresh(puzzle)
-    return serialize_puzzle(puzzle)
+    return serialize_puzzle(puzzle, db)
 
 
 @app.post("/api/puzzles/generate", response_model=PuzzleSummary)
@@ -3077,6 +3137,7 @@ def list_puzzles(request: Request, db: Session = Depends(get_db)) -> dict:
                 user,
                 library_data["previews_by_puzzle"].get(puzzle.id, fallback_preview(puzzle.puzzle_type, puzzle.puzzle_type)),
                 library_data["progress_by_puzzle"].get(puzzle.id),
+                db,
             )
             for puzzle in library_data["puzzles"]
         ],
@@ -3096,7 +3157,7 @@ def get_latest_puzzle(request: Request, printable: bool = False, db: Session = D
         puzzle_type = get_puzzle_type(puzzle.puzzle_type)
         if printable and (puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only):
             continue
-        return serialize_puzzle(puzzle)
+        return serialize_puzzle(puzzle, db)
     raise HTTPException(status_code=404, detail="No printable puzzle found" if printable else "No puzzle found")
 
 
@@ -3106,7 +3167,7 @@ def get_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) 
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-    return serialize_puzzle(puzzle)
+    return serialize_puzzle(puzzle, db)
 
 
 @app.get("/api/puzzles/{puzzle_id}/print-preview", response_model=PuzzlePrintPreview)
@@ -3124,10 +3185,10 @@ def get_puzzle_print_preview(puzzle_id: str, request: Request, db: Session = Dep
         puzzle_type=puzzle.puzzle_type,
         title=puzzle.title,
         printable=printable,
-        layout=print_layout_context(puzzle, puzzle_type),
-        url=puzzle_url(puzzle.id),
-        print_url=puzzle_print_url(puzzle.id),
-        render_url=puzzle_print_render_url(puzzle.id),
+        layout=print_layout_context(puzzle, puzzle_type, db),
+        url=puzzle_url(puzzle.id, db),
+        print_url=puzzle_print_url(puzzle.id, db),
+        render_url=puzzle_print_render_url(puzzle.id, db),
     )
 
 

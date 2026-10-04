@@ -11,6 +11,7 @@
     <a class="{% if section in ['tags', 'tag_detail'] %}active{% endif %}" href="/admin/tags">Tags</a>
     <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
     <a class="{% if section == 'users' %}active{% endif %}" href="/admin/users">Users</a>
+    <a class="{% if section == 'settings' %}active{% endif %}" href="/admin/settings">Settings</a>
     <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
   </nav>
 
@@ -807,6 +808,29 @@
         </ol>
         <p class="muted">This is a placeholder until we connect Puzzary to the Daily Stripe print job format.</p>
       </div>
+    {% endif %}
+
+    {% if section == "settings" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Settings</h1>
+          <p class="muted">Configure public links used by QR codes, print previews, setup links, and API responses.</p>
+        </div>
+      </section>
+
+      {% if request.query_params.get("error") %}<p class="notice danger">{{ request.query_params.get("error") }}</p>{% endif %}
+      {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
+
+      <form class="panel narrow-panel" method="post" action="/admin/settings">
+        <h2>Public Base URL</h2>
+        <p class="muted">Use the Cloudflare Tunnel URL here so printed QR codes open the public Puzzary address instead of the local LAN address.</p>
+        <label>
+          Public base URL
+          <input name="public_base_url" value="{{ app_settings.public_base_url }}" placeholder="https://puzzary.example.com">
+          <small class="muted">Current default from environment: {{ app_settings.default_base_url }}</small>
+        </label>
+        <button type="submit">Save Settings</button>
+      </form>
     {% endif %}
 
     {% if section == "users" %}
