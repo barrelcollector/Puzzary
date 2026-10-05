@@ -69,6 +69,8 @@ class PuzzleType:
     supports_gimmes: bool = False
     gimme_modes: tuple[str, ...] = ()
     generation_fields: tuple[GenerationField, ...] = ()
+    manual_editor_fields: tuple[GenerationField, ...] = ()
+    manual_builder: Callable[[dict[str, Any]], GeneratedPuzzle] | None = None
     theme_mode: str = "free_text"
     preview_builder: Callable[[dict, dict, dict], dict] | None = None
 

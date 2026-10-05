@@ -535,6 +535,8 @@ def manual_payload_from_form(
     draft: str,
 ) -> PuzzleManualWrite:
     hint_lines = [line.strip() for line in hints.splitlines() if line.strip()]
+    if not title.strip():
+        raise ValueError("Title is required for raw payload mode")
     return PuzzleManualWrite(
         puzzle_type=puzzle_type.strip(),
         title=title.strip(),
@@ -1204,9 +1206,9 @@ def serialize_generation_field(field) -> dict:
     }
 
 
-def validate_generation_options(puzzle_type, options: dict) -> dict:
+def validate_generation_options(puzzle_type, options: dict, fields=None) -> dict:
     validated = dict(options or {})
-    for field in puzzle_type.generation_fields:
+    for field in (fields if fields is not None else puzzle_type.generation_fields):
         raw_value = validated.get(field.name)
         raw_values = raw_value if isinstance(raw_value, list) else ([raw_value] if raw_value not in (None, "") else [])
         values = [str(value).strip() for value in raw_values if str(value).strip()]
@@ -1247,6 +1249,8 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "theme_mode": puzzle_type.theme_mode,
         "source_requirements": list(puzzle_type.source_requirements),
         "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
+        "manual_editor_fields": [serialize_generation_field(field) for field in puzzle_type.manual_editor_fields],
+        "supports_manual_editor": puzzle_type.manual_builder is not None,
         "print_layout": puzzle_type.print_layout.as_dict(),
         "templates": {
             "play": f"puzzle_types/{puzzle_type.slug}.html",
@@ -1281,6 +1285,64 @@ def generation_options_from_form(form) -> dict:
             else:
                 options[option_key] = value
     return options
+
+
+def prefixed_options_from_form(form, prefix: str) -> dict:
+    options = {}
+    for key, value in form.multi_items():
+        if not key.startswith(prefix):
+            continue
+        option_key = key.removeprefix(prefix)
+        value = str(value).strip()
+        if value:
+            if option_key in options:
+                if not isinstance(options[option_key], list):
+                    options[option_key] = [options[option_key]]
+                options[option_key].append(value)
+            else:
+                options[option_key] = value
+    return options
+
+
+def build_manual_payload_from_helper(
+    db: Session,
+    puzzle_type_slug: str,
+    title: str,
+    theme: str,
+    difficulty: str,
+    draft: str,
+    form,
+) -> PuzzleManualWrite:
+    puzzle_type = get_puzzle_type(puzzle_type_slug)
+    if puzzle_type is None or not is_puzzle_type_enabled(db, puzzle_type_slug):
+        raise ValueError("Unsupported puzzle type")
+    if puzzle_type.manual_builder is None:
+        raise ValueError("This puzzle type does not have a GUI editor helper yet")
+    try:
+        manual_options = validate_generation_options(
+            puzzle_type,
+            prefixed_options_from_form(form, "manual_"),
+            fields=puzzle_type.manual_editor_fields,
+        )
+    except HTTPException as error:
+        raise ValueError(str(error.detail)) from error
+    generated = puzzle_type.manual_builder(manual_options)
+    metadata = dict(generated.metadata or {})
+    metadata["manual_editor"] = True
+    metadata["manual_editor_options"] = manual_options
+    return PuzzleManualWrite(
+        puzzle_type=puzzle_type_slug,
+        title=(title.strip() or generated.title)[:160],
+        theme=(theme.strip() or "manual")[:80],
+        difficulty=(difficulty.strip() or "manual")[:40],
+        prompt=generated.prompt,
+        print_payload=generated.print_payload,
+        play_payload=generated.play_payload,
+        solution_payload=generated.solution_payload,
+        metadata=metadata,
+        hints=generated.hints,
+        draft=draft == "true",
+    )
 
 
 def printable_gimme_cells(puzzle: Puzzle) -> dict[str, str]:
@@ -2907,12 +2969,13 @@ def admin_revoke_user_sessions(user_id: int, request: Request, db: Session = Dep
 
 
 @app.post("/admin/puzzles/manual")
-def admin_create_manual_puzzle(
+async def admin_create_manual_puzzle(
     request: Request,
     puzzle_type: str = Form(...),
-    title: str = Form(...),
+    title: str = Form(""),
     theme: str = Form("manual"),
     difficulty: str = Form("manual"),
+    editor_mode: str = Form("raw"),
     prompt: str = Form(""),
     print_payload: str = Form("{}"),
     play_payload: str = Form("{}"),
@@ -2926,19 +2989,23 @@ def admin_create_manual_puzzle(
     if isinstance(user, RedirectResponse):
         return user
     try:
-        payload = manual_payload_from_form(
-            puzzle_type,
-            title,
-            theme,
-            difficulty,
-            prompt,
-            print_payload,
-            play_payload,
-            solution_payload,
-            metadata,
-            hints,
-            draft,
-        )
+        form = await request.form()
+        if editor_mode == "helper":
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, draft, form)
+        else:
+            payload = manual_payload_from_form(
+                puzzle_type,
+                title,
+                theme,
+                difficulty,
+                prompt,
+                print_payload,
+                play_payload,
+                solution_payload,
+                metadata,
+                hints,
+                draft,
+            )
         puzzle = write_manual_puzzle(db, payload, user)
     except ValueError as error:
         return render_admin(request, db, "puzzle_edit", manual_form_error=str(error))
@@ -2946,13 +3013,14 @@ def admin_create_manual_puzzle(
 
 
 @app.post("/admin/puzzles/{puzzle_id}/edit")
-def admin_update_manual_puzzle(
+async def admin_update_manual_puzzle(
     puzzle_id: str,
     request: Request,
     puzzle_type: str = Form(...),
-    title: str = Form(...),
+    title: str = Form(""),
     theme: str = Form("manual"),
     difficulty: str = Form("manual"),
+    editor_mode: str = Form("raw"),
     prompt: str = Form(""),
     print_payload: str = Form("{}"),
     play_payload: str = Form("{}"),
@@ -2969,19 +3037,23 @@ def admin_update_manual_puzzle(
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
     try:
-        payload = manual_payload_from_form(
-            puzzle_type,
-            title,
-            theme,
-            difficulty,
-            prompt,
-            print_payload,
-            play_payload,
-            solution_payload,
-            metadata,
-            hints,
-            draft,
-        )
+        form = await request.form()
+        if editor_mode == "helper":
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, draft, form)
+        else:
+            payload = manual_payload_from_form(
+                puzzle_type,
+                title,
+                theme,
+                difficulty,
+                prompt,
+                print_payload,
+                play_payload,
+                solution_payload,
+                metadata,
+                hints,
+                draft,
+            )
         puzzle = write_manual_puzzle(db, payload, user, puzzle)
     except ValueError as error:
         return render_admin(request, db, "puzzle_edit", selected_puzzle=puzzle, manual_form_error=str(error))

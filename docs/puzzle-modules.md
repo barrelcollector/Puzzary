@@ -29,6 +29,18 @@ def generate(theme, difficulty, source_data=None, seed=None, generation_options=
     )
 
 
+def build_manual_puzzle(manual_options) -> GeneratedPuzzle:
+    return GeneratedPuzzle(
+        title="Manual Example",
+        prompt="Solve the manually-authored example.",
+        print_payload={"kind": "example"},
+        play_payload={"kind": "example"},
+        solution_payload={"answer": "EXAMPLE"},
+        hints=[],
+        metadata={"manual": True},
+    )
+
+
 def check_answer(answer, solution_payload):
     is_correct = answer.strip().upper() == solution_payload["answer"]
     return is_correct, 1 if is_correct else 0, 1
@@ -72,6 +84,14 @@ register_puzzle_type(
                 maximum=20,
             ),
         ),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="answer",
+                label="Answer",
+                required=True,
+            ),
+        ),
     )
 )
 ```
@@ -105,6 +125,17 @@ Use `GenerationField` for module-specific options. Supported field types are:
 - `checkboxes`
 
 Puzzary serializes these fields into `/api/puzzle-types` and the generation wizard. It also validates required fields, allowed select/checkbox values, and numeric min/max limits before calling the module generator.
+
+## Manual Editor Helpers
+
+Manual puzzle creation always supports raw payload editing. A module can also provide a GUI helper by setting:
+
+- `manual_editor_fields`: a tuple of `GenerationField` values rendered in **Admin -> Puzzles -> Manual Puzzle**.
+- `manual_builder`: a function that receives the submitted helper options and returns a `GeneratedPuzzle`.
+
+The helper should build the same `print_payload`, `play_payload`, `solution_payload`, hints, and metadata shape used by generated puzzles. Puzzary stores the result as a manual puzzle draft or published puzzle, depending on the admin's selected save mode.
+
+Supported manual field types are the generation field types plus `textarea`.
 
 ## Payload Responsibilities
 
@@ -143,4 +174,4 @@ GET /api/puzzle-types
 GET /api/puzzle-types?include_disabled=true
 ```
 
-The response includes each module's label, enabled state, source requirements, generation fields, print layout, gimme support, and declared templates.
+The response includes each module's label, enabled state, source requirements, generation fields, manual editor fields, print layout, gimme support, and declared templates.

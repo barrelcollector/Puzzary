@@ -321,24 +321,26 @@
       </section>
       {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
       {% if manual_form_error %}<p class="notice danger">{{ manual_form_error }}</p>{% endif %}
+      <script type="application/json" id="generation-schemas">{{ generation_schemas | tojson }}</script>
+      <script type="application/json" id="manual-editor-values">{{ manual_meta.get("manual_editor_options", {}) | tojson }}</script>
       <form
         class="panel narrow-panel"
         method="post"
         action="{% if is_edit %}/admin/puzzles/{{ selected_puzzle.id }}/edit{% else %}/admin/puzzles/manual{% endif %}"
+        data-manual-form
       >
         <h2>Puzzle Details</h2>
         <label>
           Puzzle type
-          <select name="puzzle_type" required>
+          <select name="puzzle_type" required data-manual-puzzle-type>
             {% for puzzle_type in puzzle_types %}
               <option value="{{ puzzle_type.slug }}" {% if is_edit and selected_puzzle.puzzle_type == puzzle_type.slug %}selected{% endif %}>{{ puzzle_type.label }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>Title <input name="title" required value="{{ selected_puzzle.title if is_edit else '' }}" placeholder="Manual Crossword"></label>
+        <label>Title <input name="title" value="{{ selected_puzzle.title if is_edit else '' }}" placeholder="Optional when using a helper"></label>
         <label>Theme <input name="theme" value="{{ selected_puzzle.theme if is_edit else 'manual' }}"></label>
         <label>Difficulty <input name="difficulty" value="{{ selected_puzzle.difficulty if is_edit else 'manual' }}"></label>
-        <label>Prompt <textarea name="prompt" rows="2">{{ selected_puzzle.prompt if is_edit else '' }}</textarea></label>
         <label>
           Save mode
           <select name="draft">
@@ -347,14 +349,31 @@
           </select>
         </label>
 
-        <h2>Puzzle Payloads</h2>
-        <p class="muted">Drafts can be incomplete. Publishing requires print, play, and solution payload JSON objects with a matching kind.</p>
-        <label>Print payload <textarea name="print_payload" rows="10" spellcheck="false">{{ selected_puzzle.print_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
-        <label>Play payload <textarea name="play_payload" rows="10" spellcheck="false">{{ selected_puzzle.play_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
-        <label>Solution payload <textarea name="solution_payload" rows="10" spellcheck="false">{{ selected_puzzle.solution_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
-        <label>Metadata <textarea name="metadata" rows="6" spellcheck="false">{{ selected_puzzle.puzzle_metadata | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
-        <label>Hints <textarea name="hints" rows="5" placeholder="One hint per line">{% if is_edit %}{% for hint in selected_puzzle.hints | sort(attribute="order") %}{{ hint.text }}{% if not loop.last %}
+        <fieldset>
+          <legend>Editor</legend>
+          <div class="check-list">
+            <label><input type="radio" name="editor_mode" value="helper" data-manual-mode {% if (not is_edit) or manual_meta.get("manual_editor") %}checked{% endif %}> GUI helper</label>
+            <label><input type="radio" name="editor_mode" value="raw" data-manual-mode {% if is_edit and not manual_meta.get("manual_editor") %}checked{% endif %}> Raw payloads</label>
+          </div>
+          <small class="muted">Use a helper when the puzzle module provides one. Raw payloads remain available for every puzzle type.</small>
+        </fieldset>
+
+        <section data-manual-mode-panel="helper">
+          <h2>Editor Helper</h2>
+          <div data-manual-fields></div>
+        </section>
+
+        <section data-manual-mode-panel="raw">
+          <h2>Puzzle Payloads</h2>
+          <p class="muted">Drafts can be incomplete. Publishing requires print, play, and solution payload JSON objects with a matching kind.</p>
+          <label>Prompt <textarea name="prompt" rows="2">{{ selected_puzzle.prompt if is_edit else '' }}</textarea></label>
+          <label>Print payload <textarea name="print_payload" rows="10" spellcheck="false">{{ selected_puzzle.print_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+          <label>Play payload <textarea name="play_payload" rows="10" spellcheck="false">{{ selected_puzzle.play_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+          <label>Solution payload <textarea name="solution_payload" rows="10" spellcheck="false">{{ selected_puzzle.solution_payload | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+          <label>Metadata <textarea name="metadata" rows="6" spellcheck="false">{{ selected_puzzle.puzzle_metadata | tojson(indent=2) if is_edit else "{}" }}</textarea></label>
+          <label>Hints <textarea name="hints" rows="5" placeholder="One hint per line">{% if is_edit %}{% for hint in selected_puzzle.hints | sort(attribute="order") %}{{ hint.text }}{% if not loop.last %}
 {% endif %}{% endfor %}{% endif %}</textarea></label>
+        </section>
 
         <div class="action-row">
           <button type="submit">Save</button>
@@ -1312,5 +1331,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=6"></script>
+  <script src="/static/generation-form.js?v=7"></script>
 {% endblock %}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 import string
 from typing import Any
 
@@ -125,6 +126,116 @@ def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> di
         "words": [str(word).upper() for word in words[:5]],
         "meta": f"{len(words)} words",
     }
+
+
+def parse_manual_grid(value: Any) -> list[str]:
+    rows = []
+    for line in str(value or "").splitlines():
+        row = "".join(ch for ch in line.upper() if ch.isalnum())
+        if row:
+            rows.append(row)
+    if not rows:
+        raise ValueError("Manual word search needs a letter grid.")
+    width = len(rows[0])
+    if width < 2 or len(rows) < 2:
+        raise ValueError("Manual word search grid must be at least 2x2.")
+    if any(len(row) != width for row in rows):
+        raise ValueError("Every manual word search grid row must have the same length.")
+    if len(rows) != width:
+        raise ValueError("Manual word search grids must be square for the current web and print renderers.")
+    if width > 30 or len(rows) > 30:
+        raise ValueError("Manual word search grid can be at most 30x30.")
+    return rows
+
+
+def parse_manual_words(value: Any) -> list[str]:
+    raw_parts = re.split(r"[\n,;]+", str(value or ""))
+    words = list(dict.fromkeys(normalize_word(part) for part in raw_parts if normalize_word(part)))
+    if not words:
+        raise ValueError("Manual word search needs at least one word.")
+    return words
+
+
+def find_word_placement(grid: list[str], word: str) -> dict | None:
+    height = len(grid)
+    width = len(grid[0]) if grid else 0
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]
+    for y in range(height):
+        for x in range(width):
+            for dx, dy in directions:
+                end_x = x + dx * (len(word) - 1)
+                end_y = y + dy * (len(word) - 1)
+                if not (0 <= end_x < width and 0 <= end_y < height):
+                    continue
+                letters = "".join(grid[y + dy * index][x + dx * index] for index in range(len(word)))
+                if letters == word:
+                    return {"word": word, "start": [x, y], "direction": [dx, dy]}
+    return None
+
+
+def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    grid = parse_manual_grid(options.get("grid", ""))
+    words = parse_manual_words(options.get("words", ""))
+    placements = []
+    missing = []
+    for word in words:
+        placement = find_word_placement(grid, word)
+        if placement is None:
+            missing.append(word)
+        else:
+            placements.append(placement)
+    if missing:
+        raise ValueError(f"These words were not found in the grid: {', '.join(missing)}")
+    auto_confirm = bool_option(options, "auto_confirm", True)
+    print_style = str(options.get("print_style", "boxed")).strip().lower()
+    if print_style not in {"boxed", "compact"}:
+        print_style = "boxed"
+    gimme_count = integer_option(options, "gimme_count", 0, 0, max(0, len(words) - 1))
+    gimme_words = words[:gimme_count]
+    settings = {
+        "grid_size": max(len(grid), len(grid[0])),
+        "grid_width": len(grid[0]),
+        "grid_height": len(grid),
+        "auto_confirm": auto_confirm,
+        "word_count": len(words),
+        "word_count_min": len(words),
+        "word_count_limit": len(words),
+        "word_count_max": len(words),
+        "print_style": print_style,
+        "manual_grid": True,
+    }
+    prompt = "Find all listed words."
+    print_payload = {
+        "kind": "word_search",
+        "grid": grid,
+        "words": words,
+        "gimmes": {"mode": "found_words", "words": gimme_words},
+        "settings": settings,
+    }
+    solution_payload = {
+        "words": words,
+        "placements": placements,
+        "gimmes": {"mode": "found_words", "words": gimme_words},
+        "settings": settings,
+    }
+    return GeneratedPuzzle(
+        title="Manual Word Search",
+        prompt=prompt,
+        print_payload=print_payload,
+        play_payload=print_payload,
+        solution_payload=solution_payload,
+        hints=[
+            f"There are {len(words)} words hidden in the grid.",
+            "Trace each word in the grid to mark it found.",
+            f"The words are: {', '.join(words)}.",
+        ],
+        metadata={
+            "generator": "manual.word_search.v1",
+            "manual": True,
+            "word_count": len(words),
+            "gimmes": {"mode": "found_words", "count": len(gimme_words)},
+        },
+    )
 
 
 def contains_blocked_word(grid: list[list[str]], blocked_words: set[str]) -> bool:
@@ -315,6 +426,54 @@ register_puzzle_type(
         ),
         supports_gimmes=True,
         gimme_modes=("found_words",),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="grid",
+                label="Letter grid",
+                field_type="textarea",
+                required=True,
+                help_text="Paste one square row per line. Spaces are ignored.",
+                default="",
+            ),
+            GenerationField(
+                name="words",
+                label="Words",
+                field_type="textarea",
+                required=True,
+                help_text="One word per line, or separate words with commas.",
+                default="",
+            ),
+            GenerationField(
+                name="auto_confirm",
+                label="Auto-confirm found words",
+                field_type="select",
+                default="yes",
+                options=(
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+            GenerationField(
+                name="gimme_count",
+                label="Gimme words",
+                field_type="number",
+                default="0",
+                help_text="Number of listed words already marked found.",
+                minimum=0,
+                maximum=30,
+            ),
+            GenerationField(
+                name="print_style",
+                label="Print style",
+                field_type="select",
+                default="boxed",
+                options=(
+                    {"value": "boxed", "label": "Boxed grid"},
+                    {"value": "compact", "label": "Compact letters"},
+                ),
+            ),
+        ),
         generation_fields=(
             GenerationField(
                 name="grid_size",

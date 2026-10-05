@@ -1,7 +1,8 @@
 (function () {
   const schemaElement = document.getElementById("generation-schemas");
   const forms = Array.from(document.querySelectorAll("[data-generation-form]"));
-  if (!schemaElement || forms.length === 0) return;
+  const manualForms = Array.from(document.querySelectorAll("[data-manual-form]"));
+  if (!schemaElement || (forms.length === 0 && manualForms.length === 0)) return;
 
   let schemas = {};
   try {
@@ -48,6 +49,10 @@
         optionLabel.append(input, option.label);
         control.appendChild(optionLabel);
       });
+    } else if (field.field_type === "textarea") {
+      control = document.createElement("textarea");
+      control.rows = 8;
+      control.value = field.default || "";
     } else {
       control = document.createElement("input");
       control.type = field.field_type === "number" ? "number" : "text";
@@ -60,6 +65,17 @@
       control.required = Boolean(field.required);
       control.dataset.summaryLabel = field.label;
     }
+    return control;
+  }
+
+  function setFieldPrefix(control, field, prefix) {
+    if (field.field_type === "checkboxes") {
+      control.querySelectorAll("input").forEach((input) => {
+        input.name = `${prefix}${field.name}`;
+      });
+      return control;
+    }
+    control.name = `${prefix}${field.name}`;
     return control;
   }
 
@@ -224,5 +240,88 @@
 
     form.addEventListener("input", () => renderSummary(form));
     form.addEventListener("change", () => renderSummary(form));
+  });
+
+  function manualEditorValues() {
+    const valuesElement = document.getElementById("manual-editor-values");
+    if (!valuesElement) return {};
+    try {
+      return JSON.parse(valuesElement.textContent || "{}");
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function setControlValue(control, field, value) {
+    if (value === undefined || value === null || value === "") return;
+    if (field.field_type === "checkboxes") {
+      const values = Array.isArray(value) ? value.map(String) : String(value).split(",").map((item) => item.trim());
+      control.querySelectorAll("input").forEach((input) => {
+        input.checked = values.includes(String(input.value));
+      });
+      return;
+    }
+    control.value = String(value);
+  }
+
+  function updateManualMode(form) {
+    const selected = form.querySelector("input[data-manual-mode]:checked");
+    const mode = selected ? selected.value : "raw";
+    form.querySelectorAll("[data-manual-mode-panel]").forEach((panel) => {
+      const visible = panel.dataset.manualModePanel === mode;
+      panel.classList.toggle("is-hidden", !visible);
+      panel.querySelectorAll("input, select, textarea").forEach((control) => {
+        control.disabled = !visible;
+      });
+    });
+  }
+
+  function renderManualFields(form) {
+    const target = form.querySelector("[data-manual-fields]");
+    const typeSelect = form.querySelector("[data-manual-puzzle-type]");
+    if (!target || !typeSelect) return;
+    const schema = schemas[typeSelect.value] || {};
+    const fields = schema.manual_editor_fields || [];
+    const existingValues = manualEditorValues();
+    target.innerHTML = "";
+    if (!schema.supports_manual_editor || fields.length === 0) {
+      const note = document.createElement("p");
+      note.className = "muted";
+      note.textContent = "This puzzle type does not have a GUI editor helper yet. Use Raw payloads for now.";
+      target.appendChild(note);
+      const rawMode = form.querySelector('input[data-manual-mode][value="raw"]');
+      if (rawMode) rawMode.checked = true;
+      updateManualMode(form);
+      return;
+    }
+    fields.forEach((field) => {
+      const label = document.createElement("label");
+      label.textContent = field.label;
+      const control = setFieldPrefix(fieldControl(field), field, "manual_");
+      setControlValue(control, field, existingValues[field.name]);
+      label.appendChild(control);
+      if (field.help_text) {
+        const help = document.createElement("small");
+        help.className = "muted";
+        help.textContent = field.help_text;
+        label.appendChild(help);
+      }
+      target.appendChild(label);
+    });
+  }
+
+  manualForms.forEach((form) => {
+    renderManualFields(form);
+    updateManualMode(form);
+    const typeSelect = form.querySelector("[data-manual-puzzle-type]");
+    if (typeSelect) {
+      typeSelect.addEventListener("change", () => {
+        renderManualFields(form);
+        updateManualMode(form);
+      });
+    }
+    form.querySelectorAll("input[data-manual-mode]").forEach((input) => {
+      input.addEventListener("change", () => updateManualMode(form));
+    });
   });
 })();
