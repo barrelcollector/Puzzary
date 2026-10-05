@@ -352,6 +352,8 @@ def generate(
 
 
 def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    if str(options.get("solution_grid") or "").strip():
+        return build_manual_grid_puzzle(options)
     theme = str(options.get("_theme") or "").strip()
     difficulty = str(options.get("_difficulty") or "medium").strip().lower()
     if difficulty not in {"easy", "medium", "hard"}:
@@ -368,6 +370,101 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
             **generated.metadata,
             "generator": "manual.sudoku.v1",
             "manual": True,
+        },
+    )
+
+
+def parse_manual_grid(value: Any) -> Grid:
+    rows = []
+    for line in str(value or "").splitlines():
+        digits = [int(char) for char in line if char.isdigit() and char != "0"]
+        if digits:
+            rows.append(digits)
+    if not rows:
+        raise ValueError("Sudoku canvas needs a full solution grid.")
+    size = len(rows[0])
+    if size not in BOX_DEFAULTS and not (4 <= size <= 9):
+        raise ValueError("Sudoku canvas supports grid sizes 4 through 9.")
+    if len(rows) != size or any(len(row) != size for row in rows):
+        raise ValueError("Sudoku solution grid must be square.")
+    return rows
+
+
+def parse_manual_givens(value: Any, solution: Grid) -> dict[str, str]:
+    givens = {}
+    size = len(solution)
+    for line in str(value or "").splitlines():
+        cleaned = line.replace("=", ",").replace(":", ",")
+        parts = [part.strip() for part in cleaned.split(",") if part.strip()]
+        if len(parts) < 3:
+            continue
+        try:
+            x, y, digit = int(parts[0]), int(parts[1]), int(parts[2])
+        except ValueError:
+            continue
+        if 0 <= x < size and 0 <= y < size and solution[y][x] == digit:
+            givens[f"{x},{y}"] = str(digit)
+    if not givens:
+        givens = given_cells(solution)
+    return givens
+
+
+def validate_manual_solution(solution: Grid, box_rows: int, box_cols: int) -> None:
+    size = len(solution)
+    expected = set(range(1, size + 1))
+    for row in solution:
+        if set(row) != expected:
+            raise ValueError("Each Sudoku solution row must contain every digit once.")
+    for col in range(size):
+        if {solution[row][col] for row in range(size)} != expected:
+            raise ValueError("Each Sudoku solution column must contain every digit once.")
+    for top in range(0, size, box_rows):
+        for left in range(0, size, box_cols):
+            box = {solution[row][col] for row in range(top, top + box_rows) for col in range(left, left + box_cols)}
+            if box != expected:
+                raise ValueError("Each Sudoku box must contain every digit once.")
+
+
+def build_manual_grid_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    solution = parse_manual_grid(options.get("solution_grid", ""))
+    size = len(solution)
+    if str(options.get("grid_size") or "").strip().lower() == "custom":
+        box_rows = integer_option(options, "box_rows", BOX_DEFAULTS.get(size, (3, 3))[0], 1, size)
+        box_cols = integer_option(options, "box_cols", BOX_DEFAULTS.get(size, (3, 3))[1], 1, size)
+    else:
+        box_rows, box_cols = BOX_DEFAULTS.get(size, (3, 3))
+    if box_rows * box_cols != size:
+        raise ValueError("Sudoku canvas box rows x box columns must equal grid size.")
+    validate_manual_solution(solution, box_rows, box_cols)
+    givens = parse_manual_givens(options.get("givens", ""), solution)
+    puzzle = [[solution[row][col] if f"{col},{row}" in givens else 0 for col in range(size)] for row in range(size)]
+    settings = {
+        "grid_size": size,
+        "box_rows": box_rows,
+        "box_cols": box_cols,
+        "symmetry": "manual",
+        "candidate_notes": bool_option(options, "candidate_notes", False),
+        "check_mode": str(options.get("check_mode") or "check_puzzle"),
+        "uniqueness_verified": False,
+    }
+    payload = {"kind": "sudoku", "grid": puzzle, "givens": givens, "settings": settings}
+    return GeneratedPuzzle(
+        title="Manual Sudoku",
+        prompt=f"Fill every row, column, and {box_rows}x{box_cols} box with digits 1 through {size}.",
+        print_payload=payload,
+        play_payload=payload,
+        solution_payload={"grid": solution, "givens": givens, "settings": settings},
+        hints=[
+            f"Each row must contain 1 through {size} without repeats.",
+            f"Each column must contain 1 through {size} without repeats.",
+            f"This manual puzzle starts with {len(givens)} givens.",
+        ],
+        metadata={
+            "generator": "manual.sudoku.canvas.v1",
+            "manual": True,
+            "givens": len(givens),
+            "blanks": size * size - len(givens),
+            "generation_options": settings | {"given_count": len(givens)},
         },
     )
 
@@ -394,6 +491,20 @@ register_puzzle_type(
         ),
         manual_builder=build_manual_puzzle,
         manual_editor_fields=(
+            GenerationField(
+                name="solution_grid",
+                label="Canvas solution grid",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
+            GenerationField(
+                name="givens",
+                label="Canvas givens",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
             GenerationField(
                 name="grid_size",
                 label="Grid size",

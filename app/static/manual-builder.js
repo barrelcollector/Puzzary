@@ -314,6 +314,413 @@
     parts.properties.innerHTML = "<h3>Next Canvas Layer</h3><p class=\"muted\">The level-editor shell is in place; this module still needs exact cell/wall editing tools.</p>";
   }
 
+  function setSelectValue(item, value) {
+    if (!item) return;
+    item.value = String(value);
+    item.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function setInputValue(item, value) {
+    if (!item) return;
+    item.value = String(value);
+    item.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function renderSudokuEditor(form, parts) {
+    const solutionControl = control(form, "solution_grid");
+    const givensControl = control(form, "givens");
+    if (!solutionControl || !givensControl) return;
+    hideSourceLabels(form, ["solution_grid", "givens"]);
+    let size = Number(control(form, "grid_size") ? control(form, "grid_size").value : 9) || 9;
+    if (!Number.isFinite(size) || size < 4 || size > 9) size = 9;
+    let solution = parseSudokuSolution(solutionControl.value, size);
+    let givens = parseGivenSet(givensControl.value);
+    if (!givens.size) {
+      givens = new Set(["0,0", "1,0", "0,1", "1,1"]);
+    }
+
+    const sizeSelect = document.createElement("select");
+    [4, 6, 9].forEach((value) => {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = `${value}x${value}`;
+      option.selected = value === size;
+      sizeSelect.append(option);
+    });
+    const reset = button("Reset Pattern");
+    const clearGivens = button("Clear Givens");
+    parts.toolbar.append(document.createElement("h3"), labelWrap("Board size", sizeSelect), reset, clearGivens);
+    parts.toolbar.querySelector("h3").textContent = "Sudoku Canvas";
+    parts.properties.innerHTML = "<h3>Cell Tools</h3><p class=\"muted\">Type the solved value in a cell. Click the dot to mark whether that cell is a starting given.</p>";
+
+    function sync() {
+      solutionControl.value = solution.map((row) => row.join("")).join("\n");
+      givensControl.value = Array.from(givens).map((key) => {
+        const [x, y] = key.split(",").map(Number);
+        return `${x},${y},${solution[y][x]}`;
+      }).join("\n");
+      setSelectValue(control(form, "grid_size"), size);
+      if (size === 4) {
+        setInputValue(control(form, "box_rows"), 2);
+        setInputValue(control(form, "box_cols"), 2);
+      } else if (size === 6) {
+        setInputValue(control(form, "box_rows"), 2);
+        setInputValue(control(form, "box_cols"), 3);
+      } else {
+        setInputValue(control(form, "box_rows"), 3);
+        setInputValue(control(form, "box_cols"), 3);
+      }
+    }
+
+    function draw() {
+      parts.canvas.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "level-sudoku-grid";
+      grid.style.setProperty("--builder-grid-size", String(size));
+      solution.forEach((row, y) => {
+        row.forEach((value, x) => {
+          const wrap = document.createElement("label");
+          wrap.className = "level-sudoku-cell";
+          const input = document.createElement("input");
+          input.inputMode = "numeric";
+          input.maxLength = 1;
+          input.value = String(value || "");
+          input.addEventListener("input", () => {
+            const next = Number(input.value.replace(/[^0-9]/g, "").slice(0, 1) || 0);
+            solution[y][x] = Math.max(1, Math.min(size, next || 1));
+            input.value = String(solution[y][x]);
+            sync();
+          });
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = givens.has(`${x},${y}`) ? "level-cell-toggle active" : "level-cell-toggle";
+          toggle.title = "Toggle given";
+          toggle.textContent = "G";
+          toggle.addEventListener("click", () => {
+            const key = `${x},${y}`;
+            if (givens.has(key)) givens.delete(key);
+            else givens.add(key);
+            sync();
+            draw();
+          });
+          wrap.append(input, toggle);
+          grid.append(wrap);
+        });
+      });
+      parts.canvas.append(grid);
+    }
+
+    sizeSelect.addEventListener("change", () => {
+      size = Number(sizeSelect.value);
+      solution = solvedPattern(size);
+      givens = new Set(["0,0", "1,0", "0,1", "1,1"]);
+      sync();
+      draw();
+    });
+    reset.addEventListener("click", () => {
+      solution = solvedPattern(size);
+      sync();
+      draw();
+    });
+    clearGivens.addEventListener("click", () => {
+      givens = new Set();
+      sync();
+      draw();
+    });
+
+    sync();
+    draw();
+  }
+
+  function solvedPattern(size) {
+    const boxCols = size === 6 ? 3 : Math.sqrt(size);
+    const boxRows = size === 6 ? 2 : Math.sqrt(size);
+    return Array.from({ length: size }, (_row, row) =>
+      Array.from({ length: size }, (_col, col) => ((row * boxCols + Math.floor(row / boxRows) + col) % size) + 1)
+    );
+  }
+
+  function parseSudokuSolution(value, size) {
+    const rows = String(value || "").split(/\r?\n/).map((line) => Array.from(line).filter((char) => /[1-9]/.test(char)).map(Number)).filter((row) => row.length);
+    if (rows.length === size && rows.every((row) => row.length === size)) return rows;
+    return solvedPattern(size);
+  }
+
+  function parseGivenSet(value) {
+    return new Set(String(value || "").split(/\r?\n/).map((line) => line.split(/[,:=]/).slice(0, 2).map((part) => part.trim()).join(",")).filter((key) => /^\d+,\d+$/.test(key)));
+  }
+
+  function renderCrossEquationsEditor(form, parts) {
+    const solutionControl = control(form, "solution_grid");
+    const rowOpsControl = control(form, "row_ops");
+    const colOpsControl = control(form, "col_ops");
+    const givensControl = control(form, "givens");
+    if (!solutionControl || !rowOpsControl || !colOpsControl || !givensControl) return;
+    hideSourceLabels(form, ["solution_grid", "row_ops", "col_ops", "givens"]);
+    let size = Number(control(form, "grid_size") ? control(form, "grid_size").value : 3) || 3;
+    if (size < 3 || size > 5) size = 3;
+    let numbers = parseNumberGrid(solutionControl.value, size);
+    let rowOps = parseOps(rowOpsControl.value, size);
+    let colOps = parseOps(colOpsControl.value, size);
+    let givens = parseGivenSet(givensControl.value);
+    if (!givens.size) givens = new Set(["0,0", "2,0", "0,2"]);
+
+    const sizeSelect = document.createElement("select");
+    [3, 4, 5].forEach((value) => {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = `${value}x${value}`;
+      option.selected = value === size;
+      sizeSelect.append(option);
+    });
+    const makeAdd = button("All +");
+    const clearGivens = button("Clear Starters");
+    parts.toolbar.append(document.createElement("h3"), labelWrap("Number cells", sizeSelect), makeAdd, clearGivens);
+    parts.toolbar.querySelector("h3").textContent = "Equation Canvas";
+    parts.properties.innerHTML = "<h3>Equation Tools</h3><p class=\"muted\">Edit number cells, choose operators, and toggle starter cells with G.</p>";
+
+    function sync() {
+      solutionControl.value = numbers.map((row) => row.join(",")).join("\n");
+      rowOpsControl.value = rowOps.map((row) => row.join(",")).join("\n");
+      colOpsControl.value = colOps.map((row) => row.join(",")).join("\n");
+      givensControl.value = Array.from(givens).map((key) => {
+        const [rx, ry] = key.split(",").map(Number);
+        return `${rx},${ry},${numbers[ry / 2][rx / 2]}`;
+      }).join("\n");
+      setSelectValue(control(form, "grid_size"), size);
+    }
+
+    function draw() {
+      parts.canvas.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "level-equation-grid";
+      grid.style.setProperty("--builder-grid-size", String(size * 2 - 1));
+      for (let y = 0; y < size * 2 - 1; y += 1) {
+        for (let x = 0; x < size * 2 - 1; x += 1) {
+          if (x % 2 === 0 && y % 2 === 0) {
+            const wrap = document.createElement("label");
+            wrap.className = "level-equation-cell";
+            const input = document.createElement("input");
+            input.type = "number";
+            input.value = String(numbers[y / 2][x / 2]);
+            input.addEventListener("input", () => {
+              numbers[y / 2][x / 2] = Number(input.value || 1);
+              sync();
+            });
+            const toggle = document.createElement("button");
+            toggle.type = "button";
+            toggle.className = givens.has(`${x},${y}`) ? "level-cell-toggle active" : "level-cell-toggle";
+            toggle.textContent = "G";
+            toggle.addEventListener("click", () => {
+              const key = `${x},${y}`;
+              if (givens.has(key)) givens.delete(key);
+              else givens.add(key);
+              sync();
+              draw();
+            });
+            wrap.append(input, toggle);
+            grid.append(wrap);
+          } else if (y % 2 === 0) {
+            const operatorIndex = Math.floor(x / 2);
+            grid.append(operatorIndex === size - 2 ? equalsCell() : operatorSelect(rowOps[y / 2], operatorIndex, sync));
+          } else if (x % 2 === 0) {
+            const operatorIndex = Math.floor(y / 2);
+            grid.append(operatorIndex === size - 2 ? equalsCell() : operatorSelect(colOps[x / 2], operatorIndex, sync));
+          } else {
+            const spacer = document.createElement("span");
+            spacer.className = "level-equation-spacer";
+            grid.append(spacer);
+          }
+        }
+      }
+      parts.canvas.append(grid);
+    }
+
+    sizeSelect.addEventListener("change", () => {
+      size = Number(sizeSelect.value);
+      numbers = defaultEquationGrid(size);
+      rowOps = parseOps("", size);
+      colOps = parseOps("", size);
+      givens = new Set(["0,0"]);
+      sync();
+      draw();
+    });
+    makeAdd.addEventListener("click", () => {
+      rowOps = parseOps("", size);
+      colOps = parseOps("", size);
+      sync();
+      draw();
+    });
+    clearGivens.addEventListener("click", () => {
+      givens = new Set();
+      sync();
+      draw();
+    });
+    sync();
+    draw();
+  }
+
+  function parseNumberGrid(value, size) {
+    const rows = String(value || "").split(/\r?\n/).map((line) => line.split(/[\s,]+/).map((part) => Number(part)).filter((value) => Number.isFinite(value))).filter((row) => row.length);
+    if (rows.length === size && rows.every((row) => row.length === size)) return rows;
+    return defaultEquationGrid(size);
+  }
+
+  function defaultEquationGrid(size) {
+    const grid = Array.from({ length: size }, () => Array.from({ length: size }, () => 1));
+    for (let y = 0; y < size - 1; y += 1) grid[y][size - 1] = size - 1;
+    for (let x = 0; x < size - 1; x += 1) grid[size - 1][x] = size - 1;
+    grid[size - 1][size - 1] = (size - 1) * (size - 1);
+    return grid;
+  }
+
+  function parseOps(value, size) {
+    const operatorCount = Math.max(1, size - 2);
+    const rows = String(value || "").split(/\r?\n/).map((line) => line.split(/[\s,]+/).map((part) => part.replace("*", "x")).filter(Boolean)).filter(Boolean);
+    while (rows.length < size) rows.push(Array.from({ length: operatorCount }, () => "+"));
+    return rows.slice(0, size).map((row) => {
+      const next = row.slice(0, operatorCount).map((op) => ["+", "-", "x", "/"].includes(op) ? op : "+");
+      while (next.length < operatorCount) next.push("+");
+      return next;
+    });
+  }
+
+  function equalsCell() {
+    const item = document.createElement("span");
+    item.className = "level-equation-equals";
+    item.textContent = "=";
+    return item;
+  }
+
+  function operatorSelect(row, index, sync) {
+    const select = document.createElement("select");
+    select.className = "level-operator-select";
+    ["+", "-", "x", "/"].forEach((op) => {
+      const option = document.createElement("option");
+      option.value = op;
+      option.textContent = op;
+      option.selected = row[index] === op;
+      select.append(option);
+    });
+    select.addEventListener("change", () => {
+      row[index] = select.value;
+      sync();
+    });
+    return select;
+  }
+
+  function renderMazeEditor(form, parts) {
+    const wallsControl = control(form, "maze_walls");
+    if (!wallsControl) return;
+    hideSourceLabels(form, ["maze_walls"]);
+    let maze = parseMaze(wallsControl.value, 10, 10);
+    const widthInput = document.createElement("input");
+    widthInput.type = "number";
+    widthInput.min = "5";
+    widthInput.max = "30";
+    widthInput.value = String(maze.width);
+    const heightInput = document.createElement("input");
+    heightInput.type = "number";
+    heightInput.min = "5";
+    heightInput.max = "30";
+    heightInput.value = String(maze.height);
+    const resize = button("Resize");
+    const carve = button("Open All");
+    const box = button("Box All");
+    parts.toolbar.append(document.createElement("h3"), labelWrap("Width", widthInput), labelWrap("Height", heightInput), resize, carve, box);
+    parts.toolbar.querySelector("h3").textContent = "Maze Wall Canvas";
+    parts.properties.innerHTML = "<h3>Wall Tools</h3><p class=\"muted\">Click a wall segment to open or close it. The start and finish openings are preserved.</p>";
+
+    function sync() {
+      wallsControl.value = JSON.stringify(maze);
+      setSelectValue(control(form, "maze_size"), "custom");
+      setInputValue(control(form, "custom_width"), maze.width);
+      setInputValue(control(form, "custom_height"), maze.height);
+    }
+
+    function toggleWall(x, y, direction) {
+      const cell = maze.cells[`${x},${y}`];
+      cell[direction] = !cell[direction];
+      const opposite = { n: "s", s: "n", e: "w", w: "e" }[direction];
+      const dx = direction === "e" ? 1 : direction === "w" ? -1 : 0;
+      const dy = direction === "s" ? 1 : direction === "n" ? -1 : 0;
+      const neighbor = maze.cells[`${x + dx},${y + dy}`];
+      if (neighbor) neighbor[opposite] = cell[direction];
+      maze.cells["0,0"].w = false;
+      maze.cells[`${maze.width - 1},${maze.height - 1}`].e = false;
+      sync();
+      draw();
+    }
+
+    function draw() {
+      parts.canvas.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "level-maze-grid";
+      grid.style.setProperty("--maze-width", String(maze.width));
+      for (let y = 0; y < maze.height; y += 1) {
+        for (let x = 0; x < maze.width; x += 1) {
+          const cell = document.createElement("div");
+          cell.className = "level-maze-cell";
+          const walls = maze.cells[`${x},${y}`];
+          ["n", "e", "s", "w"].forEach((direction) => {
+            const wall = document.createElement("button");
+            wall.type = "button";
+            wall.className = `maze-wall maze-wall-${direction}${walls[direction] ? " closed" : ""}`;
+            wall.title = `${direction.toUpperCase()} wall`;
+            wall.addEventListener("click", () => toggleWall(x, y, direction));
+            cell.append(wall);
+          });
+          if (x === 0 && y === 0) cell.dataset.marker = "S";
+          if (x === maze.width - 1 && y === maze.height - 1) cell.dataset.marker = "F";
+          grid.append(cell);
+        }
+      }
+      parts.canvas.append(grid);
+    }
+
+    resize.addEventListener("click", () => {
+      maze = parseMaze("", Number(widthInput.value || 10), Number(heightInput.value || 10));
+      sync();
+      draw();
+    });
+    carve.addEventListener("click", () => {
+      Object.values(maze.cells).forEach((cell) => {
+        cell.n = false; cell.e = false; cell.s = false; cell.w = false;
+      });
+      sync();
+      draw();
+    });
+    box.addEventListener("click", () => {
+      Object.values(maze.cells).forEach((cell) => {
+        cell.n = true; cell.e = true; cell.s = true; cell.w = true;
+      });
+      sync();
+      draw();
+    });
+    sync();
+    draw();
+  }
+
+  function parseMaze(value, fallbackWidth, fallbackHeight) {
+    try {
+      const parsed = JSON.parse(String(value || ""));
+      if (parsed && parsed.cells) return parsed;
+    } catch (_error) {
+      // Build a fresh grid below.
+    }
+    const width = Math.max(5, Math.min(30, fallbackWidth || 10));
+    const height = Math.max(5, Math.min(30, fallbackHeight || width));
+    const cells = {};
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        cells[`${x},${y}`] = { n: y === 0, e: x === width - 1, s: y === height - 1, w: x === 0 };
+      }
+    }
+    cells["0,0"].w = false;
+    cells[`${width - 1},${height - 1}`].e = false;
+    return { width, height, cells };
+  }
+
   function render(form) {
     const typeSelect = form.querySelector("[data-manual-puzzle-type]");
     if (!typeSelect) return;
@@ -323,9 +730,9 @@
     if (type === "word_search") renderWordSearch(form, parts);
     if (type === "crossword") renderEntryCards(form, parts, "entries", "Crossword Entries", "Add Entry");
     if (type === "word_pyramid") renderEntryCards(form, parts, "rows", "Pyramid Rows", "Add Row");
-    if (type === "sudoku") renderControlBoard(form, parts, "Sudoku Board Builder");
-    if (type === "cross_equations") renderControlBoard(form, parts, "Cross Equations Builder");
-    if (type === "maze") renderControlBoard(form, parts, "Maze Builder");
+    if (type === "sudoku") renderSudokuEditor(form, parts);
+    if (type === "cross_equations") renderCrossEquationsEditor(form, parts);
+    if (type === "maze") renderMazeEditor(form, parts);
   }
 
   forms.forEach((form) => {

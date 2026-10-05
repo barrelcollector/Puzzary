@@ -321,6 +321,8 @@ def generate(
 
 
 def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    if str(options.get("maze_walls") or "").strip():
+        return build_manual_wall_puzzle(options)
     theme = str(options.get("_theme") or "").strip()
     difficulty = str(options.get("_difficulty") or "medium").strip().lower()
     if difficulty not in {"easy", "medium", "hard"}:
@@ -337,6 +339,83 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
             **generated.metadata,
             "generator": "manual.maze.v1",
             "manual": True,
+        },
+    )
+
+
+def parse_manual_maze(value: Any) -> tuple[int, int, list[list[dict[str, Any]]]]:
+    try:
+        payload = json.loads(str(value or ""))
+    except json.JSONDecodeError as error:
+        raise ValueError("Maze canvas data must be valid JSON.") from error
+    width = integer_option(payload, "width", 10, 5, 30)
+    height = integer_option(payload, "height", 10, 5, 30)
+    grid = new_grid(width, height)
+    raw_cells = payload.get("cells", {}) if isinstance(payload, dict) else {}
+    if isinstance(raw_cells, dict):
+        for key, walls in raw_cells.items():
+            try:
+                x_text, y_text = str(key).split(",", 1)
+                x, y = int(x_text), int(y_text)
+            except ValueError:
+                continue
+            if 0 <= x < width and 0 <= y < height and isinstance(walls, dict):
+                grid[y][x]["walls"] = {
+                    direction: bool(walls.get(direction, True))
+                    for direction in DIRECTIONS
+                }
+    for y in range(height):
+        for x in range(width):
+            grid[y][x]["walls"]["n"] = True if y == 0 else grid[y][x]["walls"]["n"]
+            grid[y][x]["walls"]["w"] = True if x == 0 else grid[y][x]["walls"]["w"]
+            if x + 1 < width:
+                grid[y][x + 1]["walls"]["w"] = grid[y][x]["walls"]["e"]
+            if y + 1 < height:
+                grid[y + 1][x]["walls"]["n"] = grid[y][x]["walls"]["s"]
+    grid[0][0]["walls"]["w"] = False
+    grid[height - 1][width - 1]["walls"]["e"] = False
+    return width, height, grid
+
+
+def build_manual_wall_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    width, height, grid = parse_manual_maze(options.get("maze_walls", ""))
+    path = solve_maze(grid)
+    cell_size = 28 if max(width, height) <= 14 else 22 if max(width, height) <= 22 else 18
+    settings = {
+        "width": width,
+        "height": height,
+        "size": "manual",
+        "cell_size": cell_size,
+        "allow_loops": True,
+        "loop_count": 0,
+    }
+    payload = {
+        "kind": "maze",
+        "grid": grid,
+        "settings": settings,
+        "start": {"x": 0, "y": 0},
+        "end": {"x": width - 1, "y": height - 1},
+    }
+    return GeneratedPuzzle(
+        title="Manual Maze",
+        prompt="Draw a path from Start to Finish without crossing any walls.",
+        print_payload=payload,
+        play_payload=payload,
+        solution_payload=payload | {
+            "path": path,
+            "path_length": len(path),
+            "solution_polyline": solution_polyline(path, cell_size),
+        },
+        hints=[
+            "Start at the opening on the left.",
+            "Finish at the opening on the right.",
+            f"The solution path uses {len(path)} cells.",
+        ],
+        metadata={
+            "generator": "manual.maze.canvas.v1",
+            "manual": True,
+            "path_length": len(path),
+            "generation_options": settings,
         },
     )
 
@@ -364,6 +443,13 @@ register_puzzle_type(
         ),
         manual_builder=build_manual_puzzle,
         manual_editor_fields=(
+            GenerationField(
+                name="maze_walls",
+                label="Canvas maze walls",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
             GenerationField(
                 name="maze_size",
                 label="Maze size",

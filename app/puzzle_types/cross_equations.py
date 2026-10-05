@@ -594,6 +594,8 @@ def generate(
 
 
 def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    if str(options.get("solution_grid") or "").strip():
+        return build_manual_grid_puzzle(options)
     theme = str(options.get("_theme") or "").strip()
     difficulty = str(options.get("_difficulty") or "medium").strip().lower()
     if difficulty not in {"easy", "medium", "hard"}:
@@ -610,6 +612,121 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
             **generated.metadata,
             "generator": "manual.cross_equations.v1",
             "manual": True,
+        },
+    )
+
+
+def parse_manual_number_grid(value: Any) -> DigitGrid:
+    rows = []
+    for line in str(value or "").splitlines():
+        parts = [part.strip() for part in line.replace(" ", ",").split(",") if part.strip()]
+        if not parts:
+            continue
+        try:
+            rows.append([int(part) for part in parts])
+        except ValueError as error:
+            raise ValueError("Cross Equations number grid must contain numbers only.") from error
+    if not rows:
+        raise ValueError("Cross Equations canvas needs a number grid.")
+    size = len(rows[0])
+    if size < DEFAULT_GRID_SIZE or size > MAX_GRID_SIZE or len(rows) != size or any(len(row) != size for row in rows):
+        raise ValueError("Cross Equations number grid must be square, 3x3 to 5x5.")
+    return rows
+
+
+def parse_manual_ops(value: Any, grid_size: int, fallback: str = "+") -> list[list[str]]:
+    valid = {"+", "-", "x", "/"}
+    operator_count = max(1, grid_size - 2)
+    rows = []
+    for line in str(value or "").splitlines():
+        parts = [part.strip().replace("*", "x") for part in line.replace(" ", ",").split(",") if part.strip()]
+        if parts:
+            rows.append([part if part in valid else fallback for part in parts[:operator_count]])
+    while len(rows) < grid_size:
+        rows.append([fallback for _ in range(operator_count)])
+    return [(row + [fallback for _ in range(operator_count)])[:operator_count] for row in rows[:grid_size]]
+
+
+def parse_manual_cross_givens(value: Any, solution: DigitGrid) -> dict[str, str]:
+    givens = {}
+    grid_size = len(solution)
+    for line in str(value or "").splitlines():
+        cleaned = line.replace("=", ",").replace(":", ",")
+        parts = [part.strip() for part in cleaned.split(",") if part.strip()]
+        if len(parts) < 3:
+            continue
+        try:
+            x, y, digit = int(parts[0]), int(parts[1]), int(parts[2])
+        except ValueError:
+            continue
+        if x % 2 == 0 and y % 2 == 0 and 0 <= x // 2 < grid_size and 0 <= y // 2 < grid_size and solution[y // 2][x // 2] == digit:
+            givens[f"{x},{y}"] = str(digit)
+    if not givens:
+        givens = {"0,0": str(solution[0][0])}
+    return givens
+
+
+def build_manual_grid_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    solution = parse_manual_number_grid(options.get("solution_grid", ""))
+    grid_size = len(solution)
+    row_ops = parse_manual_ops(options.get("row_ops", ""), grid_size)
+    col_ops = parse_manual_ops(options.get("col_ops", ""), grid_size)
+    number_max = max(max(row) for row in solution)
+    result_min, result_max = result_limits(options, number_max)
+    whole_number_division = bool_option(options, "whole_number_division", True)
+    for row_index, row in enumerate(solution):
+        if apply_operator_sequence(row[:-1], row_ops[row_index], result_min, result_max, whole_number_division) != row[-1]:
+            raise ValueError("A Cross Equations row does not match its operators and result.")
+    for col_index in range(grid_size):
+        col_values = [solution[row][col_index] for row in range(grid_size)]
+        if apply_operator_sequence(col_values[:-1], col_ops[col_index], result_min, result_max, whole_number_division) != col_values[-1]:
+            raise ValueError("A Cross Equations column does not match its operators and result.")
+    givens = parse_manual_cross_givens(options.get("givens", ""), solution)
+    answer_map = {f"{x},{y}": str(solution[y // 2][x // 2]) for x, y in digit_coords(grid_size)}
+    ops = [row_ops, col_ops]
+    equation_list = equations(solution, ops)
+    operators = sorted({operator for group in ops for row in group for operator in row if operator})
+    settings = {
+        "grid_size": grid_size,
+        "number_range": f"1-{number_max}",
+        "operators": operators,
+        "whole_number_division": whole_number_division,
+        "allow_multiple_operations": grid_size > DEFAULT_GRID_SIZE,
+        "allow_multiple_equations": False,
+        "result_min": result_min,
+        "result_max": result_max,
+        "difficulty_style": "manual",
+        "rendered_size": grid_size * 2 - 1,
+    }
+    payload = {
+        "kind": "cross_equations",
+        "cells": build_cells(solution, ops, givens),
+        "givens": givens,
+        "equations": [{"number": item["number"], "direction": item["direction"], "label": item["label"], "cells": item["cells"]} for item in equation_list],
+        "settings": settings,
+    }
+    return GeneratedPuzzle(
+        title="Manual Cross Equations",
+        prompt="Fill the shared number cells so every across and down equation is true.",
+        print_payload=payload,
+        play_payload=payload,
+        solution_payload={
+            "answers": answer_map,
+            "givens": givens,
+            "cells": build_cells(solution, ops, answer_map, include_solution=True),
+            "equations": equation_list,
+        },
+        hints=[
+            "Each row with numbers is an across equation.",
+            "Each column with numbers is a down equation.",
+            f"This manual puzzle starts with {len(givens)} givens.",
+        ],
+        metadata={
+            "generator": "manual.cross_equations.canvas.v1",
+            "manual": True,
+            "givens": len(givens),
+            "operators": operators,
+            "generation_options": settings,
         },
     )
 
@@ -636,6 +753,34 @@ register_puzzle_type(
         ),
         manual_builder=build_manual_puzzle,
         manual_editor_fields=(
+            GenerationField(
+                name="solution_grid",
+                label="Canvas number grid",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
+            GenerationField(
+                name="row_ops",
+                label="Canvas row operators",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
+            GenerationField(
+                name="col_ops",
+                label="Canvas column operators",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
+            GenerationField(
+                name="givens",
+                label="Canvas starter numbers",
+                field_type="textarea",
+                default="",
+                help_text="Managed by the visual editor.",
+            ),
             GenerationField(
                 name="grid_size",
                 label="Grid size",
