@@ -114,6 +114,152 @@ body {
   gap: 8px;
 }
 
+.level-editor {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(320px, 1fr) minmax(220px, 300px);
+  gap: 14px;
+  align-items: start;
+  margin: 12px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9f9f5;
+}
+
+.level-toolbar,
+.level-canvas,
+.level-properties {
+  min-width: 0;
+}
+
+.level-toolbar,
+.level-properties {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.level-toolbar h3,
+.level-properties h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.level-canvas {
+  min-height: 260px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid #c7c4b8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.builder-source-hidden {
+  display: none;
+}
+
+.level-word-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--builder-grid-size), 34px);
+  width: max-content;
+  border: 2px solid var(--ink);
+}
+
+.level-word-grid input {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-right: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  border-radius: 0;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.level-word-grid input:focus {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+}
+
+.level-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #75b6aa;
+  border-radius: 999px;
+  background: #e9f7f3;
+  cursor: grab;
+}
+
+.icon-button {
+  width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.level-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.level-card {
+  display: grid;
+  grid-template-columns: 34px minmax(120px, 180px) minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.level-card label {
+  margin: 0;
+}
+
+.level-card textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.level-handle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 850;
+  cursor: grab;
+}
+
+.level-control-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.level-control-board label {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f7f2;
+}
+
 .brand {
   color: var(--ink);
   text-decoration: none;
@@ -2006,6 +2152,8 @@ summary {
   .review-count-grid,
   .dashboard-actions,
   .inline-form,
+  .level-editor,
+  .level-card,
   .print-clues {
     grid-template-columns: 1fr;
   }
