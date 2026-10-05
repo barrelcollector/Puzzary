@@ -351,6 +351,27 @@ def generate(
     )
 
 
+def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    theme = str(options.get("_theme") or "").strip()
+    difficulty = str(options.get("_difficulty") or "medium").strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        difficulty = "medium"
+    generated = generate(theme, difficulty, None, str(options.get("seed") or "") or None, options)
+    return GeneratedPuzzle(
+        title="Manual Sudoku",
+        prompt=generated.prompt,
+        print_payload=generated.print_payload,
+        play_payload=generated.play_payload,
+        solution_payload=generated.solution_payload,
+        hints=generated.hints,
+        metadata={
+            **generated.metadata,
+            "generator": "manual.sudoku.v1",
+            "manual": True,
+        },
+    )
+
+
 register_puzzle_type(
     PuzzleType(
         slug="sudoku",
@@ -370,6 +391,106 @@ register_puzzle_type(
             sheet_class="print-layout-sudoku",
             instructions="Fill every row, column, and box with the required digits.",
             notes=("Box boundaries are emphasized for print review.",),
+        ),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="grid_size",
+                label="Grid size",
+                field_type="select",
+                default="9",
+                options=(
+                    {"value": "4", "label": "4x4"},
+                    {"value": "6", "label": "6x6"},
+                    {"value": "9", "label": "9x9"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_grid_size",
+                label="Custom grid size",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom. Values above 9 are not supported yet.",
+                minimum=4,
+                maximum=9,
+            ),
+            GenerationField(
+                name="box_rows",
+                label="Box rows",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom. Box rows x box columns must equal grid size.",
+                minimum=1,
+                maximum=9,
+            ),
+            GenerationField(
+                name="box_cols",
+                label="Box columns",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom.",
+                minimum=1,
+                maximum=9,
+            ),
+            GenerationField(
+                name="given_count",
+                label="Given count",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose.",
+                minimum=4,
+                maximum=80,
+            ),
+            GenerationField(
+                name="symmetry",
+                label="Symmetry",
+                field_type="select",
+                default="random",
+                options=(
+                    {"value": "random", "label": "Random"},
+                    {"value": "rotational", "label": "Rotational"},
+                    {"value": "mirrored", "label": "Mirrored"},
+                ),
+            ),
+            GenerationField(
+                name="candidate_notes",
+                label="Candidate notes",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "Off"},
+                    {"value": "yes", "label": "On"},
+                ),
+            ),
+            GenerationField(
+                name="check_mode",
+                label="Check mode",
+                field_type="select",
+                default="check_puzzle",
+                options=(
+                    {"value": "none", "label": "No checking"},
+                    {"value": "check_cell", "label": "Check cell"},
+                    {"value": "check_puzzle", "label": "Check puzzle"},
+                ),
+            ),
+            GenerationField(
+                name="require_unique",
+                label="Require unique solution",
+                field_type="select",
+                default="yes",
+                options=(
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+            GenerationField(
+                name="seed",
+                label="Seed",
+                field_type="text",
+                default="",
+                help_text="Optional. Reuse to recreate the same puzzle.",
+            ),
         ),
         generation_fields=(
             GenerationField(

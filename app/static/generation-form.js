@@ -279,16 +279,22 @@
   function renderManualFields(form) {
     const target = form.querySelector("[data-manual-fields]");
     const typeSelect = form.querySelector("[data-manual-puzzle-type]");
+    const note = form.querySelector("[data-manual-builder-note]");
     if (!target || !typeSelect) return;
     const schema = schemas[typeSelect.value] || {};
     const fields = schema.manual_editor_fields || [];
     const existingValues = manualEditorValues();
     target.innerHTML = "";
+    if (note) {
+      note.textContent = schema.label
+        ? `${schema.label} controls are supplied by the puzzle module. Save as a draft, preview, adjust, then publish.`
+        : "Choose a puzzle type to load its builder.";
+    }
     if (!schema.supports_manual_editor || fields.length === 0) {
-      const note = document.createElement("p");
-      note.className = "muted";
-      note.textContent = "This puzzle type does not have a GUI editor helper yet. Use Raw payloads for now.";
-      target.appendChild(note);
+      const missingNote = document.createElement("p");
+      missingNote.className = "muted";
+      missingNote.textContent = "This puzzle type does not have a module builder yet. Use Advanced Raw Payloads for now.";
+      target.appendChild(missingNote);
       const rawMode = form.querySelector('input[data-manual-mode][value="raw"]');
       if (rawMode) rawMode.checked = true;
       updateManualMode(form);

@@ -317,6 +317,100 @@ def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> di
     }
 
 
+def parse_manual_rows(value: Any) -> list[dict[str, Any]]:
+    rows = []
+    seen = set()
+    for line in str(value or "").splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        answer = normalize_word(parts[0] if parts else "")
+        if not answer:
+            continue
+        if answer in seen:
+            raise ValueError(f"Duplicate word pyramid row: {answer}")
+        seen.add(answer)
+        clues = [part for part in parts[1:] if part]
+        if not clues:
+            clues = FALLBACK_CLUES.get(answer, [f"{answer.title()} entry."])
+        rows.append({"word": answer, "clues": clues, "definition_id": None})
+    if len(rows) < 3:
+        raise ValueError("Manual word pyramid builder needs at least 3 rows.")
+    for index in range(1, len(rows)):
+        previous = rows[index - 1]["word"]
+        current = rows[index]["word"]
+        if len(current) != len(previous) + 1:
+            raise ValueError("Each word pyramid row must be exactly one letter longer than the row above it.")
+    return rows
+
+
+def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    rows_source = parse_manual_rows(options.get("rows", ""))
+    chain_rule = str(options.get("chain_rule", "strict_anagram_plus_one")).strip().lower()
+    if chain_rule not in {"strict_anagram_plus_one", "loose_clue_ladder"}:
+        chain_rule = "strict_anagram_plus_one"
+    if chain_rule == "strict_anagram_plus_one":
+        for index in range(1, len(rows_source)):
+            if not extends_by_one_letter(rows_source[index - 1]["word"], rows_source[index]["word"]):
+                raise ValueError("Strict word pyramid rows must use every prior letter plus one new letter.")
+    clue_placement = str(options.get("clue_placement", "inline")).strip().lower()
+    if clue_placement not in {"inline", "numbered_below"}:
+        clue_placement = "inline"
+    print_layout = str(options.get("print_layout", "alternating")).strip().lower()
+    if print_layout not in {"alternating", "pyramid_clues_below"}:
+        print_layout = "alternating"
+    if print_layout == "pyramid_clues_below":
+        clue_placement = "numbered_below"
+    gimme_count = integer_option(options, "gimme_count", 0, 0, max(0, len(rows_source) - 1))
+    rows = []
+    solution_rows = []
+    for index, entry in enumerate(rows_source):
+        answer = entry["word"]
+        clues = entry.get("clues") or [f"{answer.title()} entry."]
+        row = {
+            "index": index,
+            "number": index + 1,
+            "length": len(answer),
+            "clue": clues[0],
+            "clues": clues,
+            "definition_id": entry.get("definition_id"),
+            "gimme": index < gimme_count,
+        }
+        if row["gimme"]:
+            row["given"] = answer
+        rows.append(row)
+        solution_rows.append({**row, "answer": answer})
+    prompt = (
+        "Fill each row. Every answer is an anagram of the row above it plus one new letter."
+        if chain_rule == "strict_anagram_plus_one"
+        else "Fill each row. Every answer is one letter longer than the row above it."
+    )
+    settings = {
+        "row_count": len(rows),
+        "starting_word_length": rows[0]["length"],
+        "clue_placement": clue_placement,
+        "chain_rule": chain_rule,
+        "print_layout": print_layout,
+    }
+    payload = {"kind": "word_pyramid", "rows": rows, "settings": settings}
+    return GeneratedPuzzle(
+        title="Manual Word Pyramid",
+        prompt=prompt,
+        print_payload=payload,
+        play_payload=payload,
+        solution_payload={"rows": solution_rows, "settings": settings},
+        hints=[
+            f"The pyramid has {len(rows)} rows.",
+            "Each answer is one letter longer than the row above it.",
+            f"The shortest answer has {rows[0]['length']} letters.",
+        ],
+        metadata={
+            "generator": "manual.word_pyramid.v1",
+            "manual": True,
+            "row_count": len(rows),
+            "gimmes": {"mode": "starting_rows", "count": gimme_count},
+        },
+    )
+
+
 def generate(
     theme: str,
     difficulty: str,
@@ -431,6 +525,56 @@ register_puzzle_type(
         ),
         supports_gimmes=True,
         gimme_modes=("starting_rows",),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="rows",
+                label="Rows and clues",
+                field_type="textarea",
+                required=True,
+                help_text="One row per line: ANSWER | primary clue | optional extra clue. Each row must be one letter longer.",
+                default="TIP | A small piece of advice.\nPINT | A liquid measure equal to two cups.\nPOINT | A sharp end, exact location, or main idea.\nPISTON | A moving engine part inside a cylinder.",
+            ),
+            GenerationField(
+                name="clue_placement",
+                label="Clue placement",
+                field_type="select",
+                default="numbered_below",
+                options=(
+                    {"value": "inline", "label": "Between rows"},
+                    {"value": "numbered_below", "label": "Numbered below"},
+                ),
+            ),
+            GenerationField(
+                name="gimme_count",
+                label="Gimme rows",
+                field_type="number",
+                default="0",
+                help_text="Number of starting rows to prefill.",
+                minimum=0,
+                maximum=10,
+            ),
+            GenerationField(
+                name="chain_rule",
+                label="Chain rule",
+                field_type="select",
+                default="strict_anagram_plus_one",
+                options=(
+                    {"value": "strict_anagram_plus_one", "label": "Anagram plus one"},
+                    {"value": "loose_clue_ladder", "label": "Loose clue ladder"},
+                ),
+            ),
+            GenerationField(
+                name="print_layout",
+                label="Print layout",
+                field_type="select",
+                default="pyramid_clues_below",
+                options=(
+                    {"value": "alternating", "label": "Alternating rows and clues"},
+                    {"value": "pyramid_clues_below", "label": "Pyramid with clues below"},
+                ),
+            ),
+        ),
         generation_fields=(
             GenerationField(
                 name="row_count",

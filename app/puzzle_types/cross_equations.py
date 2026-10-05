@@ -593,6 +593,27 @@ def generate(
     )
 
 
+def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    theme = str(options.get("_theme") or "").strip()
+    difficulty = str(options.get("_difficulty") or "medium").strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        difficulty = "medium"
+    generated = generate(theme, difficulty, None, str(options.get("seed") or "") or None, options)
+    return GeneratedPuzzle(
+        title="Manual Cross Equations",
+        prompt=generated.prompt,
+        print_payload=generated.print_payload,
+        play_payload=generated.play_payload,
+        solution_payload=generated.solution_payload,
+        hints=generated.hints,
+        metadata={
+            **generated.metadata,
+            "generator": "manual.cross_equations.v1",
+            "manual": True,
+        },
+    )
+
+
 register_puzzle_type(
     PuzzleType(
         slug="cross_equations",
@@ -612,6 +633,123 @@ register_puzzle_type(
             sheet_class="print-layout-cross-equations",
             instructions="Fill the shared number cells so every across and down equation is true.",
             notes=("Number cells are boxed; operation/result cells stay unboxed for paper solving.",),
+        ),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="grid_size",
+                label="Grid size",
+                field_type="select",
+                default="3",
+                help_text="Number cells per side. Larger grids use longer row and column equations.",
+                options=(
+                    {"value": "3", "label": "3x3 equation grid"},
+                    {"value": "4", "label": "4x4 equation grid"},
+                    {"value": "5", "label": "5x5 equation grid"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_grid_size",
+                label="Custom grid size",
+                field_type="number",
+                default="",
+                help_text="Valid range is 3 to 5.",
+                minimum=3,
+                maximum=5,
+            ),
+            GenerationField(
+                name="operators",
+                label="Operators",
+                field_type="checkboxes",
+                default=(),
+                help_text="Leave unchecked to use the difficulty default. Check specific operators to override it.",
+                options=(
+                    {"value": "+", "label": "Add"},
+                    {"value": "-", "label": "Subtract"},
+                    {"value": "x", "label": "Multiply"},
+                    {"value": "/", "label": "Divide"},
+                ),
+            ),
+            GenerationField(
+                name="number_range",
+                label="Number range",
+                field_type="select",
+                default="1-9",
+                options=(
+                    {"value": "1-9", "label": "1-9"},
+                    {"value": "1-12", "label": "1-12"},
+                    {"value": "1-20", "label": "1-20"},
+                ),
+            ),
+            GenerationField(
+                name="whole_number_division",
+                label="Whole-number division",
+                field_type="select",
+                default="yes",
+                options=(
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+            GenerationField(
+                name="allow_multiple_operations",
+                label="Allow multiple operations per equation",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "No"},
+                    {"value": "yes", "label": "Yes"},
+                ),
+            ),
+            GenerationField(
+                name="allow_multiple_equations",
+                label="Allow multiple equations per row/column",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "No"},
+                    {"value": "yes", "label": "Yes"},
+                ),
+            ),
+            GenerationField(
+                name="result_constraints",
+                label="Result constraints",
+                field_type="select",
+                default="positive_only",
+                options=(
+                    {"value": "positive_only", "label": "Positive only"},
+                    {"value": "allow_zero", "label": "Allow zero"},
+                    {"value": "allow_negative", "label": "Allow negative"},
+                ),
+            ),
+            GenerationField(
+                name="difficulty_style",
+                label="Difficulty style",
+                field_type="select",
+                default="balanced",
+                options=(
+                    {"value": "more_givens", "label": "More givens"},
+                    {"value": "balanced", "label": "Balanced"},
+                    {"value": "harder_operators", "label": "Harder operators"},
+                ),
+            ),
+            GenerationField(
+                name="given_count",
+                label="Starter numbers",
+                field_type="number",
+                default="",
+                help_text="Optional. Leave blank to let difficulty choose; valid range is 2 to 24.",
+                minimum=2,
+                maximum=24,
+            ),
+            GenerationField(
+                name="seed",
+                label="Seed",
+                field_type="text",
+                default="",
+                help_text="Optional. Reuse to recreate the same puzzle.",
+            ),
         ),
         generation_fields=(
             GenerationField(

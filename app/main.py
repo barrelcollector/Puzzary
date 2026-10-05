@@ -1326,6 +1326,8 @@ def build_manual_payload_from_helper(
         )
     except HTTPException as error:
         raise ValueError(str(error.detail)) from error
+    manual_options["_theme"] = theme.strip() or "manual"
+    manual_options["_difficulty"] = difficulty.strip() or "manual"
     generated = puzzle_type.manual_builder(manual_options)
     metadata = dict(generated.metadata or {})
     metadata["manual_editor"] = True

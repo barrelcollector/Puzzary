@@ -320,6 +320,27 @@ def generate(
     )
 
 
+def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    theme = str(options.get("_theme") or "").strip()
+    difficulty = str(options.get("_difficulty") or "medium").strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        difficulty = "medium"
+    generated = generate(theme, difficulty, None, str(options.get("seed") or "") or None, options)
+    return GeneratedPuzzle(
+        title="Manual Maze",
+        prompt=generated.prompt,
+        print_payload=generated.print_payload,
+        play_payload=generated.play_payload,
+        solution_payload=generated.solution_payload,
+        hints=generated.hints,
+        metadata={
+            **generated.metadata,
+            "generator": "manual.maze.v1",
+            "manual": True,
+        },
+    )
+
+
 register_puzzle_type(
     PuzzleType(
         slug="maze",
@@ -340,6 +361,68 @@ register_puzzle_type(
             instructions="Draw a path from Start to Finish without crossing any walls.",
             notes=("Admin solution view overlays the solved path.",),
             max_width_px=760,
+        ),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="maze_size",
+                label="Maze size",
+                field_type="select",
+                default="medium",
+                options=(
+                    {"value": "", "label": "Difficulty default"},
+                    {"value": "small", "label": "Small 10x10"},
+                    {"value": "medium", "label": "Medium 14x14"},
+                    {"value": "large", "label": "Large 18x18"},
+                    {"value": "wide", "label": "Wide 20x12"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_width",
+                label="Custom width",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom.",
+                minimum=5,
+                maximum=30,
+            ),
+            GenerationField(
+                name="custom_height",
+                label="Custom height",
+                field_type="number",
+                default="",
+                help_text="Only used for Custom.",
+                minimum=5,
+                maximum=30,
+            ),
+            GenerationField(
+                name="allow_loops",
+                label="Allow loops",
+                field_type="select",
+                default="difficulty",
+                options=(
+                    {"value": "difficulty", "label": "Difficulty default"},
+                    {"value": "yes", "label": "Yes"},
+                    {"value": "no", "label": "No"},
+                ),
+            ),
+            GenerationField(
+                name="loop_count",
+                label="Loop count",
+                field_type="number",
+                default="",
+                help_text="Optional. Extra openings make alternate paths.",
+                minimum=0,
+                maximum=150,
+            ),
+            GenerationField(
+                name="seed",
+                label="Seed",
+                field_type="text",
+                default="",
+                help_text="Optional. Reuse to recreate the same maze.",
+            ),
         ),
         generation_fields=(
             GenerationField(

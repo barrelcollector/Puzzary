@@ -295,6 +295,62 @@ def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> di
     }
 
 
+def parse_manual_entries(value: Any) -> list[dict[str, Any]]:
+    entries = []
+    seen = set()
+    for line in str(value or "").splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        word = "".join(ch for ch in (parts[0] if parts else "").upper() if ch.isalnum())
+        if not word or word in seen:
+            continue
+        if len(word) < 3:
+            raise ValueError(f"Crossword answer '{word}' must be at least 3 letters.")
+        seen.add(word)
+        clues = [part for part in parts[1:] if part]
+        if not clues:
+            clues = [f"{word.title()} entry."]
+        entries.append({"word": word, "clue": clues[0], "clues": clues, "definition_id": None})
+    if len(entries) < 3:
+        raise ValueError("Manual crossword builder needs at least 3 entries.")
+    return entries
+
+
+def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
+    theme = str(options.get("_theme") or "manual").strip() or "manual"
+    difficulty = str(options.get("_difficulty") or "medium").strip().lower()
+    if difficulty not in {"easy", "medium", "hard"}:
+        difficulty = "medium"
+    entries = parse_manual_entries(options.get("entries", ""))
+    generation_options = {
+        "grid_size": options.get("grid_size") or "difficulty_default",
+        "custom_grid_size": options.get("custom_grid_size") or "",
+        "answer_count_min": str(len(entries)),
+        "answer_count": str(len(entries)),
+        "clue_style": "mixed",
+        "more_clues_depth": options.get("more_clues_depth") or "multi_step",
+        "check_mode": options.get("check_mode") or "whole_puzzle",
+        "auto_highlight_correct": options.get("auto_highlight_correct") or "no",
+        "reveal_mode": options.get("reveal_mode") or "word",
+        "gimme_mode": options.get("gimme_mode") or "letters",
+        "gimme_count": options.get("gimme_count") or "0",
+    }
+    generated = generate(theme, difficulty, entries, str(options.get("seed") or "") or None, generation_options)
+    return GeneratedPuzzle(
+        title="Manual Crossword",
+        prompt=generated.prompt,
+        print_payload=generated.print_payload,
+        play_payload=generated.play_payload,
+        solution_payload=generated.solution_payload,
+        hints=generated.hints,
+        metadata={
+            **generated.metadata,
+            "generator": "manual.crossword.v1",
+            "manual": True,
+            "manual_entry_count": len(entries),
+        },
+    )
+
+
 def generate(
     theme: str,
     difficulty: str,
@@ -615,6 +671,108 @@ register_puzzle_type(
         ),
         supports_gimmes=True,
         gimme_modes=("entries", "letters"),
+        manual_builder=build_manual_puzzle,
+        manual_editor_fields=(
+            GenerationField(
+                name="entries",
+                label="Answers and clues",
+                field_type="textarea",
+                required=True,
+                help_text="One answer per line: ANSWER | primary clue | optional extra clue | optional extra clue.",
+                default="TIP | A small piece of advice.\nPINT | A liquid measure equal to two cups.\nPOINT | A sharp end, exact location, or main idea.\nPISTON | A moving engine part inside a cylinder.",
+            ),
+            GenerationField(
+                name="grid_size",
+                label="Grid size",
+                field_type="select",
+                default="difficulty_default",
+                options=(
+                    {"value": "difficulty_default", "label": "Use difficulty default"},
+                    {"value": "8", "label": "8x8"},
+                    {"value": "10", "label": "10x10"},
+                    {"value": "12", "label": "12x12"},
+                    {"value": "14", "label": "14x14"},
+                    {"value": "custom", "label": "Custom"},
+                ),
+            ),
+            GenerationField(
+                name="custom_grid_size",
+                label="Custom grid size",
+                field_type="number",
+                default="",
+                help_text="Only used when Grid size is Custom.",
+                minimum=5,
+                maximum=25,
+            ),
+            GenerationField(
+                name="more_clues_depth",
+                label="More clues depth",
+                field_type="select",
+                default="multi_step",
+                options=(
+                    {"value": "none", "label": "None"},
+                    {"value": "one_hint", "label": "One hint"},
+                    {"value": "multi_step", "label": "Multi-step"},
+                ),
+            ),
+            GenerationField(
+                name="check_mode",
+                label="Check mode",
+                field_type="select",
+                default="whole_puzzle",
+                options=(
+                    {"value": "whole_puzzle", "label": "Whole puzzle only"},
+                    {"value": "per_word", "label": "Per-word check"},
+                ),
+            ),
+            GenerationField(
+                name="auto_highlight_correct",
+                label="Auto-highlight correct words",
+                field_type="select",
+                default="no",
+                options=(
+                    {"value": "no", "label": "No"},
+                    {"value": "yes", "label": "Yes"},
+                ),
+            ),
+            GenerationField(
+                name="reveal_mode",
+                label="Reveal mode",
+                field_type="select",
+                default="word",
+                options=(
+                    {"value": "word", "label": "Per word"},
+                    {"value": "letter", "label": "Letter"},
+                    {"value": "whole_puzzle", "label": "Whole puzzle"},
+                ),
+            ),
+            GenerationField(
+                name="gimme_mode",
+                label="Gimme mode",
+                field_type="select",
+                default="letters",
+                options=(
+                    {"value": "letters", "label": "Individual letters"},
+                    {"value": "entries", "label": "Whole entries"},
+                ),
+            ),
+            GenerationField(
+                name="gimme_count",
+                label="Gimme count",
+                field_type="number",
+                default="0",
+                help_text="Number of entries or letters to prefill, depending on Gimme mode.",
+                minimum=0,
+                maximum=30,
+            ),
+            GenerationField(
+                name="seed",
+                label="Layout seed",
+                field_type="text",
+                default="",
+                help_text="Optional. Reuse the same seed to keep a layout stable.",
+            ),
+        ),
         generation_fields=(
             GenerationField(
                 name="grid_size",
