@@ -113,6 +113,9 @@
       }
     });
     setStatus(correct === inputsByRow.size ? "Word pyramid complete." : `${correct} of ${inputsByRow.size} rows correct.`);
+    if (correct === inputsByRow.size && window.PuzzaryCelebrate) {
+      window.PuzzaryCelebrate.complete();
+    }
   }
 
   function revealRow(index) {

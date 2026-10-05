@@ -107,6 +107,9 @@
         ? "Cross Equations complete."
         : `${correct} of ${inputs.length} cells correct. ${filled} filled.`;
     }
+    if (inputs.length > 0 && correct === inputs.length && window.PuzzaryCelebrate) {
+      window.PuzzaryCelebrate.complete();
+    }
   }
 
   function revealSolution() {

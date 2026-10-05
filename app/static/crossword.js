@@ -108,6 +108,9 @@
         ? "Crossword complete."
         : `${correct} of ${inputs.length} letters correct.`;
     }
+    if (inputs.length > 0 && correct === inputs.length && window.PuzzaryCelebrate) {
+      window.PuzzaryCelebrate.complete();
+    }
   }
 
   function entryValues(entry) {

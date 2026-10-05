@@ -15,6 +15,24 @@
   </div>
 </section>
 
+<section
+  class="celebration-panel is-hidden"
+  id="completion-celebration"
+  role="status"
+  aria-live="polite"
+  data-show-on-load="{{ 'true' if request.query_params.get('celebrate') == '1' else 'false' }}"
+>
+  <div>
+    <p class="celebration-kicker">Puzzle complete</p>
+    <h2>Nice solve.</h2>
+    <p class="muted">Your progress is saved. You can reset and replay whenever you want.</p>
+  </div>
+  <div class="celebration-actions">
+    <button type="button" class="ghost-button" id="celebration-sound-toggle">Sound on</button>
+    <button type="button" class="ghost-button" id="celebration-close">Close</button>
+  </div>
+</section>
+
 <section class="puzzle-layout">
   <div class="panel">
     {% if has_puzzle_template %}
@@ -123,10 +141,11 @@
     {% endif %}
   </div>
 </section>
-<script src="/static/word-search.js?v=10"></script>
-<script src="/static/crossword.js?v=8"></script>
-<script src="/static/word-pyramid.js?v=1"></script>
-<script src="/static/sudoku.js?v=2"></script>
-<script src="/static/cross-equations.js?v=2"></script>
-<script src="/static/maze.js?v=2"></script>
+<script src="/static/celebration.js?v=1"></script>
+<script src="/static/word-search.js?v=11"></script>
+<script src="/static/crossword.js?v=9"></script>
+<script src="/static/word-pyramid.js?v=2"></script>
+<script src="/static/sudoku.js?v=3"></script>
+<script src="/static/cross-equations.js?v=3"></script>
+<script src="/static/maze.js?v=3"></script>
 {% endblock %}

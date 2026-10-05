@@ -21,6 +21,8 @@
   let selected = [];
   let guesses = [];
   let rejectedGuesses = [];
+  let celebrationReady = false;
+  let suppressCelebration = false;
 
   try {
     placements = JSON.parse(grid.dataset.placements || "[]");
@@ -40,6 +42,9 @@
       status.textContent = found.size === words.size
         ? "All words found."
         : `${found.size} of ${words.size} words found.`;
+    }
+    if (!suppressCelebration && celebrationReady && found.size === words.size && window.PuzzaryCelebrate) {
+      window.PuzzaryCelebrate.complete();
     }
   }
 
@@ -95,7 +100,9 @@
       found.add(word);
       markStoredWord(word);
     });
+    suppressCelebration = true;
     syncFoundWords();
+    suppressCelebration = false;
     if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
   }
 
@@ -353,6 +360,7 @@
 
   found.forEach(markStoredWord);
   syncFoundWords();
+  celebrationReady = true;
 
   if (checkButton) checkButton.addEventListener("click", checkGuesses);
   if (clearGuessesButton) clearGuessesButton.addEventListener("click", clearGuesses);

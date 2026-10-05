@@ -78,6 +78,42 @@ body {
   background: #f8e7e4;
 }
 
+.celebration-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #7ab8aa;
+  border-radius: 8px;
+  background: #e8f6f1;
+  box-shadow: 0 8px 22px rgba(31, 111, 98, 0.12);
+}
+
+.celebration-panel h2,
+.celebration-panel p {
+  margin: 0;
+}
+
+.celebration-panel h2 {
+  margin-bottom: 4px;
+  font-size: 26px;
+}
+
+.celebration-kicker {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.celebration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .brand {
   color: var(--ink);
   text-decoration: none;

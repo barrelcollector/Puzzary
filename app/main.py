@@ -4042,8 +4042,9 @@ def web_attempt_puzzle(
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    submit_puzzle_attempt(puzzle_id, answer, user.id, db)
-    return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
+    result = submit_puzzle_attempt(puzzle_id, answer, user.id, db)
+    celebration = "?celebrate=1" if result.is_correct else ""
+    return RedirectResponse(url=f"/puzzles/{puzzle_id}{celebration}", status_code=303)
 
 
 @app.post("/web/puzzles/{puzzle_id}/photos")
@@ -4934,7 +4935,7 @@ def submit_puzzle_attempt(
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
-    is_correct, expected_count, matched_count = puzzle_type.answer_checker(payload.answer, puzzle.solution_payload)
+    is_correct, expected_count, matched_count = puzzle_type.answer_checker(answer, puzzle.solution_payload)
 
     db.add(
         PuzzleAttempt(

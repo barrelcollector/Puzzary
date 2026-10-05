@@ -14,6 +14,7 @@
   let grid = [];
   let path = [];
   let drawing = false;
+  let celebrationReady = false;
 
   try {
     grid = JSON.parse(root.dataset.grid || "[]");
@@ -66,6 +67,7 @@
     root.classList.toggle("complete", completed);
     if (completed) {
       setStatus("Solved. The traced path reached Finish.");
+      if (celebrationReady && window.PuzzaryCelebrate) window.PuzzaryCelebrate.complete();
     } else if (path.length > 1) {
       setStatus(`${path.length} cells traced. Keep going to F.`);
     } else {
@@ -165,6 +167,7 @@
       root.dataset.completed = "true";
       root.classList.add("complete");
       setStatus("Maze marked complete.");
+      if (window.PuzzaryCelebrate) window.PuzzaryCelebrate.complete();
       savePath(true);
     });
   }
@@ -178,4 +181,5 @@
   }
 
   renderPath();
+  celebrationReady = true;
 })();
