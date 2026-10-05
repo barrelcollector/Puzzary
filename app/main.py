@@ -265,6 +265,57 @@ def puzzle_qr_svg_url(puzzle_id: str, db: Session | None = None) -> str:
     return f"{app_base_url(db)}/puzzles/{puzzle_id}/qr.svg"
 
 
+PRINT_PAGE_PRESETS = {
+    "receipt": {"label": "Receipt roll", "width_mm": 80.0, "height_mm": None, "margin_mm": 4.0},
+    "zebra": {"label": "Zebra roll", "width_mm": 80.0, "height_mm": None, "margin_mm": 4.0},
+    "4x6": {"label": "4 x 6 in", "width_mm": 101.6, "height_mm": 152.4, "margin_mm": 5.0},
+    "letter": {"label": "US Letter", "width_mm": 215.9, "height_mm": 279.4, "margin_mm": 8.0},
+    "a4": {"label": "A4", "width_mm": 210.0, "height_mm": 297.0, "margin_mm": 8.0},
+}
+
+
+def positive_float(value: str | None, default: float | None = None) -> float | None:
+    if value is None or value == "":
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number <= 0:
+        return default
+    return number
+
+
+def apply_print_request_layout(layout: dict, request: Request | None = None) -> dict:
+    params = request.query_params if request is not None else {}
+    requested_size = str(
+        params.get("page_size") or params.get("size") or layout.get("page_size") or "receipt"
+    ).strip().lower()
+    if requested_size not in PRINT_PAGE_PRESETS and requested_size != "custom":
+        requested_size = "receipt"
+
+    preset = PRINT_PAGE_PRESETS.get(requested_size, PRINT_PAGE_PRESETS["receipt"])
+    width_mm = positive_float(params.get("width_mm"), preset["width_mm"])
+    height_mm = positive_float(params.get("height_mm"), preset["height_mm"])
+    margin_mm = positive_float(params.get("margin_mm"), preset["margin_mm"]) or 0
+    if width_mm is None:
+        width_mm = PRINT_PAGE_PRESETS["receipt"]["width_mm"]
+
+    margin_mm = min(margin_mm, max((width_mm / 2) - 1, 0))
+    content_width_mm = max(width_mm - (margin_mm * 2), 10)
+
+    layout["page_size"] = requested_size
+    layout["page_size_label"] = "Custom" if requested_size == "custom" else preset["label"]
+    layout["page_width_mm"] = round(width_mm, 2)
+    layout["page_height_mm"] = round(height_mm, 2) if height_mm else None
+    layout["page_margin_mm"] = round(margin_mm, 2)
+    layout["content_width_mm"] = round(content_width_mm, 2)
+    layout["page_size_presets"] = [
+        {"value": key, "label": value["label"]} for key, value in PRINT_PAGE_PRESETS.items()
+    ] + [{"value": "custom", "label": "Custom"}]
+    return layout
+
+
 def qr_png_data_uri(value: str) -> str:
     qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=2, box_size=8)
     qr.add_data(value)
@@ -4016,7 +4067,7 @@ def render_puzzle_print_page(
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
         raise HTTPException(status_code=404, detail="This puzzle does not support printing")
-    print_layout = print_layout_context(puzzle, puzzle_type, db)
+    print_layout = apply_print_request_layout(print_layout_context(puzzle, puzzle_type, db), request)
     return templates.TemplateResponse(
         "print.html",
         {

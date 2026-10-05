@@ -1,9 +1,47 @@
 {% extends "base.html" %}
 {% block title %}Print {{ puzzle.title }} - Puzzary{% endblock %}
 {% block content %}
+<style>
+  .print-sheet {
+    --print-max-width: {{ print_layout.max_width_px | default(760) }}px;
+    --print-page-width: {{ print_layout.page_width_mm | default(80) }}mm;
+    --print-page-margin: {{ print_layout.page_margin_mm | default(4) }}mm;
+    --print-content-width: {{ print_layout.content_width_mm | default(72) }}mm;
+  }
+
+  @media print {
+    @page {
+      size: {{ print_layout.page_width_mm | default(80) }}mm{% if print_layout.page_height_mm %} {{ print_layout.page_height_mm }}mm{% endif %};
+      margin: {{ print_layout.page_margin_mm | default(4) }}mm;
+    }
+  }
+</style>
 {% if show_print_toolbar %}
   <section class="print-toolbar">
     <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Back to puzzle</a>
+    <form class="print-size-form" method="get">
+      <label>
+        Size
+        <select name="size">
+          {% for preset in print_layout.page_size_presets %}
+            <option value="{{ preset.value }}" {% if preset.value == print_layout.page_size %}selected{% endif %}>{{ preset.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Width mm
+        <input name="width_mm" inputmode="decimal" value="{{ print_layout.page_width_mm }}">
+      </label>
+      <label>
+        Height mm
+        <input name="height_mm" inputmode="decimal" value="{{ print_layout.page_height_mm or '' }}" placeholder="auto">
+      </label>
+      <label>
+        Margin mm
+        <input name="margin_mm" inputmode="decimal" value="{{ print_layout.page_margin_mm }}">
+      </label>
+      <button type="submit" class="ghost-link">Apply</button>
+    </form>
     <button type="button" class="button-link print-button" onclick="window.print()">Print</button>
   </section>
 {% endif %}
@@ -11,8 +49,8 @@
 {% set layout_class = print_layout.sheet_class | default('print-layout-default') %}
 <article
   class="print-sheet {{ layout_class }} {% if print_layout.fit_to_width | default(true) %}print-fit-width{% endif %}"
-  style="--print-max-width: {{ print_layout.max_width_px | default(760) }}px"
   data-print-layout="{{ print_layout.slug | default(print_payload.kind | default('default')) }}"
+  data-print-page-size="{{ print_layout.page_size }}"
 >
   <header class="print-header">
     <h1>{{ puzzle.title }}</h1>

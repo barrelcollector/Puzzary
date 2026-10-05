@@ -2004,6 +2004,35 @@ legend {
   gap: 12px;
   align-items: center;
   margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.print-size-form {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.print-size-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.print-size-form input,
+.print-size-form select {
+  width: 96px;
+  padding: 6px 8px;
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+}
+
+.print-size-form select {
+  width: 132px;
 }
 
 .print-button {
@@ -2011,6 +2040,8 @@ legend {
 }
 
 .print-sheet {
+  box-sizing: border-box;
+  width: min(100%, var(--print-max-width, 760px));
   max-width: var(--print-max-width, 760px);
   margin: 0 auto;
   padding: 22px;
@@ -2351,12 +2382,14 @@ summary {
   }
 
   .page {
-    width: auto;
+    width: var(--print-content-width, auto);
     margin: 0;
   }
 
   .print-sheet {
-    max-width: none;
+    width: var(--print-content-width, auto);
+    max-width: var(--print-content-width, none);
+    margin: 0;
     padding: 0;
     border: 0;
     border-radius: 0;
