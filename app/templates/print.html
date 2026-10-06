@@ -30,15 +30,15 @@
       </label>
       <label>
         Width mm
-        <input name="width_mm" inputmode="decimal" value="{{ print_layout.page_width_mm }}">
+        <input name="width_mm" type="number" min="25" max="1000" step="any" inputmode="decimal" value="{{ print_layout.page_width_mm }}">
       </label>
       <label>
         Height mm
-        <input name="height_mm" inputmode="decimal" value="{{ print_layout.page_height_mm or '' }}" placeholder="auto">
+        <input name="height_mm" type="number" min="25" max="5000" step="any" inputmode="decimal" value="{{ print_layout.page_height_mm or '' }}" placeholder="auto">
       </label>
       <label>
         Margin mm
-        <input name="margin_mm" inputmode="decimal" value="{{ print_layout.page_margin_mm }}">
+        <input name="margin_mm" type="number" min="0" step="any" inputmode="decimal" value="{{ print_layout.page_margin_mm }}">
       </label>
       <button type="submit" class="ghost-link">Apply</button>
     </form>

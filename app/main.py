@@ -308,7 +308,8 @@ def apply_print_request_layout(layout: dict, request: Request | None = None) -> 
     if params.get("margin_mm") == "0":
         margin_mm = 0
 
-    margin_mm = min(margin_mm, max((width_mm / 2) - 1, 0))
+    shortest_side = min(width_mm, height_mm) if height_mm is not None else width_mm
+    margin_mm = min(margin_mm, max((shortest_side - 10) / 2, 0))
     content_width_mm = max(width_mm - (margin_mm * 2), 10)
 
     layout["page_size"] = requested_size
