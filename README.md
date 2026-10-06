@@ -426,6 +426,14 @@ Admin manual creation includes a pixel-painting canvas. Imported or manually ent
 
 Regression checks: `PYTHONPATH=. python scripts/verify_nonogram.py`.
 
+## Takuzu / Binairo
+
+Takuzu is a self-contained module without a theme or word-bank dependency. Generate seeded 4x4, 6x6, 8x8, or 10x10 grids. Every row and column must contain equal numbers of 0s and 1s, no three identical consecutive digits, and no duplicate rows or columns. The OR-Tools CP-SAT generator creates a valid solution, then proves the starter cells have exactly one solution by excluding that answer and checking infeasibility. Extra starter cells are added when necessary; timeouts fail generation instead of claiming uniqueness. Difficulty controls the starting-cell target, not a formal human-solving difficulty rating.
+
+Click or tap to cycle blank -> 0 -> 1 -> blank, or choose a 0/1 brush and drag. Keyboard 0/1 sets a digit, Delete/Backspace erases, and arrows navigate. Starter cells are fixed. Progress is account-specific; every cell, including zeros, must be filled to complete. Auto-confirm completed lines defaults to On with row/column highlights and shared progress chimes, and can be switched Off for manual checking. Hint reveals one unfinished or incorrect cell; Reveal Solution fills the board silently. Admins see the solution and can paint a full solution in the manual canvas; the server validates all rules and derives uniquely solvable starter cells. Web/PDF prints and publishing bundles include only starter cells, not the solution.
+
+Regression checks: `PYTHONPATH=. python scripts/verify_takuzu.py` validates all sizes/difficulties using an independent second-solution model, seeds, manual grids, and progress. `scripts/verify_takuzu_tools.py` checks interactive controls and the canvas. `scripts/verify_takuzu_live.py` is opt-in live QA that creates one sample and clears its test progress; `QA_PUZZLE_ID` reuses a sample.
+
 ## AI Assistance Disclosure
 
 This project includes AI-assisted scaffolding, implementation, and testing.
