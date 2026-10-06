@@ -9,6 +9,7 @@ import shutil
 import uuid
 import hashlib
 import hmac
+import math
 import secrets
 import time
 from io import BytesIO
@@ -32,6 +33,7 @@ from sqlalchemy.orm import Session
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
+from app.print_pdf import render_pdf
 from app.models import (
     AppSetting,
     DictionaryDefinition,
@@ -281,7 +283,7 @@ def positive_float(value: str | None, default: float | None = None) -> float | N
         number = float(value)
     except (TypeError, ValueError):
         return default
-    if number <= 0:
+    if not math.isfinite(number) or number <= 0:
         return default
     return number
 
@@ -300,6 +302,11 @@ def apply_print_request_layout(layout: dict, request: Request | None = None) -> 
     margin_mm = positive_float(params.get("margin_mm"), preset["margin_mm"]) or 0
     if width_mm is None:
         width_mm = PRINT_PAGE_PRESETS["receipt"]["width_mm"]
+
+    if not 25 <= width_mm <= 1000 or (height_mm is not None and not 25 <= height_mm <= 5000):
+        raise HTTPException(status_code=422, detail="Width must be 25-1000mm and height 25-5000mm")
+    if params.get("margin_mm") == "0":
+        margin_mm = 0
 
     margin_mm = min(margin_mm, max((width_mm / 2) - 1, 0))
     content_width_mm = max(width_mm - (margin_mm * 2), 10)
@@ -4054,12 +4061,42 @@ def puzzle_print_render_page(puzzle_id: str, request: Request, db: Session = Dep
     return render_puzzle_print_page(puzzle_id, request, db, None, show_toolbar=False)
 
 
+@app.get("/puzzles/{puzzle_id}/print.pdf")
+def puzzle_pdf_download(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    return puzzle_pdf_response(puzzle_id, request, db, user)
+
+
+@app.get("/api/puzzles/{puzzle_id}/print.pdf")
+def api_puzzle_pdf(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_api_user(request, db)
+    return puzzle_pdf_response(puzzle_id, request, db, user)
+
+
+def puzzle_pdf_response(puzzle_id: str, request: Request, db: Session, user: User) -> Response:
+    rendered = render_puzzle_print_page(puzzle_id, request, db, user, show_toolbar=False, pdf_mode=True)
+    layout = rendered.context["print_layout"]
+    try:
+        pdf = render_pdf(rendered.body.decode("utf-8"), layout)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "10"}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="puzzary-{puzzle_id}-{layout["page_size"]}.pdf"',
+        "Cache-Control": "private, no-store",
+    })
+
+
 def render_puzzle_print_page(
     puzzle_id: str,
     request: Request,
     db: Session,
     user: User | None,
     show_toolbar: bool,
+    pdf_mode: bool = False,
 ) -> HTMLResponse:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
@@ -4081,6 +4118,7 @@ def render_puzzle_print_page(
             "print_gimme_words": printable_gimme_words(puzzle),
             "show_print_toolbar": show_toolbar,
             "hide_app_chrome": not show_toolbar,
+            "print_pdf_css": (BASE_DIR / "static" / "styles.css").read_text(encoding="utf-8") if pdf_mode else None,
         },
     )
 
@@ -4918,6 +4956,7 @@ def get_puzzle_print_preview(puzzle_id: str, request: Request, db: Session = Dep
         url=puzzle_url(puzzle.id, db),
         print_url=puzzle_print_url(puzzle.id, db),
         render_url=puzzle_print_render_url(puzzle.id, db),
+        pdf_url=f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.pdf",
     )
 
 

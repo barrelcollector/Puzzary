@@ -65,6 +65,7 @@ class PuzzlePrintPreview(BaseModel):
     url: str
     print_url: str
     render_url: str
+    pdf_url: str = ""
 
 
 class PuzzleImportRequest(BaseModel):

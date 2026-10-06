@@ -22,7 +22,7 @@
     <form class="print-size-form" method="get">
       <label>
         Size
-        <select name="size">
+        <select name="size" onchange="if (this.value !== 'custom') { const f = this.form; f.width_mm.value = ''; f.height_mm.value = ''; f.margin_mm.value = ''; }">
           {% for preset in print_layout.page_size_presets %}
             <option value="{{ preset.value }}" {% if preset.value == print_layout.page_size %}selected{% endif %}>{{ preset.label }}</option>
           {% endfor %}
@@ -43,6 +43,7 @@
       <button type="submit" class="ghost-link">Apply</button>
     </form>
     <button type="button" class="button-link print-button" onclick="window.print()">Print</button>
+    <a class="ghost-link" href="/puzzles/{{ puzzle.id }}/print.pdf?{{ request.query_params }}">Download PDF</a>
   </section>
 {% endif %}
 

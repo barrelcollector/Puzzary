@@ -2382,7 +2382,7 @@ summary {
   }
 
   .page {
-    width: var(--print-content-width, auto);
+    width: auto;
     margin: 0;
   }
 

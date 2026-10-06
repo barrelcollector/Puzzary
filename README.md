@@ -359,6 +359,10 @@ Print support:
 - `PuzzleType.print_layout` describes how that module should be printed: CSS class, receipt/page sizing, visible instructions, review notes, and whether to include the online solve link.
 - `GET /puzzles/{id}/print` shows a browser print preview.
 - `GET /puzzles/{id}/print/render` shows the same layout without app chrome for external PDF/print renderers.
+- **Download PDF** on the print page uses bundled Chromium to render the same layout, including shading, gimmes, and embedded QR codes.
+- `GET /puzzles/{id}/print.pdf` downloads a PDF for signed-in users. `GET /api/puzzles/{id}/print.pdf` uses the account API token (Bearer authentication).
+- PDF and HTML print routes accept `size=receipt|zebra|4x6|letter|a4|custom`, `width_mm`, `height_mm`, and `margin_mm`. Receipt/Zebra PDFs calculate their length from the content; fixed page sizes paginate as needed. Widths support 25-1000mm; explicit heights support 25-5000mm. Match the physical paper size and use 100% scaling when printing the PDF.
+- `print-preview` includes `pdf_url` for clients that want to download the rendered PDF. This does not change printer feeding or cutter commands.
 - `GET /api/puzzles/{id}/print-preview` returns the module layout metadata and print/render URLs for Home Assistant, Daily Stripe, or other clients.
 - Printed layouts include a QR code by default. The QR points to `/q/{id}`, records a lightweight scan count, and redirects to the matching puzzle page.
 - If the user is not logged in after scanning, the login flow preserves the puzzle URL and returns them there after sign-in.
