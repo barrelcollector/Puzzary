@@ -11,7 +11,7 @@
 
   @media print {
     @page {
-      size: {{ print_layout.page_width_mm | default(80) }}mm{% if print_layout.page_height_mm %} {{ print_layout.page_height_mm }}mm{% endif %};
+      size: {% if print_layout.page_height_mm %}{{ print_layout.page_width_mm }}mm {{ print_layout.page_height_mm }}mm{% else %}auto{% endif %};
       margin: {{ print_layout.page_margin_mm | default(4) }}mm;
     }
   }
