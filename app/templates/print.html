@@ -148,7 +148,7 @@
     <section class="print-word-pyramid {% if print_payload.settings.print_layout | default('alternating') == 'pyramid_clues_below' %}clues-below{% endif %}">
       {% for row in print_payload.rows %}
         <div class="print-pyramid-row">
-          <div class="print-pyramid-cells" style="grid-template-columns: repeat({{ row.length }}, 30px)">
+          <div class="print-pyramid-cells" style="--pyramid-length: {{ row.length }}; grid-template-columns: repeat({{ row.length }}, minmax(0, 1fr))">
             {% for index in range(row.length) %}
               <span>{% if row.gimme and row.given %}{{ row.given[index] }}{% endif %}</span>
             {% endfor %}

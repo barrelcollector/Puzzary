@@ -2232,11 +2232,12 @@ legend {
 .print-pyramid-cells {
   display: grid;
   justify-content: center;
+  width: min(100%, calc(var(--pyramid-length) * 30px));
 }
 
 .print-pyramid-cells span {
-  width: 30px;
-  height: 30px;
+  width: 100%;
+  height: auto;
   border: 1px solid var(--ink);
   border-left-width: 0;
   font-size: 18px;
@@ -2393,6 +2394,15 @@ summary {
     padding: 0;
     border: 0;
     border-radius: 0;
+  }
+
+  .print-word-grid,
+  .print-crossword-grid,
+  .print-sudoku-grid,
+  .print-cross-equations-grid,
+  .print-pyramid-row,
+  .print-interaction {
+    break-inside: avoid;
   }
 
   .print-gimme-cell {
