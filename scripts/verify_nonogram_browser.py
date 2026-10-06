@@ -48,6 +48,8 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.goto(base+'/puzzles/'+puzzle_id)
     page.wait_for_selector('.nonogram-play')
+    page.locator('.nonogram-clear').click()
+    page.wait_for_timeout(700)
     cells = page.locator('.nonogram-play button.nonogram-cell:not([disabled])')
     first = cells.first
     first.click()
@@ -58,8 +60,17 @@ with sync_playwright() as p:
     assert progress.json()['answers'][first.get_attribute('data-key')] == '1'
     page.reload()
     assert page.locator('.nonogram-play button.nonogram-cell:not([disabled])').first.get_attribute('data-value') == '1'
+    page.locator('[data-mode="0"]').click()
+    first.click()
+    assert first.get_attribute('data-value') == '1'
+    page.wait_for_timeout(700)
+    page.reload()
+    assert first.get_attribute('data-value') == '1'
     page.locator('.nonogram-clear').click()
     page.locator('[data-mode="0"]').click()
+    first.click()
+    assert first.get_attribute('data-value') == '0'
+    page.locator('[data-mode="1"]').click()
     first.click()
     assert first.get_attribute('data-value') == '0'
     first.press('Delete')
@@ -109,6 +120,7 @@ with sync_playwright() as p:
     page.locator('[data-manual-puzzle-type]').select_option('nonogram')
     editor = page.locator('[data-level-editor="nonogram"]')
     editor.wait_for()
+    assert page.locator('[name="manual_auto_confirm_rows"]').input_value() == 'yes'
     editor.locator('[data-key="2,2"]').click()
     assert json.loads(page.locator('[name="manual_solution_grid"]').input_value())[2][2] == 1
     page.screenshot(path=str(output/'nonogram-editor.png'),full_page=True)
@@ -118,6 +130,7 @@ with sync_playwright() as p:
     assert json.loads(schema)['nonogram']['needs_word_bank'] is False
     assert page.locator('[name="gen_grid_size"]').count() == 1
     assert page.locator('[name="gen_symmetry"]').count() == 1
+    assert page.locator('[name="gen_auto_confirm_rows"]').input_value() == 'yes'
     for size in ('letter','a4','zebra'):
         pdf = context.request.get(base+f'/puzzles/{puzzle_id}/print.pdf?size={size}')
         assert pdf.ok, pdf.text()

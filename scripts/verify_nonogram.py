@@ -61,5 +61,11 @@ class NonogramChecks(unittest.TestCase):
             with self.assertRaises(ValueError): build_manual({'solution_grid':raw})
         with self.assertRaises(ValueError): generate('', 'easy', generation_options={'grid_size':100})
 
+    def test_row_confirmation_setting(self):
+        for raw, expected in (("yes",True),("no",False),(True,True),(False,False)):
+            p=generate('', 'easy', seed='setting',generation_options={'grid_size':5,'auto_confirm_rows':raw})
+            self.assertEqual(p.play_payload['settings']['auto_confirm_rows'],expected)
+        self.assertTrue(generate('','easy',seed='default').play_payload['settings']['auto_confirm_rows'])
+
 
 if __name__ == '__main__': unittest.main(verbosity=2)
