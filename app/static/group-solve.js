@@ -32,13 +32,22 @@
   const cursorNodes = new Map();
   const colors = ['#197667','#b33d56','#256ca6','#7951a8','#986013','#167e8c'];
   let pointer = null, pointerAt = 0, presenceMembers = [], presenceReceived = 0;
+  const liveMembers = new Map(), memberReceived = new Map();
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let presenceSocket, reconnectDelay = 1000, lastSent = '', sentAt = 0, frameAt = 0;
+  function receivePresence(members, replace = false) {
+    if (replace) { liveMembers.clear(); memberReceived.clear(); }
+    for (const member of members) { liveMembers.set(member.user_id,member); memberReceived.set(member.user_id,performance.now()); }
+    renderPresence([...liveMembers.values()]);
+  }
   function renderPresence(members) {
     presenceMembers = members; presenceReceived = performance.now();
     const bounds = board.getBoundingClientRect();
+    const cells = new Map([...board.querySelectorAll('[data-key]')].map(cell => [cell.dataset.key,cell]));
     const active = new Set();
     if (!snapshot?.closed && !document.hidden) for (const member of members) {
       const value = member.presence || {};
-      if (member.user_id === snapshot?.user_id || member.status !== 'active' || !member.online || !value.updated_at) continue;
+      if (member.user_id === snapshot?.user_id || member.status !== 'active' || !member.online || !value.updated_at || performance.now()-(memberReceived.get(member.user_id) || 0) > 4000) continue;
       active.add(member.user_id);
       let nodes = cursorNodes.get(member.user_id);
       if (!nodes) {
@@ -55,16 +64,20 @@
         for (const node of [cursor,ring,entry]) node.style.setProperty('--player-color',colors[member.user_id % colors.length]);
       }
       setText(nodes.label,member.name); setText(nodes.name,member.name);
-      const cells = [...board.querySelectorAll('[data-key]')];
       const point = value.pointer;
       nodes.cursor.hidden = !point;
       if (point) {
-        const anchor = cells.find(c => c.dataset.key === point.key)?.getBoundingClientRect() || bounds;
+        const anchor = cells.get(point.key)?.getBoundingClientRect() || bounds;
         const x = anchor.left + point.x * anchor.width, y = anchor.top + point.y * anchor.height;
-        nodes.cursor.style.transform = `translate(${x}px,${y}px)`;
+        if (!nodes.position || nodes.cursor.dataset.visible !== 'true' || reducedMotion.matches) {
+          nodes.position = {x,y}; nodes.cursor.style.transform = `translate(${x}px,${y}px)`;
+        }
+        nodes.target = {x,y};
+        nodes.cursor.dataset.visible = 'true';
         nodes.cursor.classList.toggle('label-left',x > innerWidth-160);
       }
-      const cell = cells.find(c => c.dataset.key === value.focus);
+      else nodes.cursor.dataset.visible = 'false';
+      const cell = cells.get(value.focus);
       nodes.ring.hidden = !cell;
       if (cell) {
         const rect = cell.getBoundingClientRect();
@@ -74,7 +87,7 @@
         nodes.caret.style.left = `${25 + Math.min(1,value.caret / length) * 50}%`;
         nodes.ring.classList.toggle('has-selection',value.selection_end > value.caret);
       }
-      const rects = (value.entry || []).map(key => cells.find(c => c.dataset.key === key)?.getBoundingClientRect()).filter(Boolean);
+      const rects = (value.entry || []).map(key => cells.get(key)?.getBoundingClientRect()).filter(Boolean);
       nodes.entry.hidden = !rects.length;
       if (rects.length) {
         const left = Math.min(...rects.map(r => r.left)), top = Math.min(...rects.map(r => r.top));
@@ -106,27 +119,80 @@
   });
   window.addEventListener('blur',() => { pointer = null; focus = ''; });
   document.addEventListener('visibilitychange',() => { if (document.hidden) { pointer = null; focus = ''; renderPresence([]); } });
-  async function presencePoll() {
-    if (!ready || snapshot?.closed) { renderPresence([]); return; }
+  function presenceBody() {
     const element = document.activeElement;
     if (performance.now()-pointerAt >= 4000) pointer = null;
     const focused = board.contains(element) ? element.closest('[data-key]') : null;
     if (document.hidden || !document.hasFocus()) focus = '';
     else if (focused) focus = focused.dataset.key;
-    const body = document.hidden || !document.hasFocus() ? {} : {
+    return document.hidden || !document.hasFocus() ? {} : {
       pointer,
       focus, caret: focused?.selectionStart ?? null, selection_end: focused?.selectionEnd ?? null,
       entry: adapter?.presence?.().entry || []
     };
+  }
+  function sendPresence(timestamp = performance.now()) {
+    if (presenceSocket?.readyState !== WebSocket.OPEN || !ready || snapshot?.closed || timestamp-sentAt < 33) return;
+    const encoded = JSON.stringify(presenceBody());
+    if (encoded === lastSent && timestamp-sentAt < 1000) return;
+    if (presenceSocket.bufferedAmount > 12000) return;
+    presenceSocket.send(encoded); sentAt = timestamp; lastSent = encoded;
+  }
+  function animatePresence(timestamp) {
+    const delta = Math.min(50,timestamp-(frameAt || timestamp)); frameAt = timestamp;
+    sendPresence(timestamp);
+    for (const nodes of cursorNodes.values()) {
+      if (nodes.cursor.hidden || !nodes.target) continue;
+      const amount = reducedMotion.matches ? 1 : 1-Math.exp(-delta/22);
+      nodes.position.x += (nodes.target.x-nodes.position.x)*amount;
+      nodes.position.y += (nodes.target.y-nodes.position.y)*amount;
+      nodes.cursor.style.transform = `translate(${nodes.position.x}px,${nodes.position.y}px)`;
+    }
+    requestAnimationFrame(animatePresence);
+  }
+  function connectPresence() {
+    if (!ready || snapshot?.closed) return;
+    const url = new URL(`/api/groups/${id}/presence/ws`,location.href);
+    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(url.href); presenceSocket = socket;
+    socket.addEventListener('open',() => {
+      reconnectDelay = 1000; lastSent = ''; sentAt = 0;
+      overlay.dataset.transport = 'websocket'; sendPresence();
+    });
+    socket.addEventListener('message',event => {
+      try {
+        const data = JSON.parse(event.data);
+        if (['ready','presence'].includes(data.type)) receivePresence(data.members,data.type === 'ready');
+      } catch (_) {}
+    });
+    socket.addEventListener('close',event => {
+      if (presenceSocket !== socket) return;
+      overlay.dataset.transport = 'polling';
+      if (event.code !== 1008 && ready && !snapshot?.closed) {
+        setTimeout(connectPresence,reconnectDelay); reconnectDelay = Math.min(15000,reconnectDelay*2);
+      }
+    });
+    socket.addEventListener('error',() => socket.close());
+  }
+  async function presencePoll() {
+    if (!ready || snapshot?.closed) { presenceSocket?.close(); renderPresence([]); return; }
+    if (presenceSocket?.readyState === WebSocket.OPEN) {
+      sendPresence(); repositionPresence(); setTimeout(presencePoll,1000); return;
+    }
+    overlay.dataset.transport = 'polling';
     try {
-      const data = await api(`/api/groups/${id}/presence`,body);
-      renderPresence(data.members);
+      const data = await api(`/api/groups/${id}/presence`,presenceBody());
+      if (presenceSocket?.readyState !== WebSocket.OPEN) receivePresence(data.members,true);
     } catch (error) {
-      if ([403,409].includes(error.status)) { renderPresence([]); return; }
+      if ([401,403,409].includes(error.status)) { renderPresence([]); return; }
       if (performance.now()-presenceReceived > 4000) renderPresence([]);
     }
     setTimeout(presencePoll,document.hidden ? 3000 : pointer ? 250 : 1000);
   }
+  window.addEventListener('pagehide',() => { ready = false; presenceSocket?.close(); });
+  window.addEventListener('pageshow',event => {
+    if (event.persisted) { ready = true; connectPresence(); presencePoll(); poll(); }
+  });
   function setText(element, value) { if (element.textContent !== value) element.textContent = value; }
   function message(value) { setText(panel.querySelector('#group-message'),value); }
   const inviteUrl = new URL(`/puzzles/${panel.dataset.puzzle}`,location.origin);
@@ -154,6 +220,7 @@
   function show(data, preserve = {}) {
     if (snapshot && data.revision < snapshot.revision) return;
     snapshot = data;
+    panel.dataset.revision = data.revision;
     baseline = {...data.state.answers};
     const merged = {...baseline};
     for (const [k,v] of Object.entries(preserve)) { if (v) merged[k] = v; else delete merged[k]; }
@@ -284,6 +351,7 @@
       const joined = await api('/api/groups/join',{code:id});
       if (joined.pending) { status.textContent = 'Waiting for host approval.'; setTimeout(connect,2000); return; }
       show(joined); ready = true;
+      connectPresence(); requestAnimationFrame(animatePresence);
       presencePoll();
       const form = panel.querySelector('#group-settings');
       form.elements.participant_limit.value = joined.participant_limit;

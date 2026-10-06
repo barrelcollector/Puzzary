@@ -9,6 +9,8 @@ from threading import Barrier
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 import uuid
+import time
+from websockets.sync.client import connect as ws_connect
 
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
@@ -45,6 +47,20 @@ try:
     assert status==200,data
     gid=data['id']; endpoint='/api/groups/'+gid
     assert request(1,'/api/groups/join',{'code':data['code']})[0]==200
+    origins=[base]
+    if os.environ.get('PUZZARY_QA_PUBLIC_ORIGIN'): origins.append(os.environ['PUZZARY_QA_PUBLIC_ORIGIN'].rstrip('/'))
+    for origin in origins:
+        ws_url=origin.replace('https:', 'wss:').replace('http:', 'ws:')+endpoint+'/presence/ws'
+        with ws_connect(ws_url,origin=origin,additional_headers={'Cookie':'session='+cookies[0]},proxy=None) as ws1, ws_connect(ws_url,origin=origin,additional_headers={'Cookie':'session='+cookies[1]},proxy=None) as ws2:
+            assert json.loads(ws1.recv(timeout=5))['type']=='ready'
+            assert json.loads(ws2.recv(timeout=5))['type']=='ready'
+            delays=[]
+            for i in range(8):
+                started=time.monotonic(); ws2.send(json.dumps({'pointer':{'key':keys[0],'x':i/8,'y':.5}}))
+                message=json.loads(ws1.recv(timeout=5)); assert message['members'][0]['presence']['pointer']['x']==i/8
+                delays.append(time.monotonic()-started); time.sleep(.04)
+            print(f'Live cursor relay ({origin}): max {max(delays)*1000:.0f} ms')
+            assert max(delays)<1,delays
     def pair(changes):
         barrier=Barrier(2); revision=request(0,endpoint)[1]['revision']
         def edit(index):
@@ -84,6 +100,7 @@ try:
         assert pages[0].evaluate("window.liveMemberButton===document.querySelector('#group-members button')")
         pages[0].evaluate('window.liveBoardObserver.disconnect()')
         for page in pages: page.evaluate('document.hasFocus = () => true')
+        for page in pages: page.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
         remote=pages[1].locator(f'.takuzu-play [data-key="{keys[0]}"]')
         remote.focus(); remote.hover()
         pages[0].wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)',arg=ids[1])

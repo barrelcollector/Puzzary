@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+from websockets.sync.client import connect as ws_connect
+from websockets.exceptions import InvalidStatus, ConnectionClosed
 
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
@@ -79,6 +81,36 @@ try:
             member=db.query(GroupMember).filter_by(group_id=gid,user_id=ids[1]).one()
             member.presence={**member.presence,'updated_at':time.time()-5}; db.commit()
         assert not next(m for m in host.request.get(endpoint).json()['members'] if m['user_id']==ids[1])['presence']
+        ws_url=endpoint.replace('http:', 'ws:')+'/presence/ws'
+        for user_id, origin in [(None,base),(ids[2],base),(ids[0],'https://untrusted.example')]:
+            try:
+                with ws_connect(ws_url,origin=origin,additional_headers={'Cookie':'session='+cookie(user_id)} if user_id else {},proxy=None):
+                    raise AssertionError('Unauthorized socket accepted')
+            except InvalidStatus as error:
+                assert error.response.status_code==403
+        with ws_connect(ws_url,origin=base,additional_headers={'Cookie':'session='+cookie(ids[0])},proxy=None) as ws1, ws_connect(ws_url,origin=base,additional_headers={'Cookie':'session='+cookie(ids[1])},proxy=None) as ws2:
+            assert json.loads(ws1.recv(timeout=2))['type']=='ready'
+            assert json.loads(ws2.recv(timeout=2))['type']=='ready'
+            unchanged=host.request.get(endpoint).json()
+            timings=[]
+            for i in range(12):
+                started=time.monotonic()
+                ws2.send(json.dumps({'pointer':{'key':'0,0','x':i/12,'y':.5}}))
+                update=json.loads(ws1.recv(timeout=2))
+                assert update['type']=='presence'
+                assert update['members'][0]['presence']['pointer']['x']==i/12
+                timings.append(time.monotonic()-started); time.sleep(.034)
+            assert max(timings)<.2,timings
+            assert host.request.get(endpoint).json()['revision']==unchanged['revision']
+            # An HTTP-only player's position is also pushed to socket peers.
+            assert player.request.post(endpoint+'/presence',data={'pointer':{'x':.9,'y':.8}}).ok
+            assert json.loads(ws1.recv(timeout=2))['members'][0]['presence']['pointer']['x']==.9
+            ws2.send('{"pointer":{"x":2,"y":0}}')
+            try:
+                ws2.recv(timeout=2); raise AssertionError('Invalid cursor accepted')
+            except ConnectionClosed as error:
+                assert error.code==1008
+        print(f'WebSocket relay latency: max {max(timings)*1000:.0f} ms; auth/origin/validation/mixed HTTP checks passed.')
         assert outsider.request.post(endpoint+'/close',data={}).status==403
         assert player.request.post(endpoint+'/settings',data={}).status==403
         token_context=browser.new_context(extra_http_headers={'Authorization':'Bearer test-token-not-a-real-secret'})
@@ -114,12 +146,30 @@ try:
         assert b.locator('#group-host').is_hidden()
         # Remote pointer/focus overlays never become interactive board content.
         for page in [a,b]: page.evaluate('document.hasFocus = () => true')
+        for page in [a,b]: page.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
         remote=b.locator(f'.takuzu-play [data-key="{k2}"]')
         remote.focus(); remote.hover()
         a.wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)',arg=ids[1])
         a.wait_for_function('(id)=>!!document.querySelector(`.group-player-focus[data-user="${id}"]:not([hidden])`)',arg=ids[1])
         assert a.locator('.group-player-pointer span').inner_text()=='QA player'
         assert a.locator('.group-presence-layer').evaluate('(e)=>getComputedStyle(e).pointerEvents')=='none'
+        a.evaluate("""() => {
+          window.cursorFrames=[]; window.captureCursor=true;
+          function capture(t) {
+            const cursor=document.querySelector('.group-player-pointer:not([hidden])');
+            if(cursor) window.cursorFrames.push({t,x:new DOMMatrixReadOnly(getComputedStyle(cursor).transform).m41});
+            if(window.captureCursor) requestAnimationFrame(capture);
+          }
+          requestAnimationFrame(capture);
+        }""")
+        gesture=remote.bounding_box()
+        for step in range(12):
+            b.mouse.move(gesture['x']+gesture['width']*(.2+.6*(step%6)/5),gesture['y']+gesture['height']*.5)
+            b.wait_for_timeout(35)
+        a.wait_for_timeout(120); a.evaluate('window.captureCursor=false')
+        frames=a.evaluate('window.cursorFrames')
+        assert len({round(f['x'],1) for f in frames})>=15,frames
+        assert abs(frames[-1]['x']-(gesture['x']+gesture['width']*.8))<3
         bounds=remote.bounding_box()
         ring=a.locator(f'.group-player-focus[data-user="{ids[1]}"]').bounding_box()
         assert abs(bounds['width']-ring['width'])<2
@@ -225,7 +275,13 @@ try:
         assert player.request.post(endpoint+'/members',data={'user_id':ids[3],'action':'approve'}).status==403
         assert host.request.post(endpoint+'/members',data={'user_id':ids[3],'action':'approve'}).ok
         assert pending.request.get(endpoint).ok
-        assert host.request.post(endpoint+'/members',data={'user_id':ids[3],'action':'remove'}).ok
+        with ws_connect(ws_url,origin=base,additional_headers={'Cookie':'session='+cookie(ids[3])},proxy=None) as revoked:
+            assert json.loads(revoked.recv(timeout=2))['type']=='ready'
+            assert host.request.post(endpoint+'/members',data={'user_id':ids[3],'action':'remove'}).ok
+            try:
+                while True: revoked.recv(timeout=4)
+            except ConnectionClosed as error:
+                assert error.code==1008
         assert pending.request.get(endpoint).status==403
         assert pending.request.post(base+'/api/groups/join',data={'code':code}).status==403
         latest=host.request.get(endpoint).json()
@@ -279,6 +335,9 @@ try:
                 page1.locator('.reveal-entry:not([disabled])').first.click(); page1.wait_for_timeout(500)
                 assert host.request.get(endpoint2).json()['state']['hints_used']>=1
             page1.locator('#group-check').click(); page1.wait_for_timeout(400)
+            revision=host.request.get(endpoint2).json()['revision']
+            for page in [page1,page2]:
+                page.wait_for_function('(revision)=>Number(document.querySelector("#group-solve").dataset.revision)>=revision',arg=revision)
             if kind!='nonogram':
                 with SessionLocal() as db:
                     item=db.get(Puzzle,'qa-'+kind)
@@ -288,7 +347,10 @@ try:
                 if changed.input_value()!=expected:
                     changed.fill(expected); changed.dispatch_event('input')
                 page1.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key)
-                page2.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key)
+                try:
+                    page2.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key,timeout=5000)
+                except Exception as error:
+                    raise AssertionError((kind,key,expected,changed.input_value(),host.request.get(endpoint2).json()['state'],page2.locator('#group-status').inner_text())) from error
                 wrong='Z' if kind=='crossword' else '1' if expected!='1' else '2'
                 changed.fill(wrong); changed.dispatch_event('input')
                 try:
@@ -300,6 +362,23 @@ try:
             page2.wait_for_function("document.querySelector('#group-status').textContent==='Group puzzle complete.'")
             assert host.request.get(endpoint2).json()['completed']
             page1.close(); page2.close()
+        # Proxy-blocked WebSockets fall back and automatically upgrade after recovery.
+        fallback_info=host.request.post(base+'/api/puzzles/group-qa/groups',data={}).json()
+        normal=player.new_page(); fallback=host.new_page()
+        fallback.add_init_script("""window.NativeWebSocket=window.WebSocket;
+          window.WebSocket=class {static OPEN=1; readyState=3; bufferedAmount=0;
+            addEventListener(type,callback){if(type==='close')setTimeout(()=>callback({code:1006}),0)} close(){} };""")
+        for page in [normal,fallback]:
+            page.on('pageerror',lambda error:errors.append(str(error))); page.goto(base+fallback_info['url'])
+            page.wait_for_function("!document.querySelector('.puzzle-layout > .panel').inert")
+            page.evaluate('document.hasFocus=()=>true')
+        normal.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
+        fallback.locator(f'.takuzu-play [data-key="{k1}"]').hover()
+        normal.wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)',arg=ids[0])
+        assert fallback.locator('.group-presence-layer').get_attribute('data-transport')=='polling'
+        fallback.evaluate('() => {window.WebSocket=window.NativeWebSocket;}')
+        fallback.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"',timeout=6000)
+        normal.close(); fallback.close()
         assert not errors,errors
         browser.close()
     print('Group API/auth/conflict/idempotency/approval/limits/removal/persistence/isolation and two-browser desktop/mobile tests passed.')

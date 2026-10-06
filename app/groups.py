@@ -4,7 +4,7 @@ from typing import Literal
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
@@ -15,6 +15,12 @@ from app.puzzles import get_puzzle_type
 
 router = APIRouter()
 SERVER_LIMIT = 50
+
+
+@router.websocket('/api/groups/{group_id}/presence/ws')
+async def presence_socket(socket: WebSocket, group_id: str):
+    from app.group_presence import stream_presence
+    await stream_presence(socket, group_id)
 
 
 def core():
@@ -219,7 +225,10 @@ def update_presence(group_id: str, payload: Presence, request: Request, db: Sess
     member.seen_at = now()
     member.presence = {**payload.model_dump(mode='json'), 'updated_at': now().timestamp()}
     db.commit()
-    return {'members': presence_members(db, group, user)}
+    members = presence_members(db, group, user)
+    from app.group_presence import publish_from_http
+    publish_from_http(group_id, next(m for m in members if m['user_id'] == user.id))
+    return {'members': members}
 
 
 @router.post('/api/groups/{group_id}/members')
