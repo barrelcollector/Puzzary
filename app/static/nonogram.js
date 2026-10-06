@@ -6,19 +6,54 @@
   const solution = JSON.parse(root.dataset.solution);
   const saved = JSON.parse(root.dataset.answers || '{}');
   const autoConfirmRows = root.dataset.autoConfirmRows === 'true';
+  const autoConfirmColumns = root.dataset.autoConfirmColumns === 'true';
   const rows = [...root.querySelectorAll('tbody tr')];
   const rowCells = rows.map(row => [...row.querySelectorAll('button.nonogram-cell')]);
+  const columns = [...root.querySelectorAll('thead th[scope="col"]')];
+  let audio, completed = false;
   let mode = '1', brush = '', protectedValue = null, dragging = false, timer, saving = false, dirty = false;
-  function confirmRows() {
-    rows.forEach((row, y) => {
-      const complete = autoConfirmRows && rowCells[y].every((cell, x) =>
-        (cell.dataset.value || '0') === String(solution[y][x])) &&
-        (solution[y].some(v => v === 1) || rowCells[y].every(cell => cell.dataset.value === '0'));
-      const clue = row.querySelector('th');
+  function chime() {
+    try {
+      if (localStorage.getItem('puzzaryCelebrationMuted') === 'true') return;
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (!Context) return;
+      audio ||= new Context();
+      audio.resume().then(() => {
+        const now = audio.currentTime;
+        [659.25, 783.99].forEach((frequency, index) => {
+          const oscillator = audio.createOscillator(), gain = audio.createGain();
+          const start = now + index * 0.09;
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0.0001, start);
+          gain.gain.exponentialRampToValueAtTime(0.025, start + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.15);
+          oscillator.connect(gain).connect(audio.destination);
+          oscillator.start(start); oscillator.stop(start + 0.16);
+        });
+      }).catch(() => {});
+    } catch (_) { /* Audio is optional when blocked by the browser. */ }
+  }
+  function confirmLines(notify = true) {
+    let newlyConfirmed = false;
+    function confirm(clue, line, expected, enabled, label) {
+      const complete = enabled && line.every((cell, i) =>
+        (cell.dataset.value || '0') === String(expected[i])) &&
+        (expected.some(v => v === 1) || line.every(cell => cell.dataset.value === '0'));
+      newlyConfirmed ||= complete && !clue.classList.contains('confirmed');
       clue.classList.toggle('confirmed', complete);
-      clue.setAttribute('aria-label', `Row ${y + 1} clues${complete ? ', confirmed' : ''}`);
-      clue.title = complete ? 'Row confirmed' : '';
-    });
+      clue.setAttribute('aria-label', `${label} clues${complete ? ', confirmed' : ''}`);
+      clue.title = complete ? `${label} confirmed` : '';
+    }
+    rows.forEach((row, y) => confirm(row.querySelector('th'), rowCells[y], solution[y], autoConfirmRows, `Row ${y + 1}`));
+    columns.forEach((clue, x) => confirm(clue, rowCells.map(row => row[x]), solution.map(row => row[x]), autoConfirmColumns, `Column ${x + 1}`));
+    const solved = rowCells.every((row, y) => row.every((cell, x) =>
+      (cell.dataset.value || '0') === String(solution[y][x])));
+    if (notify && solved && !completed) {
+      status.textContent = 'Nonogram complete.';
+      window.PuzzaryCelebrate?.complete();
+    } else if (notify && newlyConfirmed) chime();
+    if (!solved && completed && status.textContent === 'Nonogram complete.') status.textContent = '';
+    completed = solved;
   }
   function paint(cell, value, preserveValue = null) {
     if (!cell || cell.disabled) return;
@@ -47,9 +82,10 @@
     }
     saving = false;
   }
-  function queueSave() { confirmRows(); clearTimeout(timer); timer = setTimeout(save, 200); }
+  function queueSave(notify = true) { confirmLines(notify); clearTimeout(timer); timer = setTimeout(save, 200); }
   cells.forEach(c => { if (!c.disabled && ['0','1'].includes(saved[c.dataset.key])) paint(c, saved[c.dataset.key]); });
-  confirmRows();
+  confirmLines(false);
+  if (completed) status.textContent = 'Nonogram complete.';
   root.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
     mode = button.dataset.mode;
     root.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
@@ -118,6 +154,6 @@
       paint(cell, String(solution[y][x]));
     }
     status.textContent = 'Solution revealed.';
-    queueSave();
+    queueSave(false);
   });
 })();

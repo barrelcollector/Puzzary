@@ -88,6 +88,21 @@ with sync_playwright() as p:
     page.locator('.nonogram-check').click()
     assert 'incorrect' in page.locator('.nonogram-status').inner_text()
     page.screenshot(path=str(output/'nonogram-desktop.png'),full_page=True)
+    page.locator('.nonogram-clear').click()
+    for y, row_values in enumerate(grid):
+        for x, value in enumerate(row_values):
+            c = page.locator(f'.nonogram-play [data-key="{x},{y}"]')
+            if value == 1 and c.is_enabled():
+                c.click()
+    assert page.locator('.nonogram-status').inner_text() == 'Nonogram complete.'
+    assert page.locator('#completion-celebration').is_visible()
+    assert page.locator('.nonogram-play thead th.confirmed').count() == 10
+    page.wait_for_timeout(700)
+    automatic = context.request.get(base+f'/api/puzzles/{puzzle_id}/progress').json()
+    assert automatic['found_count'] == automatic['expected_count'] == 100
+    page.reload()
+    assert page.locator('.nonogram-status').inner_text() == 'Nonogram complete.'
+    assert not page.locator('#completion-celebration').is_visible()
     page.locator('summary').filter(has_text='Hints').click()
     page.locator('#reveal-solution').click()
     page.wait_for_timeout(700)
@@ -121,6 +136,7 @@ with sync_playwright() as p:
     editor = page.locator('[data-level-editor="nonogram"]')
     editor.wait_for()
     assert page.locator('[name="manual_auto_confirm_rows"]').input_value() == 'yes'
+    assert page.locator('[name="manual_auto_confirm_columns"]').input_value() == 'yes'
     editor.locator('[data-key="2,2"]').click()
     assert json.loads(page.locator('[name="manual_solution_grid"]').input_value())[2][2] == 1
     page.screenshot(path=str(output/'nonogram-editor.png'),full_page=True)
@@ -131,6 +147,7 @@ with sync_playwright() as p:
     assert page.locator('[name="gen_grid_size"]').count() == 1
     assert page.locator('[name="gen_symmetry"]').count() == 1
     assert page.locator('[name="gen_auto_confirm_rows"]').input_value() == 'yes'
+    assert page.locator('[name="gen_auto_confirm_columns"]').input_value() == 'yes'
     for size in ('letter','a4','zebra'):
         pdf = context.request.get(base+f'/puzzles/{puzzle_id}/print.pdf?size={size}')
         assert pdf.ok, pdf.text()

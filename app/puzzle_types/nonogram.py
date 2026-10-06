@@ -136,7 +136,8 @@ def make_puzzle(grid, difficulty, seed, options):
     payload = {"kind": "nonogram", "size": size, "row_clues": [runs(row) for row in grid],
                "column_clues": [runs([grid[y][x] for y in range(size)]) for x in range(size)],
                "givens": givens, "settings": {"grid_size": size, "uniqueness_verified": True,
-                                              "auto_confirm_rows": auto_confirm}}
+                                              "auto_confirm_rows": auto_confirm,
+                                              "auto_confirm_columns": str(options.get("auto_confirm_columns", "yes")).lower() in {"yes", "true", "1", "on"}}}
     return GeneratedPuzzle(
         title=f"{size}x{size} Nonogram", prompt="Fill cells to match the numbered runs in each row and column. Separate runs with at least one empty cell.",
         print_payload=payload, play_payload=payload,
@@ -196,11 +197,15 @@ register_puzzle_type(PuzzleType(
                         help_text="Extra starter cells may be added to guarantee one solution."),
         GenerationField("auto_confirm_rows", "Auto-confirm completed rows", "select", "yes", options=(
             {"value": "yes", "label": "On"}, {"value": "no", "label": "Off"})),
+        GenerationField("auto_confirm_columns", "Auto-confirm completed columns", "select", "yes", options=(
+            {"value": "yes", "label": "On"}, {"value": "no", "label": "Off"})),
     ),
     manual_builder=build_manual,
     manual_editor_script="nonogram-editor.js?v=1",
     manual_editor_fields=(GenerationField("solution_grid", "Picture grid", "textarea", required=True,
                                          help_text="JSON rows: 1 for filled, 0 for empty. Square grids from 5 to 15."),
                           GenerationField("auto_confirm_rows", "Auto-confirm completed rows", "select", "yes", options=(
+                              {"value": "yes", "label": "On"}, {"value": "no", "label": "Off"})),
+                          GenerationField("auto_confirm_columns", "Auto-confirm completed columns", "select", "yes", options=(
                               {"value": "yes", "label": "On"}, {"value": "no", "label": "Off"}))),
 ))
