@@ -17,6 +17,7 @@ def main():
     output = Path("/tmp/puzzary-pdf-qa")
     output.mkdir(exist_ok=True)
     results = []
+    jobs = []
     with SessionLocal() as db, sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
@@ -46,13 +47,16 @@ def main():
                     page.close()
                     assert not checks["overflow"], (kind, size, checks)
                     assert checks["images"], (kind, size, "QR image failed")
-                    pdf = render_pdf(html, layout)
-                    assert pdf.startswith(b"%PDF-"), (kind, size)
                     filename = f"{kind}-{size}.pdf"
-                    (output / filename).write_bytes(pdf)
-                    results.append({"file": filename, "puzzle": puzzle.id, "bytes": len(pdf), **checks})
+                    jobs.append((filename, html, layout))
+                    results.append({"file": filename, "puzzle": puzzle.id, **checks})
         finally:
             browser.close()
+    for result, (filename, html, layout) in zip(results, jobs):
+        pdf = render_pdf(html, layout)
+        assert pdf.startswith(b"%PDF-"), filename
+        (output / filename).write_bytes(pdf)
+        result["bytes"] = len(pdf)
     print(json.dumps(results, indent=2))
 
 

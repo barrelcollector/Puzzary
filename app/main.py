@@ -26,6 +26,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import TemplateNotFound
+from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -4085,6 +4086,8 @@ def puzzle_pdf_response(puzzle_id: str, request: Request, db: Session, user: Use
         raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "10"}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PlaywrightError as exc:
+        raise HTTPException(status_code=503, detail="PDF rendering failed. Please retry.") from exc
     return Response(pdf, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="puzzary-{puzzle_id}-{layout["page_size"]}.pdf"',
         "Cache-Control": "private, no-store",
