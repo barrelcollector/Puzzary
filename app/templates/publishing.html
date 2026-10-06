@@ -1,0 +1,71 @@
+<section class="puzzle-head">
+  <h1>{% if selected_issue %}{{ selected_issue.title }}{% else %}Publishing{% endif %}</h1>
+  <div class="action-row">
+    {% if selected_issue or request.query_params.get('new') %}<a class="ghost-link" href="/admin/publishing">All issues</a>{% endif %}
+    <a class="button-link" href="/admin/publishing?new=1">New issue</a>
+  </div>
+</section>
+
+{% if selected_issue and selected_issue.published_at %}
+  <section class="issue-summary">
+    <p class="muted">Published {{ selected_issue.published_at.strftime('%Y-%m-%d %H:%M') }}{% if selected_issue.archived_at %} / Archived{% endif %}</p>
+    {% if selected_issue.description %}<p>{{ selected_issue.description }}</p>{% endif %}
+    <ol class="issue-published-modules">
+      {% for module in selected_issue.snapshot.modules %}
+        <li><strong>{{ module.title }}</strong> <small>{{ module.get('puzzle_type', 'text') }}</small></li>
+      {% endfor %}
+    </ol>
+    <div class="action-row">
+      <a class="button-link" href="/issues/{{ selected_issue.id }}">Preview / PDF</a>
+      <form method="post" action="/admin/publishing/{{ selected_issue.id }}/duplicate"><button class="ghost-button">Duplicate as draft</button></form>
+      <form method="post" action="/admin/publishing/{{ selected_issue.id }}/{{ 'restore' if selected_issue.archived_at else 'archive' }}"><button class="ghost-button">{{ 'Restore' if selected_issue.archived_at else 'Archive' }}</button></form>
+    </div>
+  </section>
+{% elif selected_issue or request.query_params.get('new') %}
+  <form class="issue-editor" id="issue-editor" action="/admin/publishing/save" method="post">
+    <input type="hidden" name="issue_id" value="{{ selected_issue.id if selected_issue else '' }}">
+    <input type="hidden" name="modules_json" id="issue-modules-json" value="[]">
+    <label>Issue title<input name="title" required maxlength="160" value="{{ selected_issue.title if selected_issue else '' }}"></label>
+    <label>Description<textarea name="description" rows="2" maxlength="2000">{{ selected_issue.description if selected_issue else '' }}</textarea></label>
+    <div class="issue-compose-layout">
+      <section class="issue-picker">
+        <h2>Puzzle library</h2>
+        <input type="search" id="issue-puzzle-search" aria-label="Search puzzles" placeholder="Search puzzles">
+        <select id="issue-puzzle-picker" multiple size="9" aria-label="Select puzzles">
+          {% for puzzle in publishing_puzzles %}
+            <option value="{{ puzzle.id }}">{{ puzzle.title }} / {{ puzzle.puzzle_type }}{% if puzzle.archived %} / archived{% endif %}</option>
+          {% endfor %}
+        </select>
+        <div class="action-row">
+          <button type="button" id="issue-add-puzzle" class="ghost-button">+ Add puzzle</button>
+          <button type="button" id="issue-add-text" class="ghost-button">+ Text section</button>
+        </div>
+      </section>
+      <section class="issue-sections">
+        <div class="puzzle-head"><h2>Sections</h2><small id="issue-section-count">0 / 20</small></div>
+        <div id="issue-sections"></div>
+        <p id="issue-section-empty" class="muted">No sections added.</p>
+      </section>
+    </div>
+    <div class="action-row">
+      <button type="submit" name="action" value="save">Save draft</button>
+      <button type="submit" name="action" value="preview" class="ghost-button">Save &amp; preview</button>
+      <button type="submit" name="action" value="publish" class="ghost-button" {% if selected_issue and selected_issue.archived_at %}disabled{% endif %}>Publish issue</button>
+      <span id="issue-save-state" class="muted" aria-live="polite"></span>
+    </div>
+  </form>
+  <script id="issue-initial-modules" type="application/json">{{ (selected_issue.modules if selected_issue else []) | tojson }}</script>
+  <script id="issue-puzzle-data" type="application/json">{{ publishing_puzzles | tojson }}</script>
+  {% if selected_issue %}
+    <form method="post" action="/admin/publishing/{{ selected_issue.id }}/{{ 'restore' if selected_issue.archived_at else 'archive' }}" class="issue-archive-form"><button class="ghost-button">{{ 'Restore draft' if selected_issue.archived_at else 'Archive draft' }}</button></form>
+  {% endif %}
+{% else %}
+  <table class="issue-table">
+    <thead><tr><th>Issue</th><th>Status</th><th>Sections</th><th>Created</th></tr></thead>
+    <tbody>
+      {% for issue in issues %}
+        <tr><td><a href="/admin/publishing/{{ issue.id }}">{{ issue.title }}</a></td><td>{{ 'Published' if issue.published_at else 'Draft' }}{% if issue.archived_at %} / Archived{% endif %}</td><td>{{ issue.modules | length }}</td><td>{{ issue.created_at.strftime('%Y-%m-%d') }}</td></tr>
+      {% else %}<tr><td colspan="4" class="muted">No issues yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+{% endif %}

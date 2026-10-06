@@ -26,7 +26,7 @@ def render_pdf(html: str, layout: dict) -> bytes:
                 page.wait_for_function("document.fonts.status === 'loaded'", timeout=10000)
                 height_mm = layout["page_height_mm"]
                 if height_mm is None:
-                    height_px = page.locator(".print-sheet").evaluate(
+                    height_px = page.locator(".print-sheet").first.evaluate(
                         "el => Math.max(el.scrollHeight, el.getBoundingClientRect().height)"
                     )
                     height_mm = height_px / PX_PER_MM + 2 * layout["page_margin_mm"] + 1

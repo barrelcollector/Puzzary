@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ issue.title }} - Puzzary{% endblock %}
+{% block content %}
+<style>
+  .bundle-sheet {
+    --print-content-width: {{ print_layout.content_width_mm }}mm;
+    max-width: 900px;
+  }
+  .bundle-sheet > .print-sheet {
+    width: 100%; max-width: 100%; border: 0; padding: 0; margin: 28px 0 0;
+    border-radius: 0; box-shadow: none;
+  }
+  .bundle-sheet > .print-sheet + .print-sheet { padding-top: 20px; border-top: 1px solid #d7d5cc; }
+  .issue-text-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media print {
+    @page { size: {% if print_layout.page_height_mm %}{{ print_layout.page_width_mm }}mm {{ print_layout.page_height_mm }}mm{% else %}auto{% endif %}; margin: {{ print_layout.page_margin_mm }}mm; }
+    .bundle-sheet { width: var(--print-content-width); max-width: none; }
+    .bundle-sheet > .print-sheet { margin: 16px 0 0; }
+    {% if print_layout.page_height_mm %}
+      .bundle-sheet > .print-sheet + .print-sheet { break-before: page; border-top: 0; padding-top: 0; }
+    {% endif %}
+  }
+</style>
+{% if show_print_toolbar %}
+  <section class="print-toolbar">
+    <a class="ghost-link" href="{{ '/admin/publishing/' ~ issue.id if current_user.is_admin else '/library' }}">Back</a>
+    <form method="get" class="print-size-form">
+      <label>Size<select name="size" onchange="if(this.value !== 'custom'){this.form.width_mm.value='';this.form.height_mm.value='';this.form.margin_mm.value='';}">
+        {% for preset in print_layout.page_size_presets %}<option value="{{ preset.value }}" {% if preset.value == print_layout.page_size %}selected{% endif %}>{{ preset.label }}</option>{% endfor %}
+      </select></label>
+      <label>Width mm<input name="width_mm" type="number" min="25" max="1000" step="any" value="{{ print_layout.page_width_mm }}"></label>
+      <label>Height mm<input name="height_mm" type="number" min="25" max="5000" step="any" value="{{ print_layout.page_height_mm or '' }}" placeholder="auto"></label>
+      <label>Margin mm<input name="margin_mm" type="number" min="0" step="any" value="{{ print_layout.page_margin_mm }}"></label>
+      <button class="ghost-button">Apply</button>
+    </form>
+    <a class="button-link" href="/issues/{{ issue.id }}/print.pdf?{{ request.query_params }}">Download PDF</a>
+  </section>
+{% endif %}
+<article class="print-sheet bundle-sheet">
+  <header class="print-header"><h1>{{ issue.title }}</h1><p>{{ 'Published' if issue.published_at else 'Draft' }} / {{ snapshot.modules | length }} sections</p></header>
+  {% if issue.description %}<p class="issue-description">{{ issue.description }}</p>{% endif %}
+  {% for module in snapshot.modules %}{{ module.html | safe }}{% endfor %}
+</article>
+{% endblock %}

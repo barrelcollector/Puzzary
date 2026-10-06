@@ -97,6 +97,21 @@ class Puzzle(Base):
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
 
 
+class PublishedIssue(Base):
+    __tablename__ = "published_issues"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    modules: Mapped[list] = mapped_column(JSON, default=list)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class PuzzleHint(Base):
     __tablename__ = "puzzle_hints"
 

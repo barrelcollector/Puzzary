@@ -47,6 +47,7 @@ from app.models import (
     PuzzleHint,
     PuzzlePhoto,
     PuzzleProgress,
+    PublishedIssue,
     PuzzleTag,
     User,
     WordBank,
@@ -88,6 +89,8 @@ app = FastAPI(title="Puzzary", version="0.1.0")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+from app.publishing import router as publishing_router
+app.include_router(publishing_router)
 
 DICTIONARY_SYNC_CHECK_SECONDS = 15 * 60
 
@@ -2749,6 +2752,16 @@ def admin_context(
         "request": request,
         "current_user": user,
         "section": section,
+        "issues": db.scalars(select(PublishedIssue).order_by(desc(PublishedIssue.created_at))).all() if section == "publishing" else [],
+        "selected_issue": None,
+        "publishing_puzzles": [
+            {"id": puzzle.id, "title": puzzle.title, "puzzle_type": puzzle.puzzle_type,
+             "archived": puzzle.archived_at is not None}
+            for puzzle in puzzles
+            if not (puzzle.puzzle_metadata or {}).get("draft")
+            and (plugin := get_puzzle_type(puzzle.puzzle_type)) is not None
+            and plugin.supports_print and not plugin.digital_only
+        ] if section == "publishing" else [],
         "app_settings": {
             "public_base_url": app_base_url(db),
             "default_base_url": DEFAULT_APP_BASE_URL,

@@ -374,6 +374,39 @@ If a registered type has no web template, Puzzary falls back to the puzzle promp
 
 Puzzle modules can also support gimmes: pre-solved cells, words, rows, or regions included in the generated payload. A module that supports them should set `supports_gimmes=True`, describe its `gimme_modes`, persist the gimme data in payloads, render it distinctly, and count it as solved in progress/checking logic. The current examples are pre-found Word Search words, pre-filled Crossword entries, and starting Word Pyramid rows.
 
+## Publishing And Issues
+
+Open **Admin -> Publishing** to create an issue. Add printable puzzles from the library and optional text sections (for notes, quotes, or other curated content), reorder them, and save a draft. **Save & preview** opens the combined print layout. **Publish issue** saves immutable print snapshots, embedded QR images, and CSS; source puzzle edits, archival, deletion, or plugin removal do not change the published paper content. To revise an issue, duplicate it as a new draft. Archive/restore keeps issue history without deleting it.
+
+Issue previews and PDFs use the same size, width, height, and margin parameters as individual puzzle prints. Fixed paper sizes start each subsequent section on a new page; roll PDFs concatenate all sections and calculate the complete roll length. One bundle PDF can be submitted as one printer job. Feeding and cutting remain the print service's responsibility.
+
+Authenticated API routes:
+
+- `GET /api/issues`: non-archived issues; regular accounts see published issues only.
+- `GET /api/issues/latest`: newest published, non-archived issue, including ordered modules and `pdf_url`.
+- `GET /api/issues/{id}`: issue metadata and ordered print payloads.
+- `GET /api/issues/{id}/print.pdf?size=zebra`: combined PDF; accepts standard/custom paper parameters.
+- `POST /api/issues`: admin draft creation.
+- `PUT /api/issues/{id}`: admin draft editing; published issues return 409.
+- `POST /api/issues/{id}/publish`: admin publication.
+
+Create a draft with this JSON, using real puzzle IDs from your library:
+
+```json
+{
+  "title": "Daily Stripe",
+  "description": "Today's puzzles",
+  "modules": [
+    {"kind": "puzzle", "puzzle_id": "PUZZLE_ID"},
+    {"kind": "text", "title": "Quote", "body": "A curated quote.", "attribution": "Source"}
+  ]
+}
+```
+
+Use `Authorization: Bearer YOUR_ACCOUNT_API_TOKEN` for automation requests. Drafts and archived issues are visible only to administrators. A maximum of 20 sections is supported; roll PDF output is limited to five metres. Text sections accept plain text and preserve line breaks; embedded HTML is escaped. Future dedicated daily-content services can supply sections through this API.
+
+Regression checks: `PYTHONPATH=. python scripts/verify_publishing.py` runs against a separate in-memory SQLite database and renders sample bundle PDFs under `/tmp/puzzary-publishing-qa`.
+
 ## AI Assistance Disclosure
 
 This project was initially scaffolded with AI assistance.

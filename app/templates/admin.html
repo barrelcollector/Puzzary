@@ -91,7 +91,7 @@
           <a href="/admin/dictionary"><strong>Add Dictionary Words</strong><span>Define words once and reuse them in banks.</span></a>
           <a href="/admin/word-banks"><strong>Manage Word Banks</strong><span>Build manual or tag-driven sources.</span></a>
           <a href="/admin/tags"><strong>Manage Tags</strong><span>Organize words, definitions, banks, and puzzles.</span></a>
-          <a href="/admin/publishing"><strong>Publishing Tasks</strong><span>Plan Daily Stripe bundle work.</span></a>
+          <a href="/admin/publishing"><strong>Publishing</strong><span>Assemble and publish printable issues.</span></a>
         </div>
       </section>
 
@@ -1177,21 +1177,7 @@
     {% endif %}
 
     {% if section == "publishing" %}
-      <section class="puzzle-head">
-        <div>
-          <h1>Publishing</h1>
-          <p class="muted">Future home for Daily Stripe issue bundles and print-run assembly.</p>
-        </div>
-      </section>
-      <div class="panel narrow-panel">
-        <h2>Planned Flow</h2>
-        <ol>
-          <li>Select modules and puzzles for a Daily Stripe issue.</li>
-          <li>Order the print sections.</li>
-          <li>Send the issue bundle to the print pipeline.</li>
-        </ol>
-        <p class="muted">This is a placeholder until we connect Puzzary to the Daily Stripe print job format.</p>
-      </div>
+      {% include "publishing.html" %}
     {% endif %}
 
     {% if section == "settings" %}
@@ -1334,4 +1320,5 @@
 {% block scripts %}
   <script src="/static/generation-form.js?v=8"></script>
   <script src="/static/manual-builder.js?v=2"></script>
+  {% if section == "publishing" %}<script src="/static/publishing.js?v=1"></script>{% endif %}
 {% endblock %}

@@ -1998,6 +1998,31 @@ legend {
   color: var(--muted);
 }
 
+.issue-compose-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr);
+  gap: 24px;
+  margin: 22px 0;
+}
+
+.issue-picker select { width: 100%; margin: 12px 0; }
+.issue-module-row { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.issue-module-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.issue-module-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.issue-module-heading .action-row { flex-wrap: nowrap; flex-shrink: 0; }
+.issue-icon-button { width: 34px; height: 34px; padding: 0; }
+.issue-module-row label { display: block; margin-top: 12px; }
+.issue-table { width: 100%; border-collapse: collapse; }
+.issue-table th, .issue-table td { padding: 12px 8px; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.issue-archive-form { margin-top: 20px; }
+.issue-published-modules li { margin: 12px 0; }
+
+@media (max-width: 760px) {
+  .issue-compose-layout { grid-template-columns: minmax(0, 1fr); }
+  .issue-table { font-size: 13px; }
+  .issue-module-heading { align-items: flex-start; }
+}
+
 .print-toolbar {
   display: flex;
   justify-content: space-between;
