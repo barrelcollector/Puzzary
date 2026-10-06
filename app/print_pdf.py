@@ -23,7 +23,10 @@ def render_pdf(html: str, layout: dict) -> bytes:
                 page.route("**/*", lambda route: route.abort())
                 page.emulate_media(media="print")
                 page.set_content(html, wait_until="load", timeout=30000)
-                page.wait_for_function("document.fonts.status === 'loaded'", timeout=10000)
+                page.wait_for_function(
+                    "document.fonts.status === 'loaded' && window.issuePagesReady !== false",
+                    timeout=10000,
+                )
                 height_mm = layout["page_height_mm"]
                 if height_mm is None:
                     height_px = page.locator(".print-sheet").first.evaluate(

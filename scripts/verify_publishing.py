@@ -127,6 +127,40 @@ class PublishingChecks(unittest.TestCase):
         self.db.commit()
         self.assertEqual(api_latest_issue(token_request, self.db)["id"], first.id)
 
+    def test_fixed_pages_fit_tall_snapshot_with_footer(self):
+        from playwright.sync_api import sync_playwright
+        issue = write_issue(self.db, self.admin, self.payload)
+        publish_issue(self.db, issue, request())
+        # Old published HTML must fit without rewriting the stored snapshot.
+        issue.snapshot = {**issue.snapshot, "modules": [
+            {"html": '<article class="print-sheet"><h2>Puzzle</h2>'
+                     '<div style="height:900px">Grid and clues</div>'
+                     '<footer>QR and puzzle footer</footer></article>'},
+            {"html": '<article class="print-sheet"><h2>Second puzzle</h2>'
+                     '<div style="height:950px">Grid</div><footer>Second QR</footer></article>'},
+        ]}
+        for size in ("letter", "a4"):
+            rendered = print_issue(issue, request(size=size), self.db, self.admin, toolbar=False)
+            layout = rendered.context["print_layout"]
+            height = (layout["page_height_mm"] - 2 * layout["page_margin_mm"]) * 96 / 25.4
+            width = layout["content_width_mm"] * 96 / 25.4
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                page = browser.new_page()
+                page.emulate_media(media="print")
+                page.set_content(rendered.body.decode())
+                page.wait_for_function("window.issuePagesReady === true")
+                boxes = page.locator(".issue-page-content").evaluate_all(
+                    "els => els.map(el => ({height:el.getBoundingClientRect().height, width:el.getBoundingClientRect().width}))"
+                )
+                self.assertEqual(len(boxes), 2)
+                for box in boxes:
+                    self.assertLessEqual(box["height"], height)
+                    self.assertAlmostEqual(box["width"], width, delta=1)
+                page.emulate_media(media="screen")
+                self.assertEqual(page.locator(".issue-page-content").first.evaluate("el => el.style.zoom"), "")
+                browser.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

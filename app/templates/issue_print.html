@@ -6,18 +6,26 @@
     --print-content-width: {{ print_layout.content_width_mm }}mm;
     max-width: 900px;
   }
-  .bundle-sheet > .print-sheet {
+  .bundle-sheet .issue-page-content > .print-sheet {
     width: 100%; max-width: 100%; border: 0; padding: 0; margin: 28px 0 0;
     border-radius: 0; box-shadow: none;
   }
-  .bundle-sheet > .print-sheet + .print-sheet { padding-top: 20px; border-top: 1px solid #d7d5cc; }
+  .issue-page + .issue-page { padding-top: 20px; border-top: 1px solid #d7d5cc; }
   .issue-text-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .issue-page-content { display: flow-root; }
   @media print {
     @page { size: {% if print_layout.page_height_mm %}{{ print_layout.page_width_mm }}mm {{ print_layout.page_height_mm }}mm{% else %}auto{% endif %}; margin: {{ print_layout.page_margin_mm }}mm; }
     .bundle-sheet { width: var(--print-content-width); max-width: none; }
-    .bundle-sheet > .print-sheet { margin: 16px 0 0; }
+    .bundle-sheet .issue-page-content > .print-sheet { margin: 16px 0 0; }
     {% if print_layout.page_height_mm %}
-      .bundle-sheet > .print-sheet + .print-sheet { break-before: page; border-top: 0; padding-top: 0; }
+      .issue-page { display: flow-root; break-inside: avoid; }
+      .issue-page + .issue-page { break-before: page; border-top: 0; padding-top: 0; }
+      {% if print_layout.content_width_mm >= 150 %}
+        .bundle-sheet .print-word-grid { width: calc(var(--print-content-width) * 0.9); max-width: 100%; gap: 0; }
+        .bundle-sheet .print-word-grid:not(.compact) span { border: 0.5pt solid var(--ink); box-sizing: border-box; }
+        .bundle-sheet .print-crossword-grid { width: calc(var(--print-content-width) * 0.8); max-width: 100%; }
+        .bundle-sheet .print-clues { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      {% endif %}
     {% endif %}
   }
 </style>
@@ -37,8 +45,51 @@
   </section>
 {% endif %}
 <article class="print-sheet bundle-sheet">
-  <header class="print-header"><h1>{{ issue.title }}</h1><p>{{ 'Published' if issue.published_at else 'Draft' }} / {{ snapshot.modules | length }} sections</p></header>
-  {% if issue.description %}<p class="issue-description">{{ issue.description }}</p>{% endif %}
-  {% for module in snapshot.modules %}{{ module.html | safe }}{% endfor %}
+  {% for module in snapshot.modules %}
+    <section class="issue-page"><div class="issue-page-content">
+      {% if loop.first %}
+        <header class="print-header"><h1>{{ issue.title }}</h1><p>{{ 'Published' if issue.published_at else 'Draft' }} / {{ snapshot.modules | length }} sections</p></header>
+        {% if issue.description %}<p class="issue-description">{{ issue.description }}</p>{% endif %}
+      {% endif %}
+      {{ module.html | safe }}
+    </div></section>
+  {% else %}
+    <header class="print-header"><h1>{{ issue.title }}</h1></header>
+  {% endfor %}
 </article>
+{% if print_layout.page_height_mm %}
+<script>
+  (() => {
+    const media = window.matchMedia('print');
+    const availableHeight = ({{ print_layout.page_height_mm }} - 2 * {{ print_layout.page_margin_mm }}) * 96 / 25.4 - 12;
+    const contents = [...document.querySelectorAll('.issue-page-content')];
+    function fitPages() {
+      for (const content of contents) {
+        content.style.zoom = '';
+        content.style.width = '';
+        if (!media.matches) continue;
+        // Reflow at each scale so text still uses the full printable width.
+        const measure = scale => {
+          content.style.zoom = scale;
+          content.style.width = 'auto';
+          return content.getBoundingClientRect().height;
+        };
+        if (measure(1) <= availableHeight) continue;
+        let low = 0.05, high = 1;
+        for (let step = 0; step < 16; step++) {
+          const scale = (low + high) / 2;
+          if (measure(scale) <= availableHeight) low = scale;
+          else high = scale;
+        }
+        measure(low);
+      }
+      window.issuePagesReady = true;
+    }
+    window.issuePagesReady = false;
+    document.fonts.ready.then(fitPages);
+    media.addEventListener('change', fitPages);
+    window.addEventListener('beforeprint', fitPages);
+  })();
+</script>
+{% endif %}
 {% endblock %}
