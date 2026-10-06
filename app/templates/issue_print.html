@@ -33,15 +33,19 @@
   <section class="print-toolbar">
     <a class="ghost-link" href="{{ '/admin/publishing/' ~ issue.id if current_user.is_admin else '/library' }}">Back</a>
     <form method="get" class="print-size-form">
-      <label>Size<select name="size" onchange="if(this.value !== 'custom'){this.form.width_mm.value='';this.form.height_mm.value='';this.form.margin_mm.value='';}">
-        {% for preset in print_layout.page_size_presets %}<option value="{{ preset.value }}" {% if preset.value == print_layout.page_size %}selected{% endif %}>{{ preset.label }}</option>{% endfor %}
+      <label>Layout<select name="print_mode" onchange="if(this.value === 'booklet' &amp;&amp; ['receipt','zebra'].includes(this.form.size.value)){this.form.size.value='letter';this.form.width_mm.value='';this.form.height_mm.value='';this.form.margin_mm.value='';}">
+        <option value="standard" {% if print_mode == 'standard' %}selected{% endif %}>Sequential pages</option>
+        <option value="booklet" {% if print_mode == 'booklet' %}selected{% endif %}>Folded booklet</option>
       </select></label>
-      <label>Width mm<input name="width_mm" type="number" min="25" max="1000" step="any" value="{{ print_layout.page_width_mm }}"></label>
-      <label>Height mm<input name="height_mm" type="number" min="25" max="5000" step="any" value="{{ print_layout.page_height_mm or '' }}" placeholder="auto"></label>
-      <label>Margin mm<input name="margin_mm" type="number" min="0" step="any" value="{{ print_layout.page_margin_mm }}"></label>
+      <label>Size<select name="size" onchange="if(this.value !== 'custom'){this.form.width_mm.value='';this.form.height_mm.value='';this.form.margin_mm.value='';}">
+        {% for preset in sheet_layout.page_size_presets %}<option value="{{ preset.value }}" {% if preset.value == sheet_layout.page_size %}selected{% endif %}>{{ preset.label }}</option>{% endfor %}
+      </select></label>
+      <label>Width mm<input name="width_mm" type="number" min="25" max="1000" step="any" value="{{ sheet_layout.page_width_mm }}"></label>
+      <label>Height mm<input name="height_mm" type="number" min="25" max="5000" step="any" value="{{ sheet_layout.page_height_mm or '' }}" placeholder="auto"></label>
+      <label>Margin mm<input name="margin_mm" type="number" min="0" step="any" value="{{ sheet_layout.page_margin_mm }}"></label>
       <button class="ghost-button">Apply</button>
     </form>
-    <a class="button-link" href="/issues/{{ issue.id }}/print.pdf?{{ request.query_params }}">Download PDF</a>
+    <a class="button-link" href="/issues/{{ issue.id }}/print.pdf?{{ request.query_params }}">{{ 'Download booklet PDF' if print_mode == 'booklet' else 'Download PDF' }}</a>
   </section>
 {% endif %}
 <article class="print-sheet bundle-sheet">
@@ -52,6 +56,7 @@
         {% if issue.description %}<p class="issue-description">{{ issue.description }}</p>{% endif %}
       {% endif %}
       {{ module.html | safe }}
+      {% if print_mode == 'booklet' %}<footer class="muted" style="text-align:center;margin-top:12px">{{ loop.index }}</footer>{% endif %}
     </div></section>
   {% else %}
     <header class="print-header"><h1>{{ issue.title }}</h1></header>

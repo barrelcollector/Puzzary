@@ -380,6 +380,10 @@ Open **Admin -> Publishing** to create an issue. Add printable puzzles from the 
 
 Issue previews and PDFs use the same size, width, height, and margin parameters as individual puzzle prints. Fixed paper sizes start each subsequent section on a new page; roll PDFs concatenate all sections and calculate the complete roll length. One bundle PDF can be submitted as one printer job. Feeding and cutting remain the print service's responsibility.
 
+For a folded, left-bound booklet, choose **Booklet / PDF** on an issue or **Layout -> Folded booklet** in its print preview. Select the physical sheet size (Letter, A4, 4x6, or a custom fixed width/height), then download the booklet PDF. Each section becomes one folded page; PDF pages contain two logical pages per landscape sheet side in nesting order. Blank pages are added at the end to reach a multiple of four. Print the downloaded PDF at actual size, one PDF page per sheet, double-sided with **flip on short edge**; do not enable an additional booklet or two-up mode in the printer driver. Stack the sheets in output order and fold them together down the centre. The preview shows sequential logical pages; the PDF contains the imposed sheet order. Duplex preferences are embedded but the printer dialog may override them. Roll paper needs an explicit fixed height for booklet mode. Normal sequential and roll PDFs are unchanged.
+
+Web and API issue PDF routes accept `print_mode=booklet`, for example `/api/issues/{id}/print.pdf?print_mode=booklet&size=letter` or `/api/issues/latest/print.pdf?print_mode=booklet&size=a4`. With no size specified, booklet mode defaults to Letter; standard mode retains its existing roll default. Published issue snapshots are not modified by choosing a print mode.
+
 Authenticated API routes:
 
 - `GET /api/issues`: non-archived issues; regular accounts see published issues only.

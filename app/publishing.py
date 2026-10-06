@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import PublishedIssue, Puzzle
 from app.print_pdf import render_pdf
+from app.booklet import booklet_layout, impose_booklet
 
 router = APIRouter()
 
@@ -176,11 +177,19 @@ def issue_metadata(issue, db):
 def print_issue(issue, request, db, user, toolbar=True):
     c = core()
     snapshot = issue.snapshot if issue.published_at else snapshot_modules(issue, request, db)
-    layout = c.apply_print_request_layout({}, request)
+    print_mode = request.query_params.get("print_mode", "standard")
+    if print_mode not in {"standard", "booklet"}:
+        raise HTTPException(422, "Print layout must be standard or booklet")
+    sheet = c.apply_print_request_layout({"page_size": "letter"} if print_mode == "booklet" else {}, request)
+    try:
+        layout = booklet_layout(sheet) if print_mode == "booklet" else sheet
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return c.templates.TemplateResponse("issue_print.html", {
         "request": request, "issue": issue, "snapshot": snapshot, "print_layout": layout,
         "print_pdf_css": snapshot["css"], "current_user": user,
         "hide_app_chrome": True, "show_print_toolbar": toolbar,
+        "sheet_layout": sheet, "print_mode": print_mode,
     })
 
 
@@ -188,14 +197,17 @@ def issue_pdf(issue, request, db, user):
     rendered = print_issue(issue, request, db, user, toolbar=False)
     try:
         data = render_pdf(rendered.body.decode(), rendered.context["print_layout"])
+        if rendered.context["print_mode"] == "booklet":
+            data = impose_booklet(data, rendered.context["sheet_layout"])
     except TimeoutError as exc:
         raise HTTPException(503, str(exc), headers={"Retry-After": "10"}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except PlaywrightError as exc:
         raise HTTPException(503, "PDF rendering failed. Please retry.") from exc
+    suffix = "-booklet" if rendered.context["print_mode"] == "booklet" else ""
     return Response(data, media_type="application/pdf", headers={
-        "Content-Disposition": f'attachment; filename="puzzary-issue-{issue.id}.pdf"',
+        "Content-Disposition": f'attachment; filename="puzzary-issue-{issue.id}{suffix}.pdf"',
         "Cache-Control": "private, no-store",
     })
 

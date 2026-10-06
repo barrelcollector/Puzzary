@@ -17,6 +17,7 @@
     </ol>
     <div class="action-row">
       <a class="button-link" href="/issues/{{ selected_issue.id }}">Preview / PDF</a>
+      <a class="ghost-link" href="/issues/{{ selected_issue.id }}?print_mode=booklet&amp;size=letter">Booklet / PDF</a>
       <form method="post" action="/admin/publishing/{{ selected_issue.id }}/duplicate"><button class="ghost-button">Duplicate as draft</button></form>
       <form method="post" action="/admin/publishing/{{ selected_issue.id }}/{{ 'restore' if selected_issue.archived_at else 'archive' }}"><button class="ghost-button">{{ 'Restore' if selected_issue.archived_at else 'Archive' }}</button></form>
     </div>
@@ -57,6 +58,7 @@
   <script id="issue-initial-modules" type="application/json">{{ (selected_issue.modules if selected_issue else []) | tojson }}</script>
   <script id="issue-puzzle-data" type="application/json">{{ publishing_puzzles | tojson }}</script>
   {% if selected_issue %}
+    <a class="ghost-link" href="/issues/{{ selected_issue.id }}?print_mode=booklet&amp;size=letter">Booklet / PDF</a>
     <form method="post" action="/admin/publishing/{{ selected_issue.id }}/{{ 'restore' if selected_issue.archived_at else 'archive' }}" class="issue-archive-form"><button class="ghost-button">{{ 'Restore draft' if selected_issue.archived_at else 'Archive draft' }}</button></form>
   {% endif %}
 {% else %}
