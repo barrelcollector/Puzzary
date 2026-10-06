@@ -20,15 +20,16 @@ with sync_playwright() as p:
         html = templates.env.get_template('puzzle_types/nonogram.html').render(puzzle=puzzle, progress_answers=saved or {})
         page.route('**/*', lambda route: route.abort())
         page.set_content(html + '<button id="reveal-solution">Reveal</button>')
-        page.evaluate('''window.fetch=async()=>({ok:true}); window.celebrations=0; window.tones=0;
+        page.evaluate('''window.fetch=async()=>({ok:true}); window.celebrations=0; window.tones=0; window.peaks=[];
             window.PuzzaryCelebrate={complete:()=>{window.celebrations++}};
             window.muted=false;
             Object.defineProperty(window,'localStorage',{configurable:true,value:{getItem:()=>window.muted ? 'true' : 'false'}});
             window.AudioContext=class {
               currentTime=0; destination={}; resume(){return Promise.resolve()}
               createOscillator(){return {frequency:{},connect(g){return g},start(){window.tones++},stop(){}}}
-              createGain(){return {gain:{setValueAtTime(){},exponentialRampToValueAtTime(){}},connect(){}}}
+              createGain(){return {gain:{setValueAtTime(){},exponentialRampToValueAtTime(v){window.peaks.push(v)}},connect(){}}}
             }; void 0;''')
+        page.add_script_tag(content=Path('/app/app/static/celebration.js').read_text())
         page.add_script_tag(content=Path('/app/app/static/nonogram.js').read_text())
     def cell(x,y=0): return page.locator(f'button.nonogram-cell[data-key="{x},{y}"]')
     def mode(value): page.locator(f'[data-mode="{value}"]').click()
@@ -90,6 +91,7 @@ with sync_playwright() as p:
     cell(0,0).click(); cell(0,2).click()
     assert page.locator('thead th[scope="col"]').first.get_attribute('class') == 'confirmed'
     assert page.evaluate('window.tones') == 2
+    assert page.evaluate('Math.max(...window.peaks)') == 0.05
     cell(1,1).click()
     assert page.evaluate('window.tones') == 4
     cell(1,1).press('x')  # Protected fill does not replay the chime.
@@ -120,6 +122,17 @@ with sync_playwright() as p:
     load(saved=solved)
     assert page.evaluate('window.tones == 0 && window.celebrations == 0')
     assert page.locator('.nonogram-status').inner_text() == 'Nonogram complete.'
+    # Shared sounds work without a celebration panel, for any module.
+    page.evaluate('window.PuzzarySounds.smallWin()')
+    assert page.evaluate('window.tones') == 3
+    assert page.evaluate('Math.max(...window.peaks)') == 0.06
+    page.evaluate('window.muted=true; window.PuzzarySounds.progress()')
+    assert page.evaluate('window.tones') == 3
+    page.evaluate('window.muted=false; window.PuzzarySounds.complete()')
+    assert page.evaluate('window.tones') == 6
+    assert page.evaluate('Math.max(...window.peaks)') == 0.08
+    page.evaluate('window.AudioContext=undefined; window.webkitAudioContext=undefined; window.PuzzarySounds.progress()')
+    assert page.evaluate('window.tones') == 6
     # Touch taps use the same protected painting path.
     touch=browser.new_context(has_touch=True,viewport={'width':390,'height':844})
     phone=touch.new_page()

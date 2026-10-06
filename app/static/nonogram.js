@@ -10,29 +10,8 @@
   const rows = [...root.querySelectorAll('tbody tr')];
   const rowCells = rows.map(row => [...row.querySelectorAll('button.nonogram-cell')]);
   const columns = [...root.querySelectorAll('thead th[scope="col"]')];
-  let audio, completed = false;
+  let completed = false;
   let mode = '1', brush = '', protectedValue = null, dragging = false, timer, saving = false, dirty = false;
-  function chime() {
-    try {
-      if (localStorage.getItem('puzzaryCelebrationMuted') === 'true') return;
-      const Context = window.AudioContext || window.webkitAudioContext;
-      if (!Context) return;
-      audio ||= new Context();
-      audio.resume().then(() => {
-        const now = audio.currentTime;
-        [659.25, 783.99].forEach((frequency, index) => {
-          const oscillator = audio.createOscillator(), gain = audio.createGain();
-          const start = now + index * 0.09;
-          oscillator.frequency.value = frequency;
-          gain.gain.setValueAtTime(0.0001, start);
-          gain.gain.exponentialRampToValueAtTime(0.025, start + 0.015);
-          gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.15);
-          oscillator.connect(gain).connect(audio.destination);
-          oscillator.start(start); oscillator.stop(start + 0.16);
-        });
-      }).catch(() => {});
-    } catch (_) { /* Audio is optional when blocked by the browser. */ }
-  }
   function confirmLines(notify = true) {
     let newlyConfirmed = false;
     function confirm(clue, line, expected, enabled, label) {
@@ -51,7 +30,7 @@
     if (notify && solved && !completed) {
       status.textContent = 'Nonogram complete.';
       window.PuzzaryCelebrate?.complete();
-    } else if (notify && newlyConfirmed) chime();
+    } else if (notify && newlyConfirmed) window.PuzzarySounds?.progress();
     if (!solved && completed && status.textContent === 'Nonogram complete.') status.textContent = '';
     completed = solved;
   }

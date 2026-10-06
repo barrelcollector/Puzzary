@@ -1,14 +1,15 @@
 (function () {
   const panel = document.getElementById("completion-celebration");
-  if (!panel) return;
 
   const closeButton = document.getElementById("celebration-close");
   const soundToggle = document.getElementById("celebration-sound-toggle");
   const storageKey = "puzzaryCelebrationMuted";
   let hasShown = false;
+  let audio;
 
   function soundMuted() {
-    return window.localStorage.getItem(storageKey) === "true";
+    try { return window.localStorage.getItem(storageKey) === "true"; }
+    catch (_) { return false; }
   }
 
   function updateSoundLabel() {
@@ -17,38 +18,47 @@
     soundToggle.setAttribute("aria-pressed", soundMuted() ? "true" : "false");
   }
 
-  function playSuccessSound() {
+  async function playNotes(notes, volume, spacing, duration) {
     if (soundMuted()) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
     try {
-      const context = new AudioContext();
+      const context = audio ||= new AudioContext();
+      await context.resume();
+      if (soundMuted()) return;
       const now = context.currentTime;
-      const notes = [523.25, 659.25, 783.99];
       notes.forEach((frequency, index) => {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
         oscillator.type = "sine";
         oscillator.frequency.value = frequency;
-        gain.gain.setValueAtTime(0.0001, now + index * 0.1);
-        gain.gain.exponentialRampToValueAtTime(0.08, now + index * 0.1 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.1 + 0.18);
+        const start = now + index * spacing;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(volume, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration - 0.02);
         oscillator.connect(gain).connect(context.destination);
-        oscillator.start(now + index * 0.1);
-        oscillator.stop(now + index * 0.1 + 0.2);
+        oscillator.start(start);
+        oscillator.stop(start + duration);
       });
-      window.setTimeout(() => context.close(), 650);
     } catch (_error) {
       // Browser audio policies vary; the visual celebration is still enough.
     }
   }
+
+  window.PuzzarySounds = {
+    progress: () => playNotes([659.25, 783.99], 0.05, 0.09, 0.16),
+    smallWin: () => playNotes([523.25, 659.25, 783.99], 0.06, 0.09, 0.18),
+    complete: () => playNotes([523.25, 659.25, 783.99], 0.08, 0.1, 0.2),
+    isMuted: soundMuted,
+  };
+  if (!panel) return;
 
   function showCelebration(options = {}) {
     if (hasShown && !options.force) return;
     hasShown = true;
     panel.classList.remove("is-hidden");
     panel.classList.add("show");
-    playSuccessSound();
+    window.PuzzarySounds.complete();
   }
 
   function hideCelebration() {
