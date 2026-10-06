@@ -62,7 +62,11 @@
     }
     saving = false;
   }
-  function queueSave(notify = true) { confirmLines(window.PuzzaryGroup ? false : notify); clearTimeout(timer); timer = setTimeout(save, 200); }
+  function queueSave(notify = true) {
+    confirmLines(window.PuzzaryGroup ? false : notify);
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
+    clearTimeout(timer); timer = setTimeout(save,200);
+  }
   window.PuzzaryGroup?.register({read:answers, apply(state) {
     cells.forEach(cell => {
       const value = state.answers[cell.dataset.key] || '';

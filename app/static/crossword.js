@@ -80,6 +80,7 @@
   }
 
   function queueSave() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveProgress, 250);
   }

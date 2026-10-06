@@ -61,6 +61,17 @@ try:
                 delays.append(time.monotonic()-started); time.sleep(.04)
             print(f'Live cursor relay ({origin}): max {max(delays)*1000:.0f} ms')
             assert max(delays)<1,delays
+            revision=request(0,endpoint)[1]['revision']
+            started=time.monotonic()
+            status,committed=request(0,endpoint+'/actions',{'action_id':str(uuid.uuid4()),'revision':revision,'kind':'patch','changes':{keys[0]:'0'}})
+            assert status==200,committed
+            while True:
+                pushed=json.loads(ws2.recv(timeout=5))
+                if pushed['type']=='state': break
+            assert pushed['snapshot']['user_id']==ids[1]
+            assert pushed['snapshot']['revision']>=committed['revision']
+            assert pushed['snapshot']['state']['answers'][keys[0]]=='0'
+            print(f'Live committed puzzle push ({origin}): {(time.monotonic()-started)*1000:.0f} ms')
     def pair(changes):
         barrier=Barrier(2); revision=request(0,endpoint)[1]['revision']
         def edit(index):
@@ -78,8 +89,15 @@ try:
             page=context.new_page(); page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(base+data['url']); page.wait_for_function("!document.querySelector('.puzzle-layout > .panel').inert")
             pages.append(page)
+        for page in pages:
+            page.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
+            page.route('**/api/groups/*',lambda route: route.abort() if route.request.method=='GET' else route.continue_())
+        started=time.monotonic()
         pages[0].locator(f'.takuzu-play [data-key="{keys[1]}"]').press('0')
         pages[1].wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="0"',arg=keys[1])
+        print(f'Live browser input-to-peer paint: {(time.monotonic()-started)*1000:.0f} ms (snapshot polling blocked)')
+        assert time.monotonic()-started<.5
+        for page in pages: page.unroute('**/api/groups/*')
         pages[1].reload(); pages[1].wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="0"',arg=keys[1])
         pages[0].evaluate("""() => {
           window.liveMemberButton = document.querySelector('#group-members button');

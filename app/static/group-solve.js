@@ -5,6 +5,16 @@
   const status = panel.querySelector('#group-status');
   let adapter, snapshot, baseline = {}, busy = false, ready = false, focus = '', lastCompleted = false, notice = '';
   let renderedState = '', renderedRevision = -1, mutation = 0;
+  let pendingState = null, stateGeneration = 0, groupSaveTimer = null, lastPoll = 0;
+  function receiveState(data) {
+    stateGeneration++;
+    if (!pendingState || data.revision >= pendingState.revision) pendingState = data;
+    flushState();
+  }
+  function flushState() {
+    if (!pendingState || !adapter || busy || Object.keys(diff(adapter.read(),baseline)).length) return;
+    const data = pendingState; pendingState = null; show(data);
+  }
   const memberNodes = new Map();
   const board = document.querySelector('.puzzle-layout > .panel');
   async function api(url, body) {
@@ -163,6 +173,7 @@
       try {
         const data = JSON.parse(event.data);
         if (['ready','presence'].includes(data.type)) receivePresence(data.members,data.type === 'ready');
+        if (data.snapshot && ['ready','state'].includes(data.type)) receiveState(data.snapshot);
       } catch (_) {}
     });
     socket.addEventListener('close',event => {
@@ -275,8 +286,11 @@
     });
   }
   window.PuzzaryGroup = {
-    register(value) { adapter = value; renderedState = ''; if (snapshot) applyState(snapshot.state); },
-    save() { send('patch'); }
+    register(value) { adapter = value; renderedState = ''; if (snapshot) applyState(snapshot.state); flushState(); },
+    save() {
+      if (groupSaveTimer !== null) return;
+      groupSaveTimer = setTimeout(() => { groupSaveTimer = null; send('patch'); },40);
+    }
   };
   async function send(kind, target = '') {
     if (!ready || busy || snapshot?.closed || !adapter) return;
@@ -286,10 +300,10 @@
       if (!Object.keys(diff(adapter.read(),baseline)).length) return send(kind,target);
       return;
     }
-    if (kind === 'patch' && !Object.keys(changes).length) return;
+    if (kind === 'patch' && !Object.keys(changes).length) { flushState(); return; }
     busy = true;
     mutation++;
-    let retryDelay = 100;
+    let retryDelay = 40;
     let success = false;
     try {
       const bytes = crypto.getRandomValues(new Uint8Array(16)); bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
@@ -306,6 +320,7 @@
       } else if (error.status === 403) { ready = false; block(true); }
       status.textContent = error.message;
     } finally { busy = false; }
+    flushState();
     if (ready && Object.keys(diff(adapter.read(),baseline)).length) setTimeout(() => send('patch'),retryDelay);
     return success;
   }
@@ -364,11 +379,13 @@
   }
   async function poll() {
     if (!ready) return;
+    if (presenceSocket?.readyState === WebSocket.OPEN && performance.now()-lastPoll < 10000) { setTimeout(poll,1000); return; }
     if (!busy) {
-      const generation = mutation;
+      lastPoll = performance.now();
+      const generation = mutation, stateVersion = stateGeneration;
       try {
         const data = await api(`/api/groups/${id}?focus=${encodeURIComponent(focus)}`);
-        if (busy || generation !== mutation || data.revision < snapshot.revision) { setTimeout(poll,1000); return; }
+        if (busy || generation !== mutation || stateVersion !== stateGeneration || data.revision < snapshot.revision) { setTimeout(poll,1000); return; }
         if (adapter && !Object.keys(diff(adapter.read(),baseline)).length) show(data);
         if (data.closed) { show(data); return; }
       } catch(error) {

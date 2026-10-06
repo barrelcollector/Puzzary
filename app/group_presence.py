@@ -1,4 +1,4 @@
-"""Transient cursor relay for the single-worker deployment; never writes puzzle answers."""
+"""Live group relay; cursor traffic never writes puzzle answers."""
 import asyncio
 from dataclasses import dataclass, field
 import time
@@ -17,6 +17,7 @@ class Peer:
     member: dict
     pending: dict = field(default_factory=dict)
     wake: asyncio.Event = field(default_factory=asyncio.Event)
+    state_dirty: bool = False
 
 
 rooms: dict[str, set[Peer]] = {}
@@ -26,6 +27,26 @@ relay_loop = None
 def publish_from_http(group_id, member):
     if relay_loop and not relay_loop.is_closed():
         relay_loop.call_soon_threadsafe(broadcast, group_id, member)
+
+
+def publish_state_change(group_id):
+    if relay_loop and not relay_loop.is_closed():
+        relay_loop.call_soon_threadsafe(mark_state_changed, group_id)
+
+
+def mark_state_changed(group_id):
+    for peer in rooms.get(group_id, ()):
+        peer.state_dirty = True
+        peer.wake.set()
+
+
+def read_snapshot(socket, group_id):
+    from app.groups import core, group_for, member_for, snapshot
+    with SessionLocal() as db:
+        user = core().require_api_user(socket, db)
+        group = group_for(db, group_id)
+        member_for(db, group, user)
+        return snapshot(db, group, user)
 
 
 def authorize(socket, group_id, value=None):
@@ -57,8 +78,17 @@ async def write_updates(peer):
         await peer.wake.wait()
         await asyncio.sleep(1 / 60)
         members = list(peer.pending.values())
+        state_dirty = peer.state_dirty
+        peer.state_dirty = False
         peer.pending.clear(); peer.wake.clear()
-        await asyncio.wait_for(peer.socket.send_json({'type': 'presence', 'members': members}), 3)
+        if state_dirty:
+            try:
+                data = await run_in_threadpool(read_snapshot, peer.socket, peer.socket.path_params['group_id'])
+            except HTTPException:
+                await peer.socket.close(code=1008); return
+            await asyncio.wait_for(peer.socket.send_json({'type': 'state', 'snapshot': data}), 3)
+        if members:
+            await asyncio.wait_for(peer.socket.send_json({'type': 'presence', 'members': members}), 3)
 
 
 async def stream_presence(socket: WebSocket, group_id: str):
@@ -86,7 +116,8 @@ async def stream_presence(socket: WebSocket, group_id: str):
     room.add(peer)
     writer = None
     try:
-        await socket.send_json({'type': 'ready', 'members': list(known.values())})
+        data = await run_in_threadpool(read_snapshot, socket, group_id)
+        await socket.send_json({'type': 'ready', 'members': list(known.values()), 'snapshot': data})
         writer = asyncio.create_task(write_updates(peer))
         checked = time.monotonic()
         window = checked; messages = 0

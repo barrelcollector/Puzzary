@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import GroupSolve, GroupMember, GroupAction, Puzzle, User
 from app.puzzles import get_puzzle_type
+from app.group_presence import publish_state_change
 
 router = APIRouter()
 SERVER_LIMIT = 50
@@ -168,6 +169,7 @@ def join_group(payload: Join, request: Request, db: Session = Depends(get_db)):
     member.status = 'pending' if group.approval_required and user.id != group.host_id else 'active'
     member.seen_at = now()
     db.commit()
+    publish_state_change(group.id)
     return {'pending': True, 'url': f'/puzzles/{group.puzzle_id}?group={group.id}', 'id': group.id} if member.status == 'pending' else snapshot(db, group, user)
 
 
@@ -210,6 +212,7 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
     db.add(GroupAction(group_id=group.id, action_id=str(payload.action_id), user_id=user.id,
                        revision=group.revision, kind=payload.kind, changes=changed))
     db.commit()
+    publish_state_change(group.id)
     return snapshot(db, group, user)
 
 
@@ -246,6 +249,7 @@ def manage_member(group_id: str, payload: MemberControl, request: Request, db: S
         member.status = 'active'
     else: member.status = 'removed'
     db.commit()
+    publish_state_change(group.id)
     return snapshot(db, group, user)
 
 
@@ -257,6 +261,7 @@ def leave_group(group_id: str, request: Request, db: Session = Depends(get_db)):
     if member.status != 'removed' and user.id != group.host_id: member.status = 'left'
     member.focus = ''; member.seen_at = None; member.presence = None
     db.commit()
+    publish_state_change(group.id)
     return {'left': True}
 
 
@@ -266,6 +271,7 @@ def close_group(group_id: str, request: Request, db: Session = Depends(get_db)):
     group = group_for(db, group_id, True)
     if user.id != group.host_id: raise HTTPException(403, 'Only the host can close this session')
     group.closed = True; db.commit()
+    publish_state_change(group.id)
     return snapshot(db, group, user)
 
 
@@ -278,4 +284,5 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
     if payload.participant_limit and payload.participant_limit < active: raise HTTPException(409, 'Limit is below current participant count')
     group.participant_limit = payload.participant_limit; group.approval_required = payload.approval_required
     db.commit()
+    publish_state_change(group.id)
     return snapshot(db, group, user)

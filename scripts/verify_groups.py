@@ -132,15 +132,32 @@ try:
         assert action(host,rev,{},kind='check').ok
         rev=host.request.get(endpoint).json()['revision']
         assert action(host,rev,{k1:'',k2:''}).ok
+        # A committed action is pushed as a recipient-specific snapshot, without a GET.
+        with ws_connect(ws_url,origin=base,additional_headers={'Cookie':'session='+cookie(ids[1])},proxy=None) as peer:
+            assert json.loads(peer.recv(timeout=2))['type']=='ready'
+            current=host.request.get(endpoint).json()['revision']
+            started=time.monotonic(); committed=action(host,current,{k1:'0'}).json()
+            pushed=json.loads(peer.recv(timeout=2))
+            assert pushed['type']=='state' and pushed['snapshot']['revision']==committed['revision']
+            assert pushed['snapshot']['user_id']==ids[1] and pushed['snapshot']['state']['answers'][k1]=='0'
+            assert time.monotonic()-started<.5
+            assert action(host,committed['revision'],{k1:''}).ok
+            assert json.loads(peer.recv(timeout=2))['snapshot']['state']['answers'].get(k1,'')==''
         # Real UI, existing module handlers, poll updates, reload and independent personal state.
         a=host.new_page(); b=player.new_page(); errors=[]
         for page in [a,b]: page.on('pageerror',lambda error:errors.append(str(error))); page.goto(url)
         a.wait_for_function("!document.querySelector('.puzzle-layout > .panel').inert")
         b.wait_for_function("!document.querySelector('.puzzle-layout > .panel').inert")
+        for page in [a,b]:
+            page.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
+            page.route('**/api/groups/*',lambda route: route.abort() if route.request.method=='GET' else route.continue_())
+        started=time.monotonic()
         a.locator(f'.takuzu-play [data-key="{k1}"]').press('1')
         b.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="1"',arg=k1)
+        assert time.monotonic()-started<.5,'Edits must not wait for polling or the old debounce'
         b.locator(f'.takuzu-play [data-key="{k2}"]').press('0')
         a.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="0"',arg=k2)
+        for page in [a,b]: page.unroute('**/api/groups/*')
         b.reload(); b.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="1"',arg=k1)
         assert b.locator('#group-members').inner_text().count('online')==2
         assert b.locator('#group-host').is_hidden()
@@ -314,6 +331,17 @@ try:
                 page2.wait_for_function('([key,value])=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).value===value',arg=[key,value])
             endpoint2=base+'/api/groups/'+info['id']
             assert host.request.get(endpoint2).json()['state']['answers'][key]==value
+            if kind=='nonogram':
+                # Keep painting faster than the old trailing debounce and inspect before mouse-up.
+                stroke=page1.locator('.nonogram-play button[data-key]:not([disabled])').all()[1:7]
+                first=stroke[0].bounding_box(); stroke_key=stroke[0].get_attribute('data-key')
+                page1.mouse.move(first['x']+first['width']/2,first['y']+first['height']/2); page1.mouse.down()
+                for cell in stroke:
+                    rect=cell.bounding_box()
+                    page1.mouse.move(rect['x']+rect['width']/2,rect['y']+rect['height']/2)
+                    page1.wait_for_timeout(50)
+                assert page2.locator(f'.nonogram-play button[data-key="{stroke_key}"]').get_attribute('data-value')=='1', 'Painting must sync before the stroke ends'
+                page1.mouse.up()
             if kind!='nonogram':
                 for page in [page1,page2]: page.evaluate('document.hasFocus = () => true')
                 # Remote changes to another cell must preserve the focused input's caret.
