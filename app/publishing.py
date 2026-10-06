@@ -225,7 +225,7 @@ def web_issue_save(request: Request, issue_id: str = Form(""), title: str = Form
         raise HTTPException(422, "Invalid issue sections or missing content") from exc
     issue = write_issue(db, user, payload, find_issue(db, issue_id, lock=True) if issue_id else None)
     if action == "publish":
-        publish_issue(db, issue, request)
+        issue = publish_issue(db, find_issue(db, issue.id, lock=True), request)
     if action == "preview":
         return RedirectResponse(f"/issues/{issue.id}", status_code=303)
     return RedirectResponse(f"/admin/publishing/{issue.id}", status_code=303)

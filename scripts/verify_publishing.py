@@ -15,7 +15,7 @@ from app.database import Base, SessionLocal, engine
 from app.models import Puzzle, User
 from app.publishing import (
     IssueWrite, api_create_issue, api_get_issue, api_update_issue,
-    issue_pdf, print_issue, publish_issue, write_issue,
+    api_latest_issue, api_latest_issue_pdf, issue_pdf, print_issue, publish_issue, write_issue,
 )
 
 
@@ -111,6 +111,21 @@ class PublishingChecks(unittest.TestCase):
             response = issue_pdf(issue, request(size=size), self.db, self.admin)
             self.assertTrue(response.body.startswith(b"%PDF-"))
             (output / f"bundle-{size}.pdf").write_bytes(response.body)
+
+    def test_latest_and_api_token_access(self):
+        first = write_issue(self.db, self.admin, self.payload)
+        publish_issue(self.db, first, request())
+        second = write_issue(self.db, self.admin, IssueWrite(title="Second issue", modules=self.payload.modules))
+        publish_issue(self.db, second, request())
+        self.player.api_token_hash = main.hash_secret("mock-publishing-token")
+        self.db.commit()
+        token_request = Request({"type": "http", "method": "GET", "path": "/", "session": {},
+                                 "query_string": b"size=zebra", "headers": [(b"authorization", b"Bearer mock-publishing-token")]})
+        self.assertEqual(api_latest_issue(token_request, self.db)["id"], second.id)
+        self.assertTrue(api_latest_issue_pdf(token_request, self.db).body.startswith(b"%PDF-"))
+        second.archived_at = main.utcnow()
+        self.db.commit()
+        self.assertEqual(api_latest_issue(token_request, self.db)["id"], first.id)
 
 
 if __name__ == "__main__":

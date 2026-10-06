@@ -24,7 +24,7 @@
 {% elif selected_issue or request.query_params.get('new') %}
   <form class="issue-editor" id="issue-editor" action="/admin/publishing/save" method="post">
     <input type="hidden" name="issue_id" value="{{ selected_issue.id if selected_issue else '' }}">
-    <input type="hidden" name="modules_json" id="issue-modules-json" value="[]">
+    <input type="hidden" name="modules_json" id="issue-modules-json" value="{{ (selected_issue.modules if selected_issue else []) | tojson | forceescape }}">
     <label>Issue title<input name="title" required maxlength="160" value="{{ selected_issue.title if selected_issue else '' }}"></label>
     <label>Description<textarea name="description" rows="2" maxlength="2000">{{ selected_issue.description if selected_issue else '' }}</textarea></label>
     <div class="issue-compose-layout">
