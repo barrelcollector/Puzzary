@@ -162,7 +162,10 @@ starter_field = GenerationField('given_count','Starter cells','number','',minimu
 confirm_field = GenerationField('auto_confirm_lines','Auto-confirm completed lines','select','yes',options=(
     {'value':'yes','label':'On'},{'value':'no','label':'Off'}))
 
+from app.group_actions import cell_collaboration
+
 register_puzzle_type(PuzzleType(slug='takuzu',label='Takuzu / Binairo',description='Balanced binary logic grids with distinct rows and columns.',
+    collaboration=cell_collaboration(normalize_progress),
     generator=generate,source_builder=lambda *_:{},answer_checker=check_answer,progress_normalizer=normalize_progress,
     progress_counter=count_progress,theme_mode='none',print_layout=PrintLayout(slug='takuzu',sheet_class='print-layout-takuzu'),
     generation_fields=(GenerationField('grid_size','Grid size','select','6',options=tuple({'value':str(n),'label':f'{n}x{n}'} for n in (4,6,8,10))),starter_field,confirm_field),

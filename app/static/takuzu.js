@@ -44,6 +44,7 @@
   if (completed) status.textContent = 'Takuzu complete.';
   function answers() { return Object.fromEntries(cells.filter(c => !c.disabled && c.dataset.value !== '').map(c => [c.dataset.key,c.dataset.value])); }
   async function save() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     dirty = true;
     if (saving) return;
     saving = true;
@@ -56,7 +57,13 @@
     }
     saving = false;
   }
-  function queueSave(notify = true) { update(notify); clearTimeout(timer); timer = setTimeout(save,200); }
+  function queueSave(notify = true) { update(window.PuzzaryGroup ? false : notify); clearTimeout(timer); timer = setTimeout(save,200); }
+  window.PuzzaryGroup?.register({read:answers, apply(state) {
+    cells.forEach(cell => {
+      paint(cell,state.answers[cell.dataset.key] || '');
+      cell.classList.toggle('incorrect',(state.incorrect || []).includes(cell.dataset.key));
+    }); update(false);
+  }});
   root.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click',() => {
     mode = button.dataset.mode;
     root.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed',String(b === button)));

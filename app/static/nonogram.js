@@ -46,6 +46,7 @@
     return Object.fromEntries(cells.filter(c => !c.disabled && c.dataset.value !== '').map(c => [c.dataset.key, c.dataset.value]));
   }
   async function save() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     dirty = true;
     if (saving) return;
     saving = true;
@@ -61,7 +62,13 @@
     }
     saving = false;
   }
-  function queueSave(notify = true) { confirmLines(notify); clearTimeout(timer); timer = setTimeout(save, 200); }
+  function queueSave(notify = true) { confirmLines(window.PuzzaryGroup ? false : notify); clearTimeout(timer); timer = setTimeout(save, 200); }
+  window.PuzzaryGroup?.register({read:answers, apply(state) {
+    cells.forEach(cell => {
+      paint(cell,state.answers[cell.dataset.key] || '');
+      cell.classList.toggle('incorrect',(state.incorrect || []).includes(cell.dataset.key));
+    }); confirmLines(false);
+  }});
   cells.forEach(c => { if (!c.disabled && ['0','1'].includes(saved[c.dataset.key])) paint(c, saved[c.dataset.key]); });
   confirmLines(false);
   if (completed) status.textContent = 'Nonogram complete.';

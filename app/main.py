@@ -91,6 +91,8 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 from app.publishing import router as publishing_router
 app.include_router(publishing_router)
+from app.groups import router as groups_router
+app.include_router(groups_router)
 
 DICTIONARY_SYNC_CHECK_SECONDS = 15 * 60
 
@@ -1305,6 +1307,7 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "enabled": enabled,
         "supports_print": puzzle_type.supports_print,
         "supports_web_play": puzzle_type.supports_web_play,
+        "supports_group_solve": puzzle_type.collaboration is not None,
         "digital_only": puzzle_type.digital_only,
         "supports_gimmes": puzzle_type.supports_gimmes,
         "gimme_modes": list(puzzle_type.gimme_modes),
@@ -4037,6 +4040,14 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     if not isinstance(progress_answers, dict):
         progress_answers = {}
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    group_id = request.query_params.get('group', '')
+    if group_id:
+        from app.groups import group_for
+        group = group_for(db, group_id)
+        if group.puzzle_id != puzzle_id:
+            raise HTTPException(404, 'Group Solve belongs to another puzzle')
+        progress_payload = {}
+        progress_answers = {}
     puzzle_template_name = f"puzzle_types/{puzzle.puzzle_type}.html"
     solution_template_name = f"puzzle_solutions/{puzzle.puzzle_type}.html"
     has_puzzle_template = template_exists(puzzle_template_name)
@@ -4054,6 +4065,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "progress_found_words": found_words_for_progress(progress),
             "progress_payload": progress_payload,
             "progress_answers": progress_answers,
+            "group_id": group_id,
             "puzzle_type_definition": puzzle_type,
             "puzzle_template": puzzle_template_name,
             "solution_template": solution_template_name,

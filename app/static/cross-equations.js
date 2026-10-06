@@ -39,6 +39,7 @@
   }
 
   function saveProgress() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     if (!progressUrl) return;
     window.fetch(progressUrl, {
       method: "POST",
@@ -53,6 +54,12 @@
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveProgress, 250);
   }
+  window.PuzzaryGroup?.register({read:currentAnswers, apply(state) {
+    inputs.forEach(input => {
+      if (!input.disabled) input.value = state.answers[input.dataset.key] || '';
+      input.closest('.number-cell').classList.toggle('incorrect',(state.incorrect || []).includes(input.dataset.key));
+    }); progressSounds?.sync();
+  }});
 
   function inputAt(key) {
     return inputs.find((input) => input.dataset.key === key) || null;

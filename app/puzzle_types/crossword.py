@@ -6,6 +6,7 @@ from typing import Any
 
 from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, normalize_answer, register_puzzle_type
+from app.group_actions import cell_collaboration
 
 
 def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
@@ -652,6 +653,7 @@ def generate(
 register_puzzle_type(
     PuzzleType(
         slug="crossword",
+        collaboration=cell_collaboration(normalize_progress),
         label="Crossword",
         generator=generate,
         source_builder=build_source,

@@ -74,6 +74,7 @@ class PuzzleType:
     theme_mode: str = "free_text"
     preview_builder: Callable[[dict, dict, dict], dict] | None = None
     manual_editor_script: str = ""
+    collaboration: Callable[[dict, dict, dict], dict] | None = None
 
 
 def fallback_preview(kind: str, label: str) -> dict:

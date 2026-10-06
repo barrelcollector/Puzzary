@@ -51,7 +51,7 @@
         <li value="{{ clue.number }}">
           <span>{{ clue.clue }}</span>
           {% if clue.clues and clue.clues | length > 1 %}
-            <button type="button" class="ghost-button more-clue">More clues</button>
+            <button type="button" class="ghost-button more-clue" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">More clues</button>
             <ul class="clue-steps" hidden>
               {% for extra_clue in clue.clues[1:] %}
                 <li hidden>{{ extra_clue }}</li>
@@ -75,7 +75,7 @@
         <li value="{{ clue.number }}">
           <span>{{ clue.clue }}</span>
           {% if clue.clues and clue.clues | length > 1 %}
-            <button type="button" class="ghost-button more-clue">More clues</button>
+            <button type="button" class="ghost-button more-clue" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">More clues</button>
             <ul class="clue-steps" hidden>
               {% for extra_clue in clue.clues[1:] %}
                 <li hidden>{{ extra_clue }}</li>

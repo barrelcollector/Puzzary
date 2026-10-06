@@ -6,6 +6,7 @@ from itertools import product
 from typing import Any
 
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
+from app.group_actions import cell_collaboration
 
 
 DigitGrid = list[list[int]]
@@ -734,6 +735,7 @@ def build_manual_grid_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
 register_puzzle_type(
     PuzzleType(
         slug="cross_equations",
+        collaboration=cell_collaboration(normalize_progress),
         label="Cross Equations",
         generator=generate,
         source_builder=build_source,

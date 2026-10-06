@@ -12,6 +12,7 @@ from typing import Any
 from ortools.sat.python import cp_model
 
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
+from app.group_actions import cell_collaboration
 
 
 def runs(line):
@@ -185,6 +186,7 @@ def build_manual(options):
 
 register_puzzle_type(PuzzleType(
     slug="nonogram", label="Nonogram / Picross", description="Picture logic grids with numbered row and column runs.",
+    collaboration=cell_collaboration(normalize_progress),
     generator=generate, source_builder=lambda *_: {}, answer_checker=check_answer,
     progress_normalizer=normalize_progress, progress_counter=count_progress, theme_mode="none",
     print_layout=PrintLayout(slug="nonogram", sheet_class="print-layout-nonogram"),

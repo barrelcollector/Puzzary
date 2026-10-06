@@ -95,6 +95,49 @@ class Puzzle(Base):
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    group_solves: Mapped[list[GroupSolve]] = relationship(cascade="all, delete-orphan")
+
+
+class GroupSolve(Base):
+    __tablename__ = "group_solves"
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    host_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    participant_limit: Mapped[int] = mapped_column(Integer, default=0)
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)
+    cell_versions: Mapped[dict] = mapped_column(JSON, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    members: Mapped[list[GroupMember]] = relationship(cascade="all, delete-orphan")
+    actions: Mapped[list[GroupAction]] = relationship(cascade="all, delete-orphan")
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_member"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("group_solves.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    focus: Mapped[str] = mapped_column(String(80), default="")
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GroupAction(Base):
+    __tablename__ = "group_actions"
+    __table_args__ = (UniqueConstraint("group_id", "action_id", name="uq_group_action"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("group_solves.id"), index=True)
+    action_id: Mapped[str] = mapped_column(String(36))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    revision: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))
+    changes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class PublishedIssue(Base):

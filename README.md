@@ -434,6 +434,25 @@ Click or tap to cycle blank -> 0 -> 1 -> blank, or choose a 0/1 brush and drag. 
 
 Regression checks: `PYTHONPATH=. python scripts/verify_takuzu.py` validates all sizes/difficulties using an independent second-solution model, seeds, manual grids, and progress. `scripts/verify_takuzu_tools.py` checks interactive controls and the canvas. `scripts/verify_takuzu_live.py` is opt-in live QA that creates one sample and clears its test progress; `QA_PUZZLE_ID` reuses a sample.
 
+## Group Solve
+
+From a supported puzzle, expand Group Solve to start a fresh shared session or enter a session code. Invite links open the same puzzle and shared progress; personal answers, attempts and photos remain separate. All participants must be signed in (API clients use their own account token). Guests are not admitted. Supported adapters: Crossword, Sudoku, Cross Equations, Nonogram and Takuzu. Word Search, Word Pyramid and Maze currently show collaboration as unavailable until their placement/path/row adapters are implemented.
+
+Sessions persist in PostgreSQL with a seven-day expiry. The host remains the host when offline or leaving, and can rejoin without losing state. A limit of 0 uses the server cap of 50 members, including the host; each account may host up to 20 open sessions. Hosts can choose invite-link access or require approval, approve/remove players, change the limit, and close a session. Removed players cannot rejoin. Closed/expired sessions preserve their state for existing participants but reject changes and new joins.
+
+The browser polls authoritative snapshots every second without refreshing the page. Presence expires after 20 seconds; focused cells and recent contributions are highlighted and attributed. API edits are incremental, idempotent actions serialized with a PostgreSQL row lock. Revisions track changes per cell: stale edits to disjoint cells merge; stale edits to a changed cell return 409 instead of overwriting it. A rejected browser edit restores current shared state and shows a conflict message. Offline unsent changes are kept for reconnect; a later conflict still requires re-entry. Joining/reloading does not replay the completion sound.
+
+API (session-cookie or bearer-token authenticated):
+- `POST /api/puzzles/{id}/groups`: `{participant_limit: 0, approval_required: false}`.
+- `POST /api/groups/join`: `{code: "SESSIONCODE"}` (also accepts the group ID); approval requests return `pending: true` without revealing state.
+- `GET /api/groups/{id}?focus=0,1`: snapshot, revision, shared state/counts, members/presence and recent action attribution.
+- `POST /api/groups/{id}/actions`: `{action_id: "UUID", revision: 0, kind: "patch", changes: {"0,1": "1"}}`; an empty value erases. `check`, `hint` and `reveal` are shared actions. Crossword also supports `clue`, `check_entry`, `reveal_entry` with `target: "1:across"`.
+- `POST /api/groups/{id}/members`: `{user_id: 2, action: "approve"}` or `remove` (host only).
+- `POST /api/groups/{id}/settings`: same options as create (host only).
+- `POST /api/groups/{id}/leave` and `/close` (close is host only).
+
+Plugin contract: opt in with `PuzzleType.collaboration(state, action, solution) -> state`. The hook validates/applies edits; the existing progress counter determines shared completion. `app.group_actions.cell_collaboration(normalize_progress)` supplies cell/entry actions for coordinate-based plugins. Web modules register `window.PuzzaryGroup.register({read, apply})` and route saves to `PuzzaryGroup.save()` rather than personal progress. The API contract advertises `supports_group_solve`; unadapted plugins remain unavailable. Server state never contains the full solution, and fixed givens cannot be edited. Test with `PYTHONPATH=. python scripts/verify_groups.py` inside the application runtime; it uses an isolated temporary SQLite database and two authenticated browser contexts, never the live database.
+
 ## AI Assistance Disclosure
 
 This project includes AI-assisted scaffolding, implementation, and testing.

@@ -15,6 +15,8 @@
   </div>
 </section>
 
+{% include 'group_solve.html' %}
+
 <section
   class="celebration-panel is-hidden"
   id="completion-celebration"
@@ -82,6 +84,7 @@
       </section>
     {% endif %}
 
+    {% if not group_id %}
     <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/reset">
       <h2>Reset Puzzle</h2>
       <p class="muted">Clear your saved progress and answer attempts for this puzzle.</p>
@@ -97,6 +100,7 @@
       <input type="file" name="file" accept="image/*" required>
       <button type="submit">Upload</button>
     </form>
+    {% endif %}
   </aside>
 </section>
 
@@ -142,10 +146,11 @@
   </div>
 </section>
 <script src="/static/celebration.js?v=3"></script>
+<script src="/static/group-solve.js?v=1"></script>
 <script src="/static/word-search.js?v=12"></script>
-<script src="/static/crossword.js?v=10"></script>
+<script src="/static/crossword.js?v=11"></script>
 <script src="/static/word-pyramid.js?v=3"></script>
-<script src="/static/sudoku.js?v=4"></script>
-<script src="/static/cross-equations.js?v=4"></script>
+<script src="/static/sudoku.js?v=5"></script>
+<script src="/static/cross-equations.js?v=5"></script>
 <script src="/static/maze.js?v=3"></script>
 {% endblock %}

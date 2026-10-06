@@ -68,6 +68,7 @@
   }
 
   function saveProgress() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     if (!progressUrl) return;
     window.fetch(progressUrl, {
       method: "POST",
@@ -82,6 +83,22 @@
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveProgress, 250);
   }
+  window.PuzzaryGroup?.register({read() {
+    return Object.fromEntries(inputs.filter(input => !input.disabled && input.value.trim())
+      .map(input => [input.dataset.key,input.value.trim().toUpperCase()]));
+  }, apply(state) {
+    inputs.forEach(input => {
+      if (!input.disabled) input.value = state.answers[input.dataset.key] || '';
+      input.closest('.crossword-cell').classList.toggle('incorrect',(state.incorrect || []).includes(input.dataset.key));
+    }); progressSounds?.sync();
+    moreClueButtons.forEach(button => {
+      const count = state.clues?.[`${button.dataset.entryNumber}:${button.dataset.entryDirection}`] || 0;
+      const list = button.nextElementSibling, steps = [...list.querySelectorAll('li')];
+      list.hidden = !count; steps.forEach((step,i) => { step.hidden = i >= count; });
+      button.disabled = count >= steps.length;
+      button.textContent = button.disabled ? 'No more clues' : count ? `More clues (${steps.length-count})` : 'More clues';
+    });
+  }});
 
   function expectedFor(input) {
     const [xText, yText] = input.dataset.key.split(",");

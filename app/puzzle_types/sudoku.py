@@ -5,6 +5,7 @@ import random
 from typing import Any
 
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
+from app.group_actions import cell_collaboration
 
 
 Grid = list[list[int]]
@@ -472,6 +473,7 @@ def build_manual_grid_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
 register_puzzle_type(
     PuzzleType(
         slug="sudoku",
+        collaboration=cell_collaboration(normalize_progress),
         label="Sudoku",
         generator=generate,
         source_builder=build_source,
