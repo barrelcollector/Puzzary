@@ -98,6 +98,55 @@ try:
         b.reload(); b.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="1"',arg=k1)
         assert b.locator('#group-members').inner_text().count('online')==2
         assert b.locator('#group-host').is_hidden()
+        # A delayed heartbeat response must not roll back an acknowledged edit.
+        a.evaluate("""() => {
+          window.originalGroupFetch = window.fetch; let hold = true;
+          window.fetch = async (...args) => {
+            const response = await window.originalGroupFetch(...args);
+            if (hold && String(args[0]).startsWith('/api/groups/') && !args[1]?.method) {
+              hold = false;
+              return await new Promise(resolve => {window.releaseGroupHeartbeat = () => resolve(response)});
+            }
+            return response;
+          };
+        }""")
+        a.wait_for_function('!!window.releaseGroupHeartbeat')
+        a.locator(f'.takuzu-play [data-key="{k1}"]').press('0')
+        b.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="0"',arg=k1)
+        a.evaluate('window.releaseGroupHeartbeat()'); a.wait_for_timeout(1300)
+        assert a.locator(f'.takuzu-play [data-key="{k1}"]').inner_text()=='0'
+        a.evaluate('window.fetch=window.originalGroupFetch')
+        a.locator(f'.takuzu-play [data-key="{k1}"]').press('1')
+        b.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="1"',arg=k1)
+        # Heartbeats must not rebuild controls, repaint the board or erase the invite.
+        a.evaluate("""() => {
+          window.memberButton = document.querySelector('#group-members button');
+          window.boardMutations = 0;
+          window.boardObserver = new MutationObserver(records => {window.boardMutations += records.length});
+          window.boardObserver.observe(document.querySelector('.takuzu-play'), {subtree:true,childList:true,characterData:true});
+          Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('test clipboard unavailable')}}});
+        }""")
+        a.locator('#group-copy').click()
+        link=a.locator('#group-invite-url')
+        link.evaluate('(input)=>{input.focus();input.setSelectionRange(0,24)}')
+        a.wait_for_timeout(2500)
+        assert a.locator('#group-invite').evaluate('(e)=>e.open')
+        assert link.input_value()==url
+        assert a.locator('#group-message').inner_text()=='Clipboard unavailable. The invite link is shown above.'
+        assert link.evaluate('(e)=>document.activeElement===e && e.selectionStart===0 && e.selectionEnd===24')
+        assert a.evaluate("window.memberButton === document.querySelector('#group-members button')")
+        assert a.evaluate('window.boardMutations')==0,'Unchanged heartbeats must not repaint the puzzle'
+        a.evaluate("window.boardObserver.disconnect(); document.querySelector('#group-host').open=true")
+        a.locator('#group-settings [name="participant_limit"]').fill('7')
+        a.wait_for_timeout(1500)
+        assert a.locator('#group-host').evaluate('(e)=>e.open')
+        assert a.locator('#group-settings [name="participant_limit"]').input_value()=='7'
+        a.locator('#group-settings [name="participant_limit"]').fill('0')
+        # Clipboard success feedback is also independent from progress snapshots.
+        a.evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.copiedInvite=value}}})")
+        a.locator('#group-copy').click(); a.wait_for_timeout(1500)
+        assert a.evaluate('window.copiedInvite')==url
+        assert a.locator('#group-message').inner_text()=='Invite link copied.'
         host.set_offline(True)
         a.locator(f'.takuzu-play [data-key="{k1}"]').press('0'); a.wait_for_timeout(600)
         assert a.locator(f'.takuzu-play [data-key="{k1}"]').inner_text()=='0'
@@ -163,6 +212,14 @@ try:
                 page2.wait_for_function('([key,value])=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).value===value',arg=[key,value])
             endpoint2=base+'/api/groups/'+info['id']
             assert host.request.get(endpoint2).json()['state']['answers'][key]==value
+            if kind!='nonogram':
+                # Remote changes to another cell must preserve the focused input's caret.
+                page1.evaluate('(key)=>{const input=document.querySelector(`.puzzle-layout input[data-key="${key}"]`);input.focus();input.setSelectionRange(0,1)}',key)
+                other_cell=page2.locator('.puzzle-layout input[data-key]:not([disabled])').nth(1)
+                other_cell.press('B' if kind=='crossword' else '2')
+                other_key=other_cell.get_attribute('data-key'); other_value='B' if kind=='crossword' else '2'
+                page1.wait_for_function('([key,value])=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).value===value',arg=[other_key,other_value])
+                assert editable_cell.evaluate('(e)=>document.activeElement===e && e.selectionStart===0 && e.selectionEnd===1')
             if kind=='crossword':
                 more=page1.locator('.more-clue').first
                 if more.count():
@@ -171,6 +228,23 @@ try:
                 page1.locator('.reveal-entry:not([disabled])').first.click(); page1.wait_for_timeout(500)
                 assert host.request.get(endpoint2).json()['state']['hints_used']>=1
             page1.locator('#group-check').click(); page1.wait_for_timeout(400)
+            if kind!='nonogram':
+                with SessionLocal() as db:
+                    item=db.get(Puzzle,'qa-'+kind)
+                    solution=item.solution_payload.get('grid',item.solution_payload.get('answers',{}))
+                    x,y=map(int,key.split(',')); expected=str(solution[key] if isinstance(solution,dict) else solution[y][x])
+                changed=page2.locator(f'.puzzle-layout input[data-key="{key}"]')
+                if changed.input_value()!=expected:
+                    changed.fill(expected); changed.dispatch_event('input')
+                page1.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key)
+                page2.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key)
+                wrong='Z' if kind=='crossword' else '1' if expected!='1' else '2'
+                changed.fill(wrong); changed.dispatch_event('input')
+                try:
+                    page1.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("incorrect")',arg=key,timeout=5000)
+                except Exception as error:
+                    raise AssertionError((kind,expected,wrong,host.request.get(endpoint2).json()['state'],page2.locator('#group-status').inner_text())) from error
+                assert not editable_cell.evaluate('(e)=>e.parentElement.classList.contains("correct")')
             page1.get_by_text('Hints',exact=True).click(); page1.locator('#reveal-solution').click()
             page2.wait_for_function("document.querySelector('#group-status').textContent==='Group puzzle complete.'")
             assert host.request.get(endpoint2).json()['completed']

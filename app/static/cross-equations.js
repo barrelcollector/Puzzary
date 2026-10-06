@@ -56,7 +56,9 @@
   }
   window.PuzzaryGroup?.register({read:currentAnswers, apply(state) {
     inputs.forEach(input => {
-      if (!input.disabled) input.value = state.answers[input.dataset.key] || '';
+      const value = state.answers[input.dataset.key] || '';
+      if (!input.disabled && input.value !== value) input.value = value;
+      input.closest('.number-cell').classList.toggle('correct',!!input.value && input.value === expectedFor(input) && !!(state.checked || state.revealed));
       input.closest('.number-cell').classList.toggle('incorrect',(state.incorrect || []).includes(input.dataset.key));
     }); progressSounds?.sync();
   }});

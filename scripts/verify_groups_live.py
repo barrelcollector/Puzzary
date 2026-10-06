@@ -65,6 +65,24 @@ try:
         pages[0].locator(f'.takuzu-play [data-key="{keys[1]}"]').press('0')
         pages[1].wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="0"',arg=keys[1])
         pages[1].reload(); pages[1].wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="0"',arg=keys[1])
+        pages[0].evaluate("""() => {
+          window.liveMemberButton = document.querySelector('#group-members button');
+          window.liveBoardChanges = 0;
+          window.liveBoardObserver = new MutationObserver(records => {window.liveBoardChanges += records.length});
+          window.liveBoardObserver.observe(document.querySelector('.takuzu-play'),{subtree:true,childList:true,characterData:true});
+          Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new Error('mock clipboard unavailable')}}});
+        }""")
+        pages[0].locator('#group-copy').click()
+        field=pages[0].locator('#group-invite-url')
+        field.evaluate('(e)=>{e.focus();e.setSelectionRange(0,20)}')
+        pages[0].wait_for_timeout(2500)
+        assert field.input_value()==base+data['url']
+        assert pages[0].locator('#group-invite').evaluate('(e)=>e.open')
+        assert 'Clipboard unavailable' in pages[0].locator('#group-message').inner_text()
+        assert field.evaluate('(e)=>document.activeElement===e && e.selectionStart===0 && e.selectionEnd===20')
+        assert pages[0].evaluate('window.liveBoardChanges')==0
+        assert pages[0].evaluate("window.liveMemberButton===document.querySelector('#group-members button')")
+        pages[0].evaluate('window.liveBoardObserver.disconnect()')
         assert pages[1].get_by_role('heading',name='Admin Solution').count()==0
         assert not errors,errors
         browser.close()

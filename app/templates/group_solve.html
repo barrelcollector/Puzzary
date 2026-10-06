@@ -10,6 +10,11 @@
       <button type="button" id="group-hint">Group hint</button>
       <button type="button" id="group-leave" class="ghost-button">Leave</button>
     </div>
+    <details id="group-invite">
+      <summary>Invite link</summary>
+      <label>Invite link <input id="group-invite-url" type="text" readonly aria-label="Invite link"></label>
+    </details>
+    <p id="group-message" role="status" aria-live="polite"></p>
     <details id="group-host" hidden>
       <summary>Session settings</summary>
       <form id="group-settings">

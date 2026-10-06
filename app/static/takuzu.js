@@ -60,7 +60,8 @@
   function queueSave(notify = true) { update(window.PuzzaryGroup ? false : notify); clearTimeout(timer); timer = setTimeout(save,200); }
   window.PuzzaryGroup?.register({read:answers, apply(state) {
     cells.forEach(cell => {
-      paint(cell,state.answers[cell.dataset.key] || '');
+      const value = state.answers[cell.dataset.key] || '';
+      if (!cell.disabled && cell.dataset.value !== value) paint(cell,value);
       cell.classList.toggle('incorrect',(state.incorrect || []).includes(cell.dataset.key));
     }); update(false);
   }});

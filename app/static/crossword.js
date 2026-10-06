@@ -88,9 +88,15 @@
       .map(input => [input.dataset.key,input.value.trim().toUpperCase()]));
   }, apply(state) {
     inputs.forEach(input => {
-      if (!input.disabled) input.value = state.answers[input.dataset.key] || '';
+      const value = state.answers[input.dataset.key] || '';
+      if (!input.disabled && input.value !== value) input.value = value;
       input.closest('.crossword-cell').classList.toggle('incorrect',(state.incorrect || []).includes(input.dataset.key));
-    }); progressSounds?.sync();
+    });
+    const highlighted = new Set(settings.auto_highlight_correct ? entries.filter(entry => entryValues(entry).join('') === String(entry.answer || '').toUpperCase())
+      .flatMap(entry => cellsByEntry.get(entryId(entry)) || []) : []);
+    inputs.forEach(input => input.closest('.crossword-cell').classList.toggle('correct',
+      !!input.value && input.value === expectedFor(input) && !!(state.checked || state.revealed || (state.checked_keys || []).includes(input.dataset.key) || highlighted.has(input.dataset.key))));
+    progressSounds?.sync();
     moreClueButtons.forEach(button => {
       const count = state.clues?.[`${button.dataset.entryNumber}:${button.dataset.entryDirection}`] || 0;
       const list = button.nextElementSibling, steps = [...list.querySelectorAll('li')];

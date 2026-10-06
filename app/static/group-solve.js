@@ -4,6 +4,8 @@
   const id = panel.dataset.group;
   const status = panel.querySelector('#group-status');
   let adapter, snapshot, baseline = {}, busy = false, ready = false, focus = '', lastCompleted = false, notice = '';
+  let renderedState = '', renderedRevision = -1, mutation = 0;
+  const memberNodes = new Map();
   const board = document.querySelector('.puzzle-layout > .panel');
   async function api(url, body) {
     const response = await fetch(url, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -24,6 +26,18 @@
     catch (error) { status.textContent = error.message; }
   });
   if (!id) return;
+  function setText(element, value) { if (element.textContent !== value) element.textContent = value; }
+  function message(value) { setText(panel.querySelector('#group-message'),value); }
+  const inviteUrl = new URL(`/puzzles/${panel.dataset.puzzle}`,location.origin);
+  inviteUrl.searchParams.set('group',id);
+  panel.querySelector('#group-invite-url').value = inviteUrl.href;
+  function applyState(state) {
+    if (!adapter) return;
+    const encoded = JSON.stringify(state);
+    const revision = snapshot?.revision ?? -1;
+    if (encoded === renderedState && renderedRevision === revision && !Object.keys(diff(adapter.read(),state.answers)).length) return;
+    adapter.apply(state); renderedState = encoded; renderedRevision = revision;
+  }
   function block(disabled) {
     board.classList.toggle('group-blocked', disabled);
     board.inert = disabled;
@@ -37,33 +51,49 @@
       .filter(k => (a[k] || '') !== (b[k] || '')).map(k => [k, a[k] || '']));
   }
   function show(data, preserve = {}) {
+    if (snapshot && data.revision < snapshot.revision) return;
     snapshot = data;
     baseline = {...data.state.answers};
     const merged = {...baseline};
     for (const [k,v] of Object.entries(preserve)) { if (v) merged[k] = v; else delete merged[k]; }
-    adapter?.apply({...data.state, answers:merged});
+    applyState({...data.state, answers:merged});
     block(data.closed);
-    panel.querySelector('#group-code').textContent = data.code;
-    status.textContent = data.closed ? 'Session closed. Shared progress is preserved.' :
+    setText(panel.querySelector('#group-code'),data.code);
+    let summary = data.closed ? 'Session closed. Shared progress is preserved.' :
       data.completed ? 'Group puzzle complete.' : `${data.found_count} of ${data.expected_count} correct. Shared progress.`;
-    if (notice) status.textContent = `${notice} ${status.textContent}`;
+    if (notice) summary = `${notice} ${summary}`;
+    setText(status,summary);
     if (ready && data.completed && !lastCompleted) window.PuzzaryCelebrate?.complete();
     lastCompleted = data.completed;
     const host = data.user_id === data.host_id;
     panel.querySelector('#group-host').hidden = !host;
-    const list = panel.querySelector('#group-members'); list.replaceChildren();
-    for (const member of data.members.filter(m => ['active','pending'].includes(m.status))) {
-      const item = document.createElement('span'); item.className = 'group-member';
-      item.textContent = `${member.name}${member.user_id === data.host_id ? ' (host)' : ''} - ${member.status === 'pending' ? 'awaiting approval' : member.online ? 'online' : 'away'}`;
+    const list = panel.querySelector('#group-members');
+    const visible = data.members.filter(m => ['active','pending'].includes(m.status));
+    for (const [userId,item] of memberNodes) {
+      if (!visible.some(m => m.user_id === userId)) { item.remove(); memberNodes.delete(userId); }
+    }
+    for (const member of visible) {
+      let item = memberNodes.get(member.user_id);
+      if (!item) {
+        item = document.createElement('span'); item.className = 'group-member';
+        item.append(document.createElement('span'),document.createElement('span'));
+        memberNodes.set(member.user_id,item); list.append(item);
+      }
+      setText(item.firstElementChild,`${member.name}${member.user_id === data.host_id ? ' (host)' : ''} - ${member.status === 'pending' ? 'awaiting approval' : member.online ? 'online' : 'away'}`);
+      const actions = `${host}:${data.closed}:${member.status}`;
+      if (item.dataset.actions === actions) continue;
+      item.dataset.actions = actions;
+      const controls = item.lastElementChild; controls.replaceChildren();
       if (host && member.user_id !== data.host_id && !data.closed) {
         for (const action of member.status === 'pending' ? ['approve','remove'] : ['remove']) {
           const button = document.createElement('button'); button.type = 'button'; button.textContent = action === 'approve' ? 'Approve' : 'Remove';
           button.addEventListener('click',async () => {
+            mutation++;
             try { show(await api(`/api/groups/${id}/members`,{user_id:member.user_id,action}), adapter ? diff(adapter.read(),baseline) : {}); }
-            catch(error) { status.textContent = error.message; }
-          }); item.append(button);
+            catch(error) { message(error.message); }
+          }); controls.append(button);
         }
-      } list.append(item);
+      }
     }
     const cells = board.querySelectorAll('[data-key]');
     cells.forEach(cell => {
@@ -71,11 +101,12 @@
       const contributor = data.recent.find(a => a.keys.includes(key));
       cell.classList.toggle('group-recent',!!contributor && contributor.user_id !== data.user_id && contributor.revision > data.revision-3);
       cell.classList.toggle('group-focus',data.members.some(m => m.user_id !== data.user_id && m.status === 'active' && m.online && m.focus === key));
-      cell.title = contributor ? `Last edit: ${contributor.name}` : '';
+      const title = contributor ? `Last edit: ${contributor.name}` : '';
+      if (cell.title !== title) cell.title = title;
     });
   }
   window.PuzzaryGroup = {
-    register(value) { adapter = value; if (snapshot) adapter.apply(snapshot.state); },
+    register(value) { adapter = value; renderedState = ''; if (snapshot) applyState(snapshot.state); },
     save() { send('patch'); }
   };
   async function send(kind, target = '') {
@@ -88,6 +119,7 @@
     }
     if (kind === 'patch' && !Object.keys(changes).length) return;
     busy = true;
+    mutation++;
     let retryDelay = 100;
     let success = false;
     try {
@@ -124,22 +156,26 @@
   board.addEventListener('focusin',event => { focus = event.target.dataset.key || ''; });
   board.addEventListener('focusout',() => { focus = ''; });
   panel.querySelector('#group-copy').addEventListener('click',async () => {
-    try { await navigator.clipboard.writeText(location.href); status.textContent = 'Invite link copied.'; }
-    catch (_) { status.textContent = `Invite link: ${location.href}`; }
+    panel.querySelector('#group-invite').open = true;
+    try { await navigator.clipboard.writeText(inviteUrl.href); message('Invite link copied.'); }
+    catch (_) { message('Clipboard unavailable. The invite link is shown above.'); }
   });
   panel.querySelector('#group-leave').addEventListener('click',async () => {
+    mutation++;
     try { await api(`/api/groups/${id}/leave`,{}); location.assign(`/puzzles/${panel.dataset.puzzle}`); }
-    catch(error) { status.textContent = error.message; }
+    catch(error) { message(error.message); }
   });
   panel.querySelector('#group-close').addEventListener('click',async () => {
     if (!confirm('Close this Group Solve for everyone?')) return;
+    mutation++;
     try { show(await api(`/api/groups/${id}/close`,{})); }
-    catch(error) { status.textContent = error.message; }
+    catch(error) { message(error.message); }
   });
   panel.querySelector('#group-settings').addEventListener('submit',async event => {
     event.preventDefault();
-    try { show(await api(`/api/groups/${id}/settings`,options(event.target)),diff(adapter.read(),baseline)); }
-    catch(error) { status.textContent = error.message; }
+    mutation++;
+    try { show(await api(`/api/groups/${id}/settings`,options(event.target)),diff(adapter.read(),baseline)); message('Session settings saved.'); }
+    catch(error) { message(error.message); }
   });
   async function connect() {
     try {
@@ -158,8 +194,10 @@
   async function poll() {
     if (!ready) return;
     if (!busy) {
+      const generation = mutation;
       try {
         const data = await api(`/api/groups/${id}?focus=${encodeURIComponent(focus)}`);
+        if (busy || generation !== mutation || data.revision < snapshot.revision) { setTimeout(poll,1000); return; }
         if (adapter && !Object.keys(diff(adapter.read(),baseline)).length) show(data);
         if (data.closed) { show(data); return; }
       } catch(error) {
