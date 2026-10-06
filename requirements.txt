@@ -7,4 +7,4 @@ psycopg[binary]==3.2.3
 pydantic==2.10.4
 itsdangerous==2.2.0
 qrcode==7.4.2
-playwright==1.51.1
+playwright==1.58.0
