@@ -50,6 +50,24 @@
     smallWin: () => playNotes([523.25, 659.25, 783.99], 0.06, 0.09, 0.18),
     complete: () => playNotes([523.25, 659.25, 783.99], 0.08, 0.1, 0.2),
     isMuted: soundMuted,
+    createProgressTracker(readCompleted, isComplete) {
+      let known = new Set(readCompleted());
+      return {
+        sync() { known = new Set(readCompleted()); },
+        invalidate() {
+          const current = new Set(readCompleted());
+          known = new Set([...known].filter(id => current.has(id)));
+        },
+        check(scope = null) {
+          const current = new Set(readCompleted());
+          known = new Set([...known].filter(id => current.has(id)));
+          const eligible = [...current].filter(id => !scope || scope.includes(id));
+          const changed = eligible.some(id => !known.has(id));
+          eligible.forEach(id => known.add(id));
+          if (changed && !isComplete()) window.PuzzarySounds.progress();
+        },
+      };
+    },
   };
   if (!panel) return;
 

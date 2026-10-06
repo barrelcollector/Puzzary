@@ -23,6 +23,7 @@
   let rejectedGuesses = [];
   let celebrationReady = false;
   let suppressCelebration = false;
+  let soundedFound = new Set(found);
 
   try {
     placements = JSON.parse(grid.dataset.placements || "[]");
@@ -35,6 +36,11 @@
   );
 
   function syncFoundWords() {
+    const newFind = [...found].some(word => !soundedFound.has(word));
+    soundedFound = new Set(found);
+    if (newFind && celebrationReady && !suppressCelebration && found.size < words.size) {
+      window.PuzzarySounds?.progress();
+    }
     wordList.querySelectorAll("[data-word]").forEach((item) => {
       item.classList.toggle("found", found.has(item.dataset.word.toUpperCase()));
     });

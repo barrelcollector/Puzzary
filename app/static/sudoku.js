@@ -18,6 +18,24 @@
   } catch (_error) {
     solution = [];
   }
+  const units = [];
+  const boxRows = Number(root.dataset.boxRows || 3), boxCols = Number(root.dataset.boxCols || 3);
+  for (let n = 0; n < size; n++) {
+    units.push(inputs.filter(input => Number(input.dataset.key.split(',')[1]) === n));
+    units.push(inputs.filter(input => Number(input.dataset.key.split(',')[0]) === n));
+  }
+  for (let y = 0; y < size; y += boxRows) {
+    for (let x = 0; x < size; x += boxCols) {
+      units.push(inputs.filter(input => {
+        const [cx, cy] = input.dataset.key.split(',').map(Number);
+        return cx >= x && cx < x + boxCols && cy >= y && cy < y + boxRows;
+      }));
+    }
+  }
+  const progressSounds = window.PuzzarySounds?.createProgressTracker(
+    () => units.flatMap((unit, index) => unit.length && unit.every(input => input.value.trim() === expectedFor(input)) ? [index] : []),
+    () => inputs.length > 0 && inputs.every(input => input.value.trim() === expectedFor(input))
+  );
 
   function currentAnswers() {
     const answers = {};
@@ -78,6 +96,7 @@
     const digit = String(value).replace(allowed, "").slice(0, 1);
     input.value = digit;
     input.closest(".sudoku-cell").classList.remove("correct", "incorrect");
+    progressSounds?.invalidate();
     queueSave();
   }
 
@@ -86,6 +105,7 @@
       if (status) status.textContent = "Checking is off for this puzzle.";
       return;
     }
+    progressSounds?.check();
     let filled = 0;
     let correct = 0;
     inputs.forEach((input) => {
@@ -120,6 +140,7 @@
       input.closest(".sudoku-cell").classList.add("correct");
     });
     if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
+    progressSounds?.sync();
     saveProgress();
   }
 
@@ -170,6 +191,7 @@
         input.closest(".sudoku-cell").classList.remove("correct", "incorrect");
       });
       if (status) status.textContent = "Grid cleared.";
+      progressSounds?.sync();
       saveProgress();
     });
   }

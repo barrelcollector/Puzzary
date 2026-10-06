@@ -19,6 +19,14 @@
   } catch (_error) {
     solution = {};
   }
+  const equations = JSON.parse(root.dataset.equations || '[]');
+  const progressSounds = window.PuzzarySounds?.createProgressTracker(
+    () => equations.flatMap((equation, index) => equation.cells.length && equation.cells.every(key => {
+      const input = inputAt(key);
+      return input && input.value.trim() === expectedFor(input);
+    }) ? [index] : []),
+    () => inputs.length > 0 && inputs.every(input => input.value.trim() === expectedFor(input))
+  );
 
   function currentAnswers() {
     const answers = {};
@@ -79,14 +87,16 @@
     }
     input.value = text.slice(0, 4);
     input.closest(".number-cell").classList.remove("correct", "incorrect");
+    progressSounds?.invalidate();
     queueSave();
   }
 
   function expectedFor(input) {
-    return String(solution[input.dataset.key] || "");
+    return String(solution[input.dataset.key] ?? "");
   }
 
   function checkGrid() {
+    progressSounds?.check();
     let filled = 0;
     let correct = 0;
     inputs.forEach((input) => {
@@ -119,6 +129,7 @@
       input.closest(".number-cell").classList.add("correct");
     });
     if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
+    progressSounds?.sync();
     saveProgress();
   }
 
@@ -167,6 +178,7 @@
         input.closest(".number-cell").classList.remove("correct", "incorrect");
       });
       if (status) status.textContent = "Grid cleared.";
+      progressSounds?.sync();
       saveProgress();
     });
   }

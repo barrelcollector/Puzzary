@@ -53,6 +53,10 @@
     }
     cellsByEntry.set(entryId(entry), keys);
   });
+  const progressSounds = window.PuzzarySounds?.createProgressTracker(
+    () => entries.filter(entry => entryValues(entry).join("") === String(entry.answer || "").toUpperCase()).map(entryId),
+    () => inputs.length > 0 && inputs.every(input => input.value.trim().toUpperCase() === expectedFor(input))
+  );
 
   function currentAnswers() {
     const answers = {};
@@ -87,6 +91,7 @@
   }
 
   function checkGrid() {
+    progressSounds?.check();
     let filled = 0;
     let correct = 0;
     inputs.forEach((input) => {
@@ -122,6 +127,7 @@
   }
 
   function checkEntry(entry) {
+    progressSounds?.check([entryId(entry)]);
     const keys = cellsByEntry.get(entryId(entry)) || [];
     const expected = String(entry.answer || "").toUpperCase();
     const values = entryValues(entry);
@@ -147,6 +153,7 @@
 
   function autoHighlightEntries() {
     if (!settings.auto_highlight_correct) return;
+    progressSounds?.check();
     entries.forEach((entry) => {
       const expected = String(entry.answer || "").toUpperCase();
       const values = entryValues(entry);
@@ -166,6 +173,7 @@
       input.closest(".crossword-cell").classList.add("correct");
     });
     if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
+    progressSounds?.sync();
     saveProgress();
   }
 
@@ -187,6 +195,7 @@
       input.closest(".crossword-cell").classList.add("correct");
     });
     if (status) status.textContent = revealMode === "letter" ? `One letter revealed for ${entry.number} ${entry.direction}.` : `${entry.number} ${entry.direction} revealed.`;
+    progressSounds?.sync();
     saveProgress();
   }
 
@@ -244,6 +253,7 @@
     if (input.disabled) return;
     input.value = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     input.closest(".crossword-cell").classList.remove("correct", "incorrect");
+    progressSounds?.invalidate();
     queueSave();
     window.setTimeout(autoHighlightEntries, 0);
   }
@@ -310,6 +320,7 @@
         input.closest(".crossword-cell").classList.remove("correct", "incorrect");
       });
       if (status) status.textContent = "Grid cleared.";
+      progressSounds?.sync();
       saveProgress();
     });
   }

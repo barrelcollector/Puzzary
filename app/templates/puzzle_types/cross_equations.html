@@ -4,6 +4,7 @@
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.answers | tojson }}'
+  data-equations='{{ puzzle.play_payload.equations | tojson }}'
   data-value-max="{{ puzzle.play_payload.settings.result_max | default(9) }}"
   data-grid-size="{{ puzzle.play_payload.settings.grid_size | default(3) }}"
 >

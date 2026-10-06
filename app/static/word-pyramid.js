@@ -29,6 +29,10 @@
   inputsByRow.forEach((list) => {
     list.sort((a, b) => Number(a.dataset.cell) - Number(b.dataset.cell));
   });
+  const progressSounds = window.PuzzarySounds?.createProgressTracker(
+    () => [...inputsByRow.keys()].filter(index => rowAnswer(index) === answerFor(index)),
+    () => [...inputsByRow.keys()].every(index => rowAnswer(index) === answerFor(index))
+  );
 
   function answerFor(index) {
     return String((rows[index] && rows[index].answer) || "").toUpperCase();
@@ -85,6 +89,7 @@
     if (input.disabled) return;
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     setRowState(Number(input.dataset.row), "");
+    progressSounds?.invalidate();
     queueSave();
   }
 
@@ -99,6 +104,7 @@
   }
 
   function checkPyramid() {
+    progressSounds?.check();
     let correct = 0;
     inputsByRow.forEach((_list, rowIndex) => {
       const expected = answerFor(rowIndex);
@@ -125,6 +131,7 @@
     });
     setRowState(index, "correct");
     setStatus(`Row ${index + 1} revealed.`);
+    progressSounds?.sync();
     saveProgress();
   }
 
@@ -171,6 +178,7 @@
         setRowState(Number(input.dataset.row), "");
       });
       setStatus("Pyramid cleared.");
+      progressSounds?.sync();
       saveProgress();
     });
   }

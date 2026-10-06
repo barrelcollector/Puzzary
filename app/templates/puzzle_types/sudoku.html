@@ -5,6 +5,8 @@
   data-answers='{{ progress_answers | tojson }}'
   data-solution='{{ puzzle.solution_payload.grid | tojson }}'
   data-size="{{ puzzle.play_payload.settings.grid_size | default(9) }}"
+  data-box-rows="{{ puzzle.play_payload.settings.box_rows | default(3) }}"
+  data-box-cols="{{ puzzle.play_payload.settings.box_cols | default(3) }}"
   data-check-mode="{{ puzzle.play_payload.settings.check_mode | default('check_puzzle') }}"
 >
   <div

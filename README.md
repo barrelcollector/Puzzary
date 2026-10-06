@@ -416,6 +416,8 @@ Web play supports fill, empty (X), and erase brushes, mouse/touch painting, righ
 
 Puzzle modules can call `window.PuzzarySounds?.progress()` for a short two-note progress chime or `window.PuzzarySounds?.smallWin()` for a three-note small win without opening the completion panel. `window.PuzzarySounds?.complete()` plays the full completion sound only; `window.PuzzaryCelebrate?.complete()` opens the celebration and plays that sound. These shared methods respect the same sound-mute preference, reuse an audio context, and tolerate unavailable or blocked browser audio. Call them on user-driven transitions, not when restoring progress on load.
 
+Progress chimes are used for newly confirmed Word Search words, checked Crossword entries (or automatic correct-word highlighting when enabled), checked Word Pyramid rows, checked Sudoku rows/columns/boxes, and checked Cross Equations equations. Manual-check puzzles do not chime while typing. Repeated checks, restored answers, givens, and reveals are silent; full completion uses the existing celebration instead of layering a progress chime over it. Maze retains its finish sound because it has no confirmed intermediate milestone. `PuzzarySounds.createProgressTracker(readCompleted, isComplete)` provides `check(scope)`, `invalidate()`, and silent `sync()` for modules using checked milestones.
+
 Admin manual creation includes a pixel-painting canvas. Imported or manually entered solution grids must be square JSON arrays of integer 0/1 values, 5 to 15 cells per side. Prints contain clues and starter cells only, not the answer, and support web/PDF/issue-bundle output. The answer is displayed in the admin solution panel.
 
 Regression checks: `PYTHONPATH=. python scripts/verify_nonogram.py`.
