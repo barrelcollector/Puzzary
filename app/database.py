@@ -54,6 +54,8 @@ def ensure_schema() -> None:
     dictionary_definition_columns = {column["name"] for column in inspector.get_columns("dictionary_definitions")} if "dictionary_definitions" in table_names else set()
     tag_columns = {column["name"] for column in inspector.get_columns("puzzle_tags")} if "puzzle_tags" in table_names else set()
     with engine.begin() as connection:
+        if "group_members" in table_names and "presence" not in {c["name"] for c in inspector.get_columns("group_members")}:
+            connection.execute(text("ALTER TABLE group_members ADD COLUMN presence JSON"))
         if "archived_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
         if "auto_archive_at" not in puzzle_columns:

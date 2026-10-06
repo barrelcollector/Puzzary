@@ -83,7 +83,9 @@
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveProgress, 250);
   }
-  window.PuzzaryGroup?.register({read() {
+  window.PuzzaryGroup?.register({presence() {
+    return {entry: activeEntry && root.contains(document.activeElement) ? cellsByEntry.get(entryId(activeEntry)) || [] : []};
+  }, read() {
     return Object.fromEntries(inputs.filter(input => !input.disabled && input.value.trim())
       .map(input => [input.dataset.key,input.value.trim().toUpperCase()]));
   }, apply(state) {

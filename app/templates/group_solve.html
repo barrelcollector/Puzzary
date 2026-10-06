@@ -56,4 +56,18 @@
   .group-focus { outline: 2px dashed #a66420; outline-offset: -3px; }
   .group-blocked { pointer-events: none; opacity: .65; }
   #group-solve [hidden] { display: none; }
+  .group-presence-layer { position: fixed; inset: 0; pointer-events: none; z-index: 100; overflow: hidden; }
+  .group-presence-layer [hidden] { display: none !important; }
+  .group-player-pointer { position: absolute; top: 0; left: 0; transition: transform .2s linear; }
+  .group-player-pointer::before { content: ''; display: block; width: 13px; height: 18px; background: var(--player-color); clip-path: polygon(0 0,100% 65%,55% 65%,35% 100%); }
+  .group-player-pointer span, .group-focus-name { position: absolute; padding: 2px 5px; font-size: 11px; line-height: 16px; background: var(--player-color); color: white; border-radius: 3px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .group-player-pointer span { left: 12px; top: 14px; }
+  .group-player-pointer.label-left span { left: auto; right: 0; }
+  .group-player-focus, .group-player-entry { position: absolute; box-sizing: border-box; border: 2px solid var(--player-color); }
+  .group-player-entry { border-style: dashed; opacity: .65; }
+  .group-focus-name { right: 0; bottom: 100%; }
+  .group-player-caret { position: absolute; width: 2px; height: 50%; top: 25%; background: var(--player-color); }
+  .group-player-focus.has-selection { background: color-mix(in srgb,var(--player-color) 12%,transparent); }
+  @media print { .group-presence-layer { display: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .group-player-pointer { transition: none; } }
 </style>

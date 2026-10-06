@@ -52,6 +52,36 @@ class MemberControl(BaseModel):
     action: Literal['approve', 'remove']
 
 
+class Pointer(BaseModel):
+    key: str = Field(default='', max_length=80)
+    x: float = Field(ge=0, le=1, allow_inf_nan=False)
+    y: float = Field(ge=0, le=1, allow_inf_nan=False)
+
+
+class Presence(BaseModel):
+    pointer: Pointer | None = None
+    focus: str = Field(default='', max_length=80)
+    caret: int | None = Field(default=None, ge=0, le=16)
+    selection_end: int | None = Field(default=None, ge=0, le=16)
+    entry: list[str] = Field(default_factory=list, max_length=100)
+
+
+def presence_members(db, group, user):
+    rows = db.execute(select(GroupMember, User).join(User, GroupMember.user_id == User.id)
+                      .where(GroupMember.group_id == group.id)).all()
+    result = []
+    for member, account in rows:
+        if member.status != 'active' and user.id != group.host_id:
+            continue
+        online = bool(member.seen_at and (now()-utc(member.seen_at)).total_seconds() < 20)
+        value = member.presence or {}
+        fresh = online and now().timestamp() - value.get('updated_at', 0) < 4
+        result.append({'user_id': member.user_id, 'name': account.display_name, 'status': member.status,
+                       'online': online, 'focus': member.focus if online else '',
+                       'presence': value if fresh and member.status == 'active' else {}})
+    return result
+
+
 def group_for(db, group_id, lock=False):
     query = select(GroupSolve).where(GroupSolve.id == group_id)
     group = db.scalar(query.with_for_update() if lock else query)
@@ -90,10 +120,7 @@ def snapshot(db, group, user):
             'participant_limit': group.participant_limit, 'server_limit': SERVER_LIMIT,
             'approval_required': group.approval_required,
             'url': f'/puzzles/{group.puzzle_id}?group={group.id}',
-            'members': [{'user_id': m.user_id, 'name': u.display_name, 'status': m.status,
-                         'online': bool(m.seen_at and (now()-utc(m.seen_at)).total_seconds() < 20),
-                         'focus': m.focus if m.seen_at and (now()-utc(m.seen_at)).total_seconds() < 20 else ''}
-                        for m, u in members if m.status == 'active' or user.id == group.host_id],
+            'members': presence_members(db, group, user),
             'recent': [{'revision': a.revision, 'user_id': a.user_id, 'name': names.get(a.user_id, 'Player'),
                         'kind': a.kind, 'keys': list(a.changes)} for a in recent]}
 
@@ -180,6 +207,21 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
     return snapshot(db, group, user)
 
 
+@router.post('/api/groups/{group_id}/presence')
+def update_presence(group_id: str, payload: Presence, request: Request, db: Session = Depends(get_db)):
+    user = core().require_api_user(request, db)
+    group = group_for(db, group_id)
+    member = member_for(db, group, user)
+    writable(group)
+    if any(len(key) > 80 for key in payload.entry):
+        raise HTTPException(422, 'Cell key too long')
+    member.focus = payload.focus
+    member.seen_at = now()
+    member.presence = {**payload.model_dump(mode='json'), 'updated_at': now().timestamp()}
+    db.commit()
+    return {'members': presence_members(db, group, user)}
+
+
 @router.post('/api/groups/{group_id}/members')
 def manage_member(group_id: str, payload: MemberControl, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
@@ -204,7 +246,7 @@ def leave_group(group_id: str, request: Request, db: Session = Depends(get_db)):
     group = group_for(db, group_id, True)
     member = member_for(db, group, user, active=False)
     if member.status != 'removed' and user.id != group.host_id: member.status = 'left'
-    member.focus = ''; member.seen_at = None
+    member.focus = ''; member.seen_at = None; member.presence = None
     db.commit()
     return {'left': True}
 

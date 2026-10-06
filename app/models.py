@@ -124,6 +124,7 @@ class GroupMember(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(16), default="active")
     focus: Mapped[str] = mapped_column(String(80), default="")
+    presence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

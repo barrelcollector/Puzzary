@@ -13,7 +13,7 @@ import uuid
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from app.database import Base, engine, SessionLocal
-from app.models import GroupSolve, Puzzle, PuzzleProgress, User
+from app.models import GroupSolve, GroupMember, Puzzle, PuzzleProgress, User
 from app.puzzles import get_puzzle_type
 from app.main import SESSION_SECRET, hash_secret, hash_password
 
@@ -64,7 +64,21 @@ try:
         data=response.json(); gid=data['id']; code=data['code']
         url=base+data['url']; endpoint=base+'/api/groups/'+gid
         assert outsider.request.get(endpoint).status==403
+        assert outsider.request.post(endpoint+'/presence',data={}).status==403
         assert player.request.post(base+'/api/groups/join',data={'code':code}).ok
+        assert player.request.post(endpoint+'/presence',data={'pointer':{'x':2,'y':0}}).status==422
+        assert player.request.post(endpoint+'/presence',data={'entry':['x'*81]}).status==422
+        before_presence=host.request.get(endpoint).json()
+        response=player.request.post(endpoint+'/presence',data={'pointer':{'x':.25,'y':.5},'focus':'0,0','caret':1,'selection_end':1})
+        assert response.ok and 'state' not in response.json()
+        assert response.json()['members'][1]['presence']['pointer']=={'key':'','x':.25,'y':.5}
+        after_presence=host.request.get(endpoint).json()
+        assert before_presence['revision']==after_presence['revision'] and before_presence['state']==after_presence['state']
+        assert anonymous.request.post(endpoint+'/presence',data={}).status==401
+        with SessionLocal() as db:
+            member=db.query(GroupMember).filter_by(group_id=gid,user_id=ids[1]).one()
+            member.presence={**member.presence,'updated_at':time.time()-5}; db.commit()
+        assert not next(m for m in host.request.get(endpoint).json()['members'] if m['user_id']==ids[1])['presence']
         assert outsider.request.post(endpoint+'/close',data={}).status==403
         assert player.request.post(endpoint+'/settings',data={}).status==403
         token_context=browser.new_context(extra_http_headers={'Authorization':'Bearer test-token-not-a-real-secret'})
@@ -98,6 +112,36 @@ try:
         b.reload(); b.wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="1"',arg=k1)
         assert b.locator('#group-members').inner_text().count('online')==2
         assert b.locator('#group-host').is_hidden()
+        # Remote pointer/focus overlays never become interactive board content.
+        for page in [a,b]: page.evaluate('document.hasFocus = () => true')
+        remote=b.locator(f'.takuzu-play [data-key="{k2}"]')
+        remote.focus(); remote.hover()
+        a.wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)',arg=ids[1])
+        a.wait_for_function('(id)=>!!document.querySelector(`.group-player-focus[data-user="${id}"]:not([hidden])`)',arg=ids[1])
+        assert a.locator('.group-player-pointer span').inner_text()=='QA player'
+        assert a.locator('.group-presence-layer').evaluate('(e)=>getComputedStyle(e).pointerEvents')=='none'
+        bounds=remote.bounding_box()
+        ring=a.locator(f'.group-player-focus[data-user="{ids[1]}"]').bounding_box()
+        assert abs(bounds['width']-ring['width'])<2
+        a.screenshot(path='/tmp/group-presence-desktop.png',full_page=True)
+        a.set_viewport_size({'width':390,'height':844})
+        a.wait_for_timeout(1100)
+        a.screenshot(path='/tmp/group-presence-mobile.png',full_page=True)
+        mobile_ring=a.locator(f'.group-player-focus[data-user="{ids[1]}"]').bounding_box()
+        mobile_cell=a.locator(f'.takuzu-play [data-key="{k2}"]').bounding_box()
+        assert abs(mobile_ring['width']-mobile_cell['width'])<2
+        assert abs(mobile_ring['x']-mobile_cell['x'])<2
+        cursor=a.locator(f'.group-player-pointer[data-user="{ids[1]}"]').bounding_box()
+        assert mobile_cell['x'] <= cursor['x'] <= mobile_cell['x']+mobile_cell['width']
+        assert mobile_cell['y'] <= cursor['y'] <= mobile_cell['y']+mobile_cell['height']
+        assert a.locator('.group-presence-layer').evaluate('(e)=>getComputedStyle(e).display')!='none'
+        a.emulate_media(media='print')
+        assert a.locator('.group-presence-layer').evaluate('(e)=>getComputedStyle(e).display')=='none'
+        a.emulate_media(media='screen'); a.set_viewport_size({'width':1280,'height':1000})
+        b.mouse.move(0,0)
+        a.wait_for_function('(id)=>document.querySelector(`.group-player-pointer[data-user="${id}"]`).hidden',arg=ids[1])
+        b.locator('#group-copy').focus()
+        a.wait_for_function('(id)=>document.querySelector(`.group-player-focus[data-user="${id}"]`).hidden',arg=ids[1])
         # A delayed heartbeat response must not roll back an acknowledged edit.
         a.evaluate("""() => {
           window.originalGroupFetch = window.fetch; let hold = true;
@@ -176,6 +220,7 @@ try:
         assert host.request.post(endpoint+'/settings',data={'participant_limit':0,'approval_required':True}).ok
         assert pending.request.post(base+'/api/groups/join',data={'code':code}).json()['pending']
         assert pending.request.get(endpoint).status==403
+        assert pending.request.post(endpoint+'/presence',data={}).status==403
         assert pending.request.post(endpoint+'/actions',data={'action_id':str(uuid.uuid4()),'revision':0}).status==403
         assert player.request.post(endpoint+'/members',data={'user_id':ids[3],'action':'approve'}).status==403
         assert host.request.post(endpoint+'/members',data={'user_id':ids[3],'action':'approve'}).ok
@@ -193,6 +238,7 @@ try:
             assert personal.progress_payload=={'answers':{'personal':'kept'}}
             assert db.query(PuzzleProgress).filter_by(puzzle_id='group-qa',user_id=ids[1]).count()==0
         assert host.request.post(endpoint+'/close',data={}).ok
+        assert player.request.post(endpoint+'/presence',data={}).status==409
         assert action(player,host.request.get(endpoint).json()['revision'],{k1:''}).status==409
         a.reload(); a.wait_for_function("document.querySelector('#group-status').textContent.startsWith('Session closed')")
         assert a.locator('.puzzle-layout > .panel').evaluate('(e)=>e.inert')
@@ -213,8 +259,13 @@ try:
             endpoint2=base+'/api/groups/'+info['id']
             assert host.request.get(endpoint2).json()['state']['answers'][key]==value
             if kind!='nonogram':
+                for page in [page1,page2]: page.evaluate('document.hasFocus = () => true')
                 # Remote changes to another cell must preserve the focused input's caret.
                 page1.evaluate('(key)=>{const input=document.querySelector(`.puzzle-layout input[data-key="${key}"]`);input.focus();input.setSelectionRange(0,1)}',key)
+                page2.wait_for_function('(id)=>!!document.querySelector(`.group-player-focus[data-user="${id}"]:not([hidden]) .group-player-caret:not([hidden])`)',arg=ids[0])
+                page2.wait_for_function('(id)=>document.querySelector(`.group-player-focus[data-user="${id}"]`)?.classList.contains("has-selection")',arg=ids[0])
+                if kind=='crossword':
+                    page2.wait_for_function('!!document.querySelector(".group-player-entry:not([hidden])")')
                 other_cell=page2.locator('.puzzle-layout input[data-key]:not([disabled])').nth(1)
                 other_cell.press('B' if kind=='crossword' else '2')
                 other_key=other_cell.get_attribute('data-key'); other_value='B' if kind=='crossword' else '2'

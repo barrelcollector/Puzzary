@@ -57,7 +57,7 @@ try:
     with sync_playwright() as p:
         browser=p.chromium.launch(); pages=[]; errors=[]
         for value in cookies:
-            context=browser.new_context(viewport={'width':1280,'height':900})
+            context=browser.new_context(viewport={'width':1280,'height':900},has_touch=True)
             context.add_cookies([{'name':'session','value':value,'url':base}])
             page=context.new_page(); page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(base+data['url']); page.wait_for_function("!document.querySelector('.puzzle-layout > .panel').inert")
@@ -83,6 +83,20 @@ try:
         assert pages[0].evaluate('window.liveBoardChanges')==0
         assert pages[0].evaluate("window.liveMemberButton===document.querySelector('#group-members button')")
         pages[0].evaluate('window.liveBoardObserver.disconnect()')
+        for page in pages: page.evaluate('document.hasFocus = () => true')
+        remote=pages[1].locator(f'.takuzu-play [data-key="{keys[0]}"]')
+        remote.focus(); remote.hover()
+        pages[0].wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)',arg=ids[1])
+        pages[0].wait_for_function('(id)=>!!document.querySelector(`.group-player-focus[data-user="${id}"]:not([hidden])`)',arg=ids[1])
+        assert pages[0].locator('.group-presence-layer').evaluate('(e)=>getComputedStyle(e).pointerEvents')=='none'
+        pages[0].screenshot(path='/tmp/group-presence-live-desktop.png',full_page=True)
+        pages[0].set_viewport_size({'width':390,'height':844}); pages[0].wait_for_timeout(500)
+        pages[0].locator(f'.takuzu-play [data-key="{keys[0]}"]').scroll_into_view_if_needed()
+        pages[0].wait_for_timeout(300)
+        pages[0].screenshot(path='/tmp/group-presence-live-mobile.png')
+        remote.tap()
+        pages[0].wait_for_function('(id)=>document.querySelector(`.group-player-pointer[data-user="${id}"]`).hidden',arg=ids[1])
+        assert not pages[0].locator(f'.group-player-focus[data-user="{ids[1]}"]').is_hidden()
         assert pages[1].get_by_role('heading',name='Admin Solution').count()==0
         assert not errors,errors
         browser.close()

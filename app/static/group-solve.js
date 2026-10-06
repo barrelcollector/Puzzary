@@ -26,6 +26,107 @@
     catch (error) { status.textContent = error.message; }
   });
   if (!id) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'group-presence-layer'; overlay.setAttribute('aria-hidden','true');
+  document.body.append(overlay);
+  const cursorNodes = new Map();
+  const colors = ['#197667','#b33d56','#256ca6','#7951a8','#986013','#167e8c'];
+  let pointer = null, pointerAt = 0, presenceMembers = [], presenceReceived = 0;
+  function renderPresence(members) {
+    presenceMembers = members; presenceReceived = performance.now();
+    const bounds = board.getBoundingClientRect();
+    const active = new Set();
+    if (!snapshot?.closed && !document.hidden) for (const member of members) {
+      const value = member.presence || {};
+      if (member.user_id === snapshot?.user_id || member.status !== 'active' || !member.online || !value.updated_at) continue;
+      active.add(member.user_id);
+      let nodes = cursorNodes.get(member.user_id);
+      if (!nodes) {
+        const cursor = document.createElement('div'); cursor.className = 'group-player-pointer';
+        cursor.dataset.user = member.user_id;
+        const label = document.createElement('span'); cursor.append(label);
+        const ring = document.createElement('div'); ring.className = 'group-player-focus';
+        ring.dataset.user = member.user_id;
+        const name = document.createElement('span'); name.className = 'group-focus-name'; ring.append(name);
+        const caret = document.createElement('i'); caret.className = 'group-player-caret'; ring.append(caret);
+        const entry = document.createElement('div'); entry.className = 'group-player-entry';
+        overlay.append(cursor,ring,entry);
+        nodes = {cursor,label,ring,name,caret,entry}; cursorNodes.set(member.user_id,nodes);
+        for (const node of [cursor,ring,entry]) node.style.setProperty('--player-color',colors[member.user_id % colors.length]);
+      }
+      setText(nodes.label,member.name); setText(nodes.name,member.name);
+      const cells = [...board.querySelectorAll('[data-key]')];
+      const point = value.pointer;
+      nodes.cursor.hidden = !point;
+      if (point) {
+        const anchor = cells.find(c => c.dataset.key === point.key)?.getBoundingClientRect() || bounds;
+        const x = anchor.left + point.x * anchor.width, y = anchor.top + point.y * anchor.height;
+        nodes.cursor.style.transform = `translate(${x}px,${y}px)`;
+        nodes.cursor.classList.toggle('label-left',x > innerWidth-160);
+      }
+      const cell = cells.find(c => c.dataset.key === value.focus);
+      nodes.ring.hidden = !cell;
+      if (cell) {
+        const rect = cell.getBoundingClientRect();
+        Object.assign(nodes.ring.style,{left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`});
+        const length = Math.max(1,cell.value?.length || 1);
+        nodes.caret.hidden = value.caret === null || value.caret === undefined;
+        nodes.caret.style.left = `${25 + Math.min(1,value.caret / length) * 50}%`;
+        nodes.ring.classList.toggle('has-selection',value.selection_end > value.caret);
+      }
+      const rects = (value.entry || []).map(key => cells.find(c => c.dataset.key === key)?.getBoundingClientRect()).filter(Boolean);
+      nodes.entry.hidden = !rects.length;
+      if (rects.length) {
+        const left = Math.min(...rects.map(r => r.left)), top = Math.min(...rects.map(r => r.top));
+        Object.assign(nodes.entry.style,{left:`${left}px`,top:`${top}px`,width:`${Math.max(...rects.map(r => r.right))-left}px`,height:`${Math.max(...rects.map(r => r.bottom))-top}px`});
+      }
+    }
+    for (const [userId,nodes] of cursorNodes) if (!active.has(userId)) {
+      nodes.cursor.remove(); nodes.ring.remove(); nodes.entry.remove(); cursorNodes.delete(userId);
+    }
+  }
+  function repositionPresence() {
+    const received = presenceReceived;
+    if (performance.now()-received < 4000) renderPresence(presenceMembers);
+    else renderPresence([]);
+    presenceReceived = received;
+  }
+  window.addEventListener('resize',repositionPresence);
+  document.addEventListener('scroll',repositionPresence,true);
+  board.addEventListener('pointermove',event => {
+    if (event.pointerType === 'touch') return;
+    const cell = event.target.closest('[data-key]');
+    const rect = (cell || board).getBoundingClientRect();
+    pointer = {key:cell?.dataset.key || '',x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))};
+    pointerAt = performance.now();
+  });
+  board.addEventListener('pointerleave',() => { pointer = null; });
+  board.addEventListener('pointerdown',event => {
+    if (event.pointerType === 'touch') { pointer = null; focus = event.target.closest('[data-key]')?.dataset.key || ''; }
+  });
+  window.addEventListener('blur',() => { pointer = null; focus = ''; });
+  document.addEventListener('visibilitychange',() => { if (document.hidden) { pointer = null; focus = ''; renderPresence([]); } });
+  async function presencePoll() {
+    if (!ready || snapshot?.closed) { renderPresence([]); return; }
+    const element = document.activeElement;
+    if (performance.now()-pointerAt >= 4000) pointer = null;
+    const focused = board.contains(element) ? element.closest('[data-key]') : null;
+    if (document.hidden || !document.hasFocus()) focus = '';
+    else if (focused) focus = focused.dataset.key;
+    const body = document.hidden || !document.hasFocus() ? {} : {
+      pointer,
+      focus, caret: focused?.selectionStart ?? null, selection_end: focused?.selectionEnd ?? null,
+      entry: adapter?.presence?.().entry || []
+    };
+    try {
+      const data = await api(`/api/groups/${id}/presence`,body);
+      renderPresence(data.members);
+    } catch (error) {
+      if ([403,409].includes(error.status)) { renderPresence([]); return; }
+      if (performance.now()-presenceReceived > 4000) renderPresence([]);
+    }
+    setTimeout(presencePoll,document.hidden ? 3000 : pointer ? 250 : 1000);
+  }
   function setText(element, value) { if (element.textContent !== value) element.textContent = value; }
   function message(value) { setText(panel.querySelector('#group-message'),value); }
   const inviteUrl = new URL(`/puzzles/${panel.dataset.puzzle}`,location.origin);
@@ -58,6 +159,7 @@
     for (const [k,v] of Object.entries(preserve)) { if (v) merged[k] = v; else delete merged[k]; }
     applyState({...data.state, answers:merged});
     block(data.closed);
+    if (data.closed) renderPresence([]);
     setText(panel.querySelector('#group-code'),data.code);
     let summary = data.closed ? 'Session closed. Shared progress is preserved.' :
       data.completed ? 'Group puzzle complete.' : `${data.found_count} of ${data.expected_count} correct. Shared progress.`;
@@ -182,6 +284,7 @@
       const joined = await api('/api/groups/join',{code:id});
       if (joined.pending) { status.textContent = 'Waiting for host approval.'; setTimeout(connect,2000); return; }
       show(joined); ready = true;
+      presencePoll();
       const form = panel.querySelector('#group-settings');
       form.elements.participant_limit.value = joined.participant_limit;
       form.elements.approval_required.checked = joined.approval_required;
