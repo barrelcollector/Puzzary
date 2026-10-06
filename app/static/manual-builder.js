@@ -74,7 +74,7 @@
     const existing = form.querySelector("[data-level-editor]");
     if (existing) existing.remove();
     const target = form.querySelector("[data-manual-fields]");
-    if (!target || !editorTypes.has(type)) return null;
+    if (!target || (!editorTypes.has(type) && !window.PuzzaryManualEditors?.[type])) return null;
 
     const shell = document.createElement("section");
     shell.className = "level-editor";
@@ -733,6 +733,7 @@
     if (type === "sudoku") renderSudokuEditor(form, parts);
     if (type === "cross_equations") renderCrossEquationsEditor(form, parts);
     if (type === "maze") renderMazeEditor(form, parts);
+    window.PuzzaryManualEditors?.[type]?.(form, parts);
   }
 
   forms.forEach((form) => {

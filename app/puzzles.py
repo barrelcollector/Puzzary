@@ -73,6 +73,7 @@ class PuzzleType:
     manual_builder: Callable[[dict[str, Any]], GeneratedPuzzle] | None = None
     theme_mode: str = "free_text"
     preview_builder: Callable[[dict, dict, dict], dict] | None = None
+    manual_editor_script: str = ""
 
 
 def fallback_preview(kind: str, label: str) -> dict:

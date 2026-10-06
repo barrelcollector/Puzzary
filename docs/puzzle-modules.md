@@ -157,6 +157,10 @@ Without a custom play template, Puzzary falls back to a simple prompt and answer
 
 ## Print Support
 
+Modules can provide `app/templates/puzzle_print/{slug}.html` for custom print rendering without editing the central print dispatcher. It receives `puzzle`, `print_payload`, and `print_layout`; include necessary module CSS in the fragment so immutable issue snapshots preserve it.
+
+For a manual canvas editor, declare `manual_editor_script` as a static asset filename. Register `window.PuzzaryManualEditors[slug] = (form, parts) => { ... }` in that script. `parts` supplies the toolbar, canvas, and properties regions; synchronize the declared `manual_*` form fields. The admin loads registered module editor assets automatically.
+
 Set `supports_print=True` and provide a `PrintLayout`. If layout details depend on generated payload data, provide `print_layout_builder`.
 
 Every print-enabled module automatically participates in:

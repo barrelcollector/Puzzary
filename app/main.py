@@ -1313,11 +1313,13 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "source_requirements": list(puzzle_type.source_requirements),
         "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
         "manual_editor_fields": [serialize_generation_field(field) for field in puzzle_type.manual_editor_fields],
+        "manual_editor_script": puzzle_type.manual_editor_script,
         "supports_manual_editor": puzzle_type.manual_builder is not None,
         "print_layout": puzzle_type.print_layout.as_dict(),
         "templates": {
             "play": f"puzzle_types/{puzzle_type.slug}.html",
             "solution": f"puzzle_solutions/{puzzle_type.slug}.html",
+            "print": f"puzzle_print/{puzzle_type.slug}.html",
         },
     }
 
@@ -4130,6 +4132,7 @@ def render_puzzle_print_page(
             "current_user": user,
             "puzzle_type_definition": puzzle_type,
             "print_payload": puzzle.print_payload or {},
+            "has_module_print_template": template_exists(f"puzzle_print/{puzzle.puzzle_type}.html"),
             "print_layout": print_layout,
             "print_gimme_cells": printable_gimme_cells(puzzle),
             "print_gimme_words": printable_gimme_words(puzzle),

@@ -408,6 +408,16 @@ Use `Authorization: Bearer YOUR_ACCOUNT_API_TOKEN` for automation requests. Draf
 
 Regression checks: `PYTHONPATH=. python scripts/verify_publishing.py` runs against a separate in-memory SQLite database and renders sample bundle PDFs under `/tmp/puzzary-publishing-qa`.
 
+## Nonogram / Picross
+
+Nonogram is a self-contained puzzle module with no dictionary or theme requirement. Generate square grids from 5x5 to 15x15 with mirrored, rotational, or random pixel patterns, optional starter cells, and a reproducible seed. OR-Tools CP-SAT proves uniqueness; additional fixed cells are added when clues alone have more than one answer. A timeout rejects generation rather than claiming uniqueness.
+
+Web play supports fill, empty (X), and erase brushes, mouse/touch painting, right-click empty marks, arrow-key navigation, Space/Enter marking, X for empty, and Delete to erase. Progress belongs to the signed-in account. Check highlights incorrect marks; reveal, reset, and completion celebration use the existing puzzle workflow. Empty cells do not all need X marks to complete, but incorrect X marks prevent completion.
+
+Admin manual creation includes a pixel-painting canvas. Imported or manually entered solution grids must be square JSON arrays of integer 0/1 values, 5 to 15 cells per side. Prints contain clues and starter cells only, not the answer, and support web/PDF/issue-bundle output. The answer is displayed in the admin solution panel.
+
+Regression checks: `PYTHONPATH=. python scripts/verify_nonogram.py`.
+
 ## AI Assistance Disclosure
 
-This project was initially scaffolded with AI assistance.
+This project includes AI-assisted scaffolding, implementation, and testing.

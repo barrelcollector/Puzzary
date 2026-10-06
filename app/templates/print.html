@@ -62,7 +62,10 @@
     <p class="print-instructions">{{ print_layout.instructions or puzzle.prompt }}</p>
   {% endif %}
 
-  {% if print_payload.kind == "word_search" %}
+  {% set module_print_template = 'puzzle_print/' ~ puzzle.puzzle_type ~ '.html' %}
+  {% if has_module_print_template %}
+    {% include module_print_template %}
+  {% elif print_payload.kind == "word_search" %}
     <section class="print-word-search">
       <div class="print-word-grid {% if print_payload.settings.print_style | default('boxed') == 'compact' %}compact{% endif %}" style="--grid-size: {{ print_payload.grid | length }}; --word-grid-target-cell: {% if print_payload.grid | length >= 22 %}22px{% elif print_payload.grid | length >= 18 %}25px{% else %}31px{% endif %}; --word-grid-font: {% if print_payload.grid | length >= 22 %}15px{% elif print_payload.grid | length >= 18 %}17px{% else %}20px{% endif %}">
         {% for row in print_payload.grid %}
