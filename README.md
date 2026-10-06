@@ -384,6 +384,7 @@ Authenticated API routes:
 
 - `GET /api/issues`: non-archived issues; regular accounts see published issues only.
 - `GET /api/issues/latest`: newest published, non-archived issue, including ordered modules and `pdf_url`.
+- `GET /api/issues/latest/print.pdf?size=zebra`: download the latest published issue directly.
 - `GET /api/issues/{id}`: issue metadata and ordered print payloads.
 - `GET /api/issues/{id}/print.pdf?size=zebra`: combined PDF; accepts standard/custom paper parameters.
 - `POST /api/issues`: admin draft creation.

@@ -2010,7 +2010,7 @@ legend {
 .issue-module-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .issue-module-heading strong { min-width: 0; overflow-wrap: anywhere; }
 .issue-module-heading .action-row { flex-wrap: nowrap; flex-shrink: 0; }
-.issue-icon-button { width: 34px; height: 34px; padding: 0; }
+.issue-module-heading .issue-icon-button { flex: 0 0 34px; width: 34px; min-width: 34px; height: 34px; padding: 0; }
 .issue-module-row label { display: block; margin-top: 12px; }
 .issue-table { width: 100%; border-collapse: collapse; }
 .issue-table th, .issue-table td { padding: 12px 8px; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

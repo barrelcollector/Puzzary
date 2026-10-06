@@ -283,11 +283,21 @@ def api_issue_list(request: Request, db: Session = Depends(get_db)):
 @router.get("/api/issues/latest")
 def api_latest_issue(request: Request, db: Session = Depends(get_db)):
     core().require_api_user(request, db)
+    return issue_metadata(latest_published_issue(db), db)
+
+
+def latest_published_issue(db):
     issue = db.scalar(select(PublishedIssue).where(PublishedIssue.published_at.is_not(None), PublishedIssue.archived_at.is_(None))
                       .order_by(desc(PublishedIssue.published_at)).limit(1))
     if issue is None:
         raise HTTPException(404, "No published issues")
-    return issue_metadata(issue, db)
+    return issue
+
+
+@router.get("/api/issues/latest/print.pdf")
+def api_latest_issue_pdf(request: Request, db: Session = Depends(get_db)):
+    user = core().require_api_user(request, db)
+    return issue_pdf(latest_published_issue(db), request, db, user)
 
 
 @router.post("/api/issues", status_code=201)
