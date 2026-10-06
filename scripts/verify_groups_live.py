@@ -133,6 +133,36 @@ try:
         pages[0].wait_for_function('(id)=>document.querySelector(`.group-player-pointer[data-user="${id}"]`).hidden',arg=ids[1])
         assert not pages[0].locator(f'.group-player-focus[data-user="{ids[1]}"]').is_hidden()
         assert pages[1].get_by_role('heading',name='Admin Solution').count()==0
+        # Guest identity is cookie-bound and confined to this temporary group.
+        assert request(0, endpoint+'/settings', {'allow_guests': True})[0] == 200
+        guest = browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
+        gp = guest.new_page(); gp.on('pageerror',lambda error:errors.append(str(error)))
+        gp.goto(base+data['url'])
+        gp.locator('#guest-join [name=name]').fill('QA guest '+gid[:8])
+        gp.locator('#guest-join button').click()
+        gp.wait_for_function("document.querySelector('#group-solve')?.dataset.revision!==undefined")
+        gp.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
+        identity = guest.request.get(base+endpoint).json()
+        guest_id = identity['user_id']
+        assert identity['is_guest'] and guest_id < 0 and not identity['can_allow_guests']
+        assert guest.request.get(base+f'/api/puzzles/{pid}/progress').status == 401
+        assert gp.get_by_role('heading',name='Admin Solution').count() == 0
+        gp.locator(f'.takuzu-play [data-key="{keys[2]}"]').press('1')
+        pages[0].wait_for_function('(key)=>document.querySelector(`.takuzu-play [data-key="${key}"]`).dataset.value==="1"',arg=keys[2])
+        gp.reload()
+        gp.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
+        assert guest.request.get(base+endpoint).json()['user_id'] == guest_id
+        gp.screenshot(path='/tmp/group-guest-live-mobile.png',full_page=True)
+        guest_cookie = next(c['value'] for c in guest.cookies() if c['name']=='session')
+        for origin in origins:
+            guest_ws = origin.replace('https:','wss:').replace('http:','ws:')+endpoint+'/presence/ws'
+            with ws_connect(guest_ws,origin=origin,additional_headers={'Cookie':'session='+guest_cookie},proxy=None) as socket:
+                initial = json.loads(socket.recv(timeout=5))
+                assert initial['type']=='ready' and initial['snapshot']['user_id']==guest_id
+        assert request(0,endpoint+'/settings',{'allow_guests':False})[0] == 200
+        assert guest.request.get(base+endpoint).status==401
+        gp.wait_for_function("document.querySelector('.puzzle-layout > .panel').inert",timeout=15000)
+        print('Live mobile guest join/reload/edit, LAN/public WebSocket access and disabling guests passed.')
         assert not errors,errors
         browser.close()
     with SessionLocal() as db:

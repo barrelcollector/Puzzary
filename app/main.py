@@ -4021,17 +4021,39 @@ def admin_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db
 
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
 def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
-    user = require_web_user(request, db)
+    group_id = request.query_params.get('group', '')
+    user = current_user(request, db)
+    if not user and group_id:
+        from app.groups import group_for, guests_allowed, require_group_user, member_for, writable
+        group = group_for(db, group_id)
+        if group.puzzle_id != puzzle_id:
+            raise HTTPException(404, 'Group Solve belongs to another puzzle')
+        if guests_allowed(db, group):
+            try:
+                user = require_group_user(request, db, group)
+            except HTTPException as error:
+                if error.status_code != 401:
+                    raise
+                writable(group)
+                return templates.TemplateResponse('group_guest_join.html', {
+                    'request': request, 'group': group, 'current_user': None,
+                })
+            member = member_for(db, group, user, active=False)
+            if member.status == 'removed':
+                raise HTTPException(403, 'You were removed from this session')
+    if not user:
+        user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-    users = db.scalars(select(User).order_by(User.display_name)).all()
-    attempts = db.scalars(
+    is_guest = getattr(user, 'is_guest', False)
+    users = [] if is_guest else db.scalars(select(User).order_by(User.display_name)).all()
+    attempts = [] if is_guest else db.scalars(
         select(PuzzleAttempt).where(PuzzleAttempt.puzzle_id == puzzle_id).order_by(desc(PuzzleAttempt.created_at)).limit(10)
     ).all()
-    photos = db.scalars(
+    photos = [] if is_guest else db.scalars(
         select(PuzzlePhoto).where(PuzzlePhoto.puzzle_id == puzzle_id).order_by(desc(PuzzlePhoto.created_at)).limit(10)
     ).all()
     progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
@@ -4040,7 +4062,6 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     if not isinstance(progress_answers, dict):
         progress_answers = {}
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
-    group_id = request.query_params.get('group', '')
     if group_id:
         from app.groups import group_for
         group = group_for(db, group_id)

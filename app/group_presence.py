@@ -41,19 +41,19 @@ def mark_state_changed(group_id):
 
 
 def read_snapshot(socket, group_id):
-    from app.groups import core, group_for, member_for, snapshot
+    from app.groups import require_group_user, group_for, member_for, snapshot
     with SessionLocal() as db:
-        user = core().require_api_user(socket, db)
         group = group_for(db, group_id)
+        user = require_group_user(socket, db, group)
         member_for(db, group, user)
         return snapshot(db, group, user)
 
 
 def authorize(socket, group_id, value=None):
-    from app.groups import core, group_for, member_for, writable, now, presence_members
+    from app.groups import require_group_user, group_for, member_for, writable, now, presence_members
     with SessionLocal() as db:
-        user = core().require_api_user(socket, db)
         group = group_for(db, group_id)
+        user = require_group_user(socket, db, group)
         member = member_for(db, group, user)
         writable(group)
         member.seen_at = now()

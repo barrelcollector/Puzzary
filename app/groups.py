@@ -1,8 +1,10 @@
-"""Persistent, account-only Group Solve sessions. Row locks serialize all writes."""
+"""Persistent Group Solve sessions with opt-in, group-scoped guests."""
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 import secrets
 import uuid
+import hashlib
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field
@@ -40,10 +42,45 @@ def utc(value):
 class GroupOptions(BaseModel):
     participant_limit: int = Field(default=0, ge=0, le=SERVER_LIMIT)
     approval_required: bool = False
+    allow_guests: bool = False
 
 
 class Join(BaseModel):
     code: str = Field(min_length=1, max_length=26)
+
+
+class GuestJoin(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+def participant_id(member):
+    return member.user_id if member.user_id is not None else -member.id
+
+
+def guests_allowed(db, group):
+    host = db.get(User, group.host_id)
+    return bool(group.allow_guests and host and host.is_active and host.is_admin)
+
+
+def require_group_user(request, db, group):
+    try:
+        return core().require_api_user(request, db)
+    except HTTPException as error:
+        if error.status_code != 401 or request.headers.get('authorization'):
+            raise
+    token = request.session.get('group_guests', {}).get(group.id, '')
+    if not token or not guests_allowed(db, group):
+        raise HTTPException(401, 'Sign in or join this group as a guest')
+    member = db.scalar(select(GroupMember).where(
+        GroupMember.group_id == group.id, GroupMember.user_id.is_(None),
+        GroupMember.guest_token_hash == hashlib.sha256(token.encode()).hexdigest()))
+    if not member:
+        raise HTTPException(401, 'Guest session not found')
+    return SimpleNamespace(id=-member.id, display_name=member.guest_name, is_admin=False, is_guest=True)
+
+
+def member_identity(user):
+    return GroupMember.id == -user.id if getattr(user, 'is_guest', False) else GroupMember.user_id == user.id
 
 
 class Action(BaseModel):
@@ -74,7 +111,7 @@ class Presence(BaseModel):
 
 
 def presence_members(db, group, user):
-    rows = db.execute(select(GroupMember, User).join(User, GroupMember.user_id == User.id)
+    rows = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
                       .where(GroupMember.group_id == group.id)).all()
     result = []
     for member, account in rows:
@@ -83,7 +120,8 @@ def presence_members(db, group, user):
         online = bool(member.seen_at and (now()-utc(member.seen_at)).total_seconds() < 20)
         value = member.presence or {}
         fresh = online and now().timestamp() - value.get('updated_at', 0) < 4
-        result.append({'user_id': member.user_id, 'name': account.display_name, 'status': member.status,
+        result.append({'user_id': participant_id(member), 'name': account.display_name if account else member.guest_name,
+                       'guest': account is None, 'status': member.status,
                        'online': online, 'focus': member.focus if online else '',
                        'presence': value if fresh and member.status == 'active' else {}})
     return result
@@ -97,7 +135,7 @@ def group_for(db, group_id, lock=False):
 
 
 def member_for(db, group, user, active=True):
-    member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.user_id == user.id))
+    member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, member_identity(user)))
     if not member or (active and member.status != 'active'):
         raise HTTPException(403, 'Join this Group Solve first; approval may be required')
     return member
@@ -113,11 +151,11 @@ def snapshot(db, group, user):
     plugin = get_puzzle_type(puzzle.puzzle_type)
     if not plugin or not plugin.collaboration: raise HTTPException(410, 'Collaboration plugin is unavailable')
     found, total = plugin.progress_counter(group.state, puzzle.solution_payload)
-    members = db.execute(select(GroupMember, User).join(User, GroupMember.user_id == User.id)
+    members = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
                          .where(GroupMember.group_id == group.id)).all()
     recent = db.scalars(select(GroupAction).where(GroupAction.group_id == group.id)
                         .order_by(GroupAction.id.desc()).limit(20)).all()
-    names = {m.user_id: u.display_name for m, u in members}
+    names = {participant_id(m): u.display_name if u else m.guest_name for m, u in members}
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
             'host_id': group.host_id, 'user_id': user.id, 'revision': group.revision,
             'state': group.state, 'found_count': found, 'expected_count': total,
@@ -126,15 +164,21 @@ def snapshot(db, group, user):
             'expires_at': group.expires_at.isoformat(),
             'participant_limit': group.participant_limit, 'server_limit': SERVER_LIMIT,
             'approval_required': group.approval_required,
+            'allow_guests': guests_allowed(db, group),
+            'can_allow_guests': user.id == group.host_id and user.is_admin,
+            'is_guest': getattr(user, 'is_guest', False),
             'url': f'/puzzles/{group.puzzle_id}?group={group.id}',
             'members': presence_members(db, group, user),
-            'recent': [{'revision': a.revision, 'user_id': a.user_id, 'name': names.get(a.user_id, 'Player'),
+            'recent': [{'revision': a.revision, 'user_id': a.user_id if a.user_id is not None else -a.guest_member_id,
+                        'name': names.get(a.user_id if a.user_id is not None else -a.guest_member_id, 'Player'),
                         'kind': a.kind, 'keys': list(a.changes)} for a in recent]}
 
 
 @router.post('/api/puzzles/{puzzle_id}/groups')
 def create_group(puzzle_id: str, payload: GroupOptions, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
+    if payload.allow_guests and not user.is_admin:
+        raise HTTPException(403, 'Only an admin host can allow guests')
     puzzle = db.get(Puzzle, puzzle_id)
     if not puzzle: raise HTTPException(404, 'Puzzle not found')
     plugin = get_puzzle_type(puzzle.puzzle_type)
@@ -153,11 +197,11 @@ def create_group(puzzle_id: str, payload: GroupOptions, request: Request, db: Se
 
 @router.post('/api/groups/join')
 def join_group(payload: Join, request: Request, db: Session = Depends(get_db)):
-    user = core().require_api_user(request, db)
     code = payload.code.strip()
     group = db.scalar(select(GroupSolve).where((GroupSolve.code == code.upper()) | (GroupSolve.id == code)).with_for_update())
     if not group: raise HTTPException(404, 'Group Solve not found')
-    member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.user_id == user.id))
+    user = require_group_user(request, db, group)
+    member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, member_identity(user)))
     if member and member.status == 'removed': raise HTTPException(403, 'You were removed from this session')
     if member and member.status == 'active': return snapshot(db, group, user)
     writable(group)
@@ -173,10 +217,53 @@ def join_group(payload: Join, request: Request, db: Session = Depends(get_db)):
     return {'pending': True, 'url': f'/puzzles/{group.puzzle_id}?group={group.id}', 'id': group.id} if member.status == 'pending' else snapshot(db, group, user)
 
 
+@router.post('/api/groups/{group_id}/guests')
+def join_guest(group_id: str, payload: GuestJoin, request: Request, db: Session = Depends(get_db)):
+    group = group_for(db, group_id, True)
+    writable(group)
+    if not guests_allowed(db, group):
+        raise HTTPException(403, 'Guest access is disabled for this group')
+    if core().current_user(request, db):
+        raise HTTPException(400, 'Signed-in players should join with their account')
+    try:
+        user = require_group_user(request, db, group)
+    except HTTPException as error:
+        if error.status_code != 401:
+            raise
+    else:
+        member_for(db, group, user, active=False)
+        return join_group(Join(code=group.id), request, db)
+    name = payload.name.strip()
+    if not name or any(ord(c) < 32 for c in name):
+        raise HTTPException(422, 'Enter a display name')
+    existing = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
+                          .where(GroupMember.group_id == group.id)).all()
+    if any(name.casefold() == (u.display_name if u else m.guest_name or '').casefold() for m, u in existing):
+        raise HTTPException(409, 'That name is already used in this group')
+    if len(existing) >= 200:
+        raise HTTPException(429, 'Guest join limit reached')
+    active = sum(m.status == 'active' for m, _ in existing)
+    if active >= (group.participant_limit or SERVER_LIMIT):
+        raise HTTPException(409, 'Participant limit reached')
+    token = secrets.token_urlsafe(32)
+    member = GroupMember(group_id=group.id, guest_name=name,
+                         guest_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                         status='pending' if group.approval_required else 'active', seen_at=now())
+    db.add(member)
+    db.commit()
+    sessions = dict(request.session.get('group_guests', {}))
+    if len(sessions) >= 20:
+        sessions.pop(next(iter(sessions)))
+    sessions[group.id] = token
+    request.session['group_guests'] = sessions
+    publish_state_change(group.id)
+    return {'url': f'/puzzles/{group.puzzle_id}?group={group.id}', 'pending': member.status == 'pending'}
+
+
 @router.get('/api/groups/{group_id}')
 def read_group(group_id: str, request: Request, focus: str = '', db: Session = Depends(get_db)):
-    user = core().require_api_user(request, db)
     group = group_for(db, group_id)
+    user = require_group_user(request, db, group)
     member = member_for(db, group, user)
     member.seen_at = now(); member.focus = focus[:80]
     db.commit()
@@ -185,12 +272,13 @@ def read_group(group_id: str, request: Request, focus: str = '', db: Session = D
 
 @router.post('/api/groups/{group_id}/actions')
 def group_action(group_id: str, payload: Action, request: Request, db: Session = Depends(get_db)):
-    user = core().require_api_user(request, db)
     group = group_for(db, group_id, True)
-    member_for(db, group, user); writable(group)
+    user = require_group_user(request, db, group)
+    member = member_for(db, group, user); writable(group)
     duplicate = db.scalar(select(GroupAction).where(GroupAction.group_id == group.id, GroupAction.action_id == str(payload.action_id)))
     if duplicate:
-        if duplicate.user_id != user.id: raise HTTPException(409, 'Action ID already used')
+        owner = duplicate.user_id if duplicate.user_id is not None else -duplicate.guest_member_id
+        if owner != user.id: raise HTTPException(409, 'Action ID already used')
         return snapshot(db, group, user)
     if payload.revision > group.revision: raise HTTPException(409, 'Invalid future revision')
     if payload.kind != 'patch' and payload.revision != group.revision:
@@ -209,7 +297,8 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
     group.revision += 1
     group.state = state
     group.cell_versions = {**group.cell_versions, **{k: group.revision for k in changed}}
-    db.add(GroupAction(group_id=group.id, action_id=str(payload.action_id), user_id=user.id,
+    db.add(GroupAction(group_id=group.id, action_id=str(payload.action_id), user_id=member.user_id,
+                       guest_member_id=member.id if member.user_id is None else None,
                        revision=group.revision, kind=payload.kind, changes=changed))
     db.commit()
     publish_state_change(group.id)
@@ -218,8 +307,8 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
 
 @router.post('/api/groups/{group_id}/presence')
 def update_presence(group_id: str, payload: Presence, request: Request, db: Session = Depends(get_db)):
-    user = core().require_api_user(request, db)
     group = group_for(db, group_id)
+    user = require_group_user(request, db, group)
     member = member_for(db, group, user)
     writable(group)
     if any(len(key) > 80 for key in payload.entry):
@@ -240,8 +329,11 @@ def manage_member(group_id: str, payload: MemberControl, request: Request, db: S
     group = group_for(db, group_id, True); writable(group)
     if user.id != group.host_id: raise HTTPException(403, 'Only the host can manage participants')
     if payload.user_id == group.host_id: raise HTTPException(400, 'The host cannot be removed')
-    member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.user_id == payload.user_id))
+    identity = ((GroupMember.id == -payload.user_id) & GroupMember.user_id.is_(None)) if payload.user_id < 0 else GroupMember.user_id == payload.user_id
+    member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, identity))
     if not member: raise HTTPException(404, 'Participant not found')
+    if member.user_id == group.host_id:
+        raise HTTPException(400, 'The host cannot be removed')
     if payload.action == 'approve':
         active = db.scalar(select(func.count()).select_from(GroupMember).where(GroupMember.group_id == group.id, GroupMember.status == 'active'))
         if member.status != 'pending': raise HTTPException(400, 'No pending request')
@@ -255,8 +347,8 @@ def manage_member(group_id: str, payload: MemberControl, request: Request, db: S
 
 @router.post('/api/groups/{group_id}/leave')
 def leave_group(group_id: str, request: Request, db: Session = Depends(get_db)):
-    user = core().require_api_user(request, db)
     group = group_for(db, group_id, True)
+    user = require_group_user(request, db, group)
     member = member_for(db, group, user, active=False)
     if member.status != 'removed' and user.id != group.host_id: member.status = 'left'
     member.focus = ''; member.seen_at = None; member.presence = None
@@ -280,9 +372,18 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
     user = core().require_api_user(request, db)
     group = group_for(db, group_id, True); writable(group)
     if user.id != group.host_id: raise HTTPException(403, 'Only the host can change settings')
+    if payload.allow_guests and not user.is_admin:
+        raise HTTPException(403, 'Only an admin host can allow guests')
     active = db.scalar(select(func.count()).select_from(GroupMember).where(GroupMember.group_id == group.id, GroupMember.status == 'active'))
     if payload.participant_limit and payload.participant_limit < active: raise HTTPException(409, 'Limit is below current participant count')
     group.participant_limit = payload.participant_limit; group.approval_required = payload.approval_required
+    group.allow_guests = payload.allow_guests
+    if not group.allow_guests:
+        for member in db.scalars(select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.user_id.is_(None))):
+            member.presence = None
+            member.seen_at = None
+            if member.status != 'removed':
+                member.status = 'left'
     db.commit()
     publish_state_change(group.id)
     return snapshot(db, group, user)

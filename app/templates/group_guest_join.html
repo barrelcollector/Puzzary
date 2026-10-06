@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Join Group Solve - Puzzary{% endblock %}
+{% block content %}
+<section class="panel" style="max-width: 460px; margin: 24px auto;">
+  <h1>Join Group Solve</h1>
+  <p>Session {{ group.code }}</p>
+  <form id="guest-join" data-group="{{ group.id }}">
+    <label>Guest display name <input name="name" maxlength="80" autocomplete="nickname" required></label>
+    <button type="submit">Join as guest</button>
+    <p id="guest-message" role="status" aria-live="polite"></p>
+  </form>
+  <a href="/login?return_to={{ request.url.path | urlencode }}%3Fgroup%3D{{ group.id }}">Sign in instead</a>
+</section>
+<script src="/static/group-guest-join.js?v=1"></script>
+{% endblock %}

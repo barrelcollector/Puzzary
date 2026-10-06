@@ -54,7 +54,43 @@ def ensure_schema() -> None:
     dictionary_definition_columns = {column["name"] for column in inspector.get_columns("dictionary_definitions")} if "dictionary_definitions" in table_names else set()
     tag_columns = {column["name"] for column in inspector.get_columns("puzzle_tags")} if "puzzle_tags" in table_names else set()
     with engine.begin() as connection:
-        if "group_members" in table_names and "presence" not in {c["name"] for c in inspector.get_columns("group_members")}:
+        if "group_solves" in table_names and "allow_guests" not in {c["name"] for c in inspector.get_columns("group_solves")}:
+            connection.execute(text("ALTER TABLE group_solves ADD COLUMN allow_guests BOOLEAN NOT NULL DEFAULT FALSE"))
+        for table, additions in {
+            "group_members": {"guest_name": "VARCHAR(80)", "guest_token_hash": "VARCHAR(64)"},
+            "group_actions": {"guest_member_id": "INTEGER"},
+        }.items():
+            if table not in table_names:
+                continue
+            columns = {c["name"]: c for c in inspector.get_columns(table)}
+            for name, sql_type in additions.items():
+                if name not in columns:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+            if not columns["user_id"]["nullable"]:
+                if engine.dialect.name == "sqlite":
+                    # SQLite cannot drop NOT NULL in place. Rebuild these leaf tables,
+                    # preserving every existing row and recreating model constraints.
+                    from sqlalchemy.schema import CreateTable, CreateIndex
+                    from sqlalchemy import MetaData
+                    from app.models import GroupMember, GroupAction
+                    model = GroupMember if table == "group_members" else GroupAction
+                    metadata = MetaData()
+                    for original in Base.metadata.sorted_tables:
+                        original.to_metadata(metadata)
+                    temporary = model.__table__.to_metadata(metadata, name=f"{table}_guest_migration")
+                    connection.execute(CreateTable(temporary))
+                    old_names = [c["name"] for c in inspect(connection).get_columns(table)]
+                    names = ", ".join(old_names)
+                    connection.execute(text(f"INSERT INTO {temporary.name} ({names}) SELECT {names} FROM {table}"))
+                    connection.execute(text(f"DROP TABLE {table}"))
+                    connection.execute(text(f"ALTER TABLE {temporary.name} RENAME TO {table}"))
+                    for index in model.__table__.indexes:
+                        connection.execute(CreateIndex(index))
+                else:
+                    connection.execute(text(f"ALTER TABLE {table} ALTER COLUMN user_id DROP NOT NULL"))
+        if "group_members" in table_names:
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_group_guest_token ON group_members (guest_token_hash)"))
+        if "group_members" in table_names and "presence" not in {c["name"] for c in inspect(connection).get_columns("group_members")}:
             connection.execute(text("ALTER TABLE group_members ADD COLUMN presence JSON"))
         if "archived_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))

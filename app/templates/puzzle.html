@@ -7,9 +7,11 @@
     <p class="muted">{{ puzzle.puzzle_type }}{% if puzzle.theme %} / {{ puzzle.theme }}{% endif %} / {{ puzzle.difficulty }}</p>
   </div>
   <div class="puzzle-head-actions">
+    {% if not current_user.is_guest %}
     <a class="ghost-link" href="{{ return_to | default('/library') }}">Back to Library</a>
     {% if puzzle_type_definition and puzzle_type_definition.supports_print and not puzzle_type_definition.digital_only %}
       <a class="button-link" href="/puzzles/{{ puzzle.id }}/print">Print</a>
+    {% endif %}
     {% endif %}
     <code>{{ puzzle.id }}</code>
   </div>
@@ -104,6 +106,7 @@
   </aside>
 </section>
 
+{% if not current_user.is_guest %}
 <section class="history">
   {% if not playable_puzzle_type %}
     <div class="panel">
@@ -145,8 +148,9 @@
     {% endif %}
   </div>
 </section>
+{% endif %}
 <script src="/static/celebration.js?v=3"></script>
-<script src="/static/group-solve.js?v=5"></script>
+<script src="/static/group-solve.js?v=6"></script>
 <script src="/static/word-search.js?v=12"></script>
 <script src="/static/crossword.js?v=14"></script>
 <script src="/static/word-pyramid.js?v=3"></script>

@@ -16,7 +16,9 @@
       <a class="brand" href="/library">Puzzary</a>
       <span class="tagline">A puzzle library for Daily Stripe</span>
       <span class="topbar-spacer"></span>
-      {% if current_user %}
+      {% if current_user and current_user.is_guest %}
+        <span class="user-pill">{{ current_user.display_name }} (guest)</span>
+      {% elif current_user %}
         <a class="nav-link" href="/generate">Generate</a>
         {% if current_user.is_admin %}
           <a class="nav-link" href="/admin">Admin</a>

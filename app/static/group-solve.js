@@ -26,7 +26,7 @@
     }
     return data;
   }
-  function options(form) { return {participant_limit:Number(form.elements.participant_limit.value), approval_required:form.elements.approval_required.checked}; }
+  function options(form) { return {participant_limit:Number(form.elements.participant_limit.value), approval_required:form.elements.approval_required.checked, allow_guests:!!form.elements.allow_guests?.checked}; }
   for (const [selector, url, body] of [
     ['#group-create', `/api/puzzles/${panel.dataset.puzzle}/groups`, options],
     ['#group-join', '/api/groups/join', form => ({code:form.elements.code.value.trim()})]
@@ -71,7 +71,7 @@
         const entry = document.createElement('div'); entry.className = 'group-player-entry';
         overlay.append(cursor,ring,entry);
         nodes = {cursor,label,ring,name,caret,entry}; cursorNodes.set(member.user_id,nodes);
-        for (const node of [cursor,ring,entry]) node.style.setProperty('--player-color',colors[member.user_id % colors.length]);
+        for (const node of [cursor,ring,entry]) node.style.setProperty('--player-color',colors[Math.abs(member.user_id) % colors.length]);
       }
       setText(nodes.label,member.name); setText(nodes.name,member.name);
       const point = value.pointer;
@@ -247,6 +247,8 @@
     lastCompleted = data.completed;
     const host = data.user_id === data.host_id;
     panel.querySelector('#group-host').hidden = !host;
+    const guestOption = panel.querySelector('#group-guests-option');
+    if (guestOption) guestOption.hidden = !data.can_allow_guests;
     const list = panel.querySelector('#group-members');
     const visible = data.members.filter(m => ['active','pending'].includes(m.status));
     for (const [userId,item] of memberNodes) {
@@ -259,7 +261,7 @@
         item.append(document.createElement('span'),document.createElement('span'));
         memberNodes.set(member.user_id,item); list.append(item);
       }
-      setText(item.firstElementChild,`${member.name}${member.user_id === data.host_id ? ' (host)' : ''} - ${member.status === 'pending' ? 'awaiting approval' : member.online ? 'online' : 'away'}`);
+      setText(item.firstElementChild,`${member.name}${member.user_id === data.host_id ? ' (host)' : member.guest ? ' (guest)' : ''} - ${member.status === 'pending' ? 'awaiting approval' : member.online ? 'online' : 'away'}`);
       const actions = `${host}:${data.closed}:${member.status}`;
       if (item.dataset.actions === actions) continue;
       item.dataset.actions = actions;
@@ -346,7 +348,7 @@
   });
   panel.querySelector('#group-leave').addEventListener('click',async () => {
     mutation++;
-    try { await api(`/api/groups/${id}/leave`,{}); location.assign(`/puzzles/${panel.dataset.puzzle}`); }
+    try { await api(`/api/groups/${id}/leave`,{}); location.assign(snapshot?.is_guest ? '/login' : `/puzzles/${panel.dataset.puzzle}`); }
     catch(error) { message(error.message); }
   });
   panel.querySelector('#group-close').addEventListener('click',async () => {
@@ -371,6 +373,7 @@
       const form = panel.querySelector('#group-settings');
       form.elements.participant_limit.value = joined.participant_limit;
       form.elements.approval_required.checked = joined.approval_required;
+      if (form.elements.allow_guests) form.elements.allow_guests.checked = joined.allow_guests;
       poll();
     } catch(error) {
       status.textContent = error.message;
@@ -389,7 +392,7 @@
         if (adapter && !Object.keys(diff(adapter.read(),baseline)).length) show(data);
         if (data.closed) { show(data); return; }
       } catch(error) {
-        if (error.status === 403) { ready = false; block(true); status.textContent = error.message; return; }
+        if (error.status === 401 || error.status === 403) { ready = false; block(true); status.textContent = error.message; return; }
         status.textContent = 'Connection interrupted. Reconnecting; unsent edits are kept.';
       }
     }

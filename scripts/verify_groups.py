@@ -408,6 +408,8 @@ try:
         fallback.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"',timeout=6000)
         normal.close(); fallback.close()
         assert not errors,errors
+        from verify_group_guests import verify_guests
+        verify_guests(browser, base, host, player, ids[0])
         browser.close()
     print('Group API/auth/conflict/idempotency/approval/limits/removal/persistence/isolation and two-browser desktop/mobile tests passed.')
 finally:

@@ -20,6 +20,9 @@
       <form id="group-settings">
         <label>Participant limit <input name="participant_limit" type="number" min="0" max="50" value="0"></label>
         <label><input name="approval_required" type="checkbox"> Require host approval</label>
+        {% if current_user.is_admin %}
+        <label id="group-guests-option" hidden><input name="allow_guests" type="checkbox"> Allow guests</label>
+        {% endif %}
         <button type="submit">Save</button>
       </form>
       <button type="button" id="group-close" class="danger-button">Close session</button>
@@ -30,6 +33,9 @@
       <form id="group-create">
         <label>Participant limit <input name="participant_limit" type="number" min="0" max="50" value="0"></label>
         <label><input name="approval_required" type="checkbox"> Require host approval</label>
+        {% if current_user.is_admin %}
+        <label><input name="allow_guests" type="checkbox"> Allow guests</label>
+        {% endif %}
         <button type="submit">Start Group Solve</button>
       </form>
       <form id="group-join">
