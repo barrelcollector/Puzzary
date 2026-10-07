@@ -195,6 +195,16 @@ try:
             for puzzle in db.scalars(select(Puzzle)):
                 puzzle.auto_archive_at = None
             db.commit()
+        solution_page = admin.new_page()
+        solution_page.goto(base+'/puzzles/mine')
+        assert solution_page.locator('#admin-solution').count() == 1
+        assert not solution_page.locator('#admin-solution').evaluate('(panel) => panel.open')
+        solution_page.locator('#admin-solution > summary').click()
+        assert solution_page.locator('#admin-solution').evaluate('(panel) => panel.open')
+        solution_page.reload()
+        assert not solution_page.locator('#admin-solution').evaluate('(panel) => panel.open')
+        solution_page.close()
+        assert 'id="admin-solution"' not in publisher.request.get(base+'/puzzles/mine').text()
         for width in [1280,390]:
             page=admin.new_page()
             page.set_viewport_size({'width':width,'height':900})

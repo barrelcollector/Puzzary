@@ -75,15 +75,15 @@
     </details>
 
     {% if not current_user.is_guest and current_user.can('puzzles.solutions') %}
-      <section class="panel">
-        <h2>Admin Solution</h2>
+      <details class="panel" id="admin-solution">
+        <summary>Admin Solution</summary>
         {% if has_solution_template %}
           {% include solution_template %}
         {% endif %}
         {% if not has_solution_template %}
           <pre>{{ puzzle.solution_payload | tojson(indent=2) }}</pre>
         {% endif %}
-      </section>
+      </details>
     {% endif %}
 
     {% if not group_id %}
