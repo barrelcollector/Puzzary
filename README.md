@@ -26,6 +26,14 @@ It owns puzzle generation, stored solutions, hints, attempts, photo submissions,
 - Photo submission upload endpoint
 - Printable puzzle payload API for Daily Stripe
 
+## Dictionary Content Pack
+
+The [English dictionary expansion](content_packs/english-wordnet-5000-v1/README.md)
+provides licensed definitions, multiple senses, progressive clues and topic tags
+for a library of about 5,000 words. Its opt-in transactional importer preserves
+existing content and adds automatic, sense-specific word banks. Source data has
+its own bundled licenses; it is not part of the application's code license.
+
 ## Run
 
 Copy the sample environment:

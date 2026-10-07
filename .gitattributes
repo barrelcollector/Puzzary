@@ -1,0 +1,4 @@
+# Preserve content-pack bytes: manifest checksums must survive Windows checkouts.
+content_packs/**/*.json -text
+# Upstream license notices are retained verbatim, including original whitespace.
+content_packs/**/licenses/** -text whitespace=-blank-at-eol,-blank-at-eof
