@@ -190,15 +190,64 @@ try:
             assert post(admin,f'/admin/roles/{role.id}',{'name':'Admin'}).status==409
             assert db.get(User,admin_id).can('roles.manage')
             assert db.scalar(select(PermissionAudit))
+        # Account UI fixtures do not exercise scheduling. SQLite stores dates without timezone information.
+        with SessionLocal() as db:
+            for puzzle in db.scalars(select(Puzzle)):
+                puzzle.auto_archive_at = None
+            db.commit()
         for width in [1280,390]:
             page=admin.new_page()
             page.set_viewport_size({'width':width,'height':900})
             page.goto(base+f'/admin/users/{ids["Publisher"]}')
             assert page.locator('[data-permission]').count()>40
+            assert page.locator('[data-user-panel="profile"]').is_visible()
+            for tab in ['access','security','activity','profile']:
+                page.locator(f'[data-user-tab="{tab}"]').click()
+                assert page.locator(f'[data-user-panel="{tab}"]').is_visible()
+                assert page.locator('[data-user-panel]:visible').count()==1
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+            page.locator('[data-user-tab="profile"]').focus()
+            page.keyboard.press('ArrowRight')
+            assert page.locator('[data-user-tab="access"]').get_attribute('aria-selected')=='true'
+            page.locator('[data-permission-search]').fill('generate')
+            assert page.locator('.permission-row:visible').count()>0
+            assert page.locator('.permission-row:visible').count()<page.locator('.permission-row').count()
+            assert page.locator('[data-permission]').count()>40
+            page.locator('[data-permission-search]').fill('')
+            assert page.evaluate("[...new FormData(document.querySelector('[data-permission-form]')).keys()].filter(key => key.startsWith('permission:')).length") == page.locator('[data-permission]').count()
+            page.screenshot(path=f'/tmp/user-access-{width}.png',full_page=True)
+            page.goto(base+f'/admin/users/{ids["Publisher"]}?tab=security')
+            assert page.locator('[data-user-panel="security"]').is_visible()
+            page.goto(base+f'/admin/users/{ids["Publisher"]}')
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
             Path('/tmp/permissions-qa').mkdir(exist_ok=True)
             page.screenshot(path=f'/tmp/permissions-qa/user-{width}.png',full_page=True)
             page.screenshot(path=f'/tmp/permissions-qa/viewport-{width}.png')
+            page.goto(base+'/admin/users')
+            assert page.locator('[data-user-card]').count()>=4
+            page.locator('[data-user-search]').fill('Publisher')
+            assert page.locator('[data-user-card]:visible').count()==1
+            page.locator('[data-user-search]').fill('No such account')
+            assert page.locator('[data-user-empty]').is_visible()
+            page.locator('[data-user-search]').fill('')
+            page.locator('[data-user-status]').select_option('disabled')
+            assert page.locator('[data-user-card][data-status="enabled"]:visible').count()==0
+            page.locator('[data-user-status]').select_option('all')
+            page.locator('[data-create-user]').click()
+            assert page.locator('[data-user-dialog]').is_visible()
+            page.keyboard.press('Escape')
+            assert not page.locator('[data-user-dialog]').is_visible()
+            menu=page.locator('.user-menu').first
+            menu.locator('summary').click()
+            assert menu.locator('a').first.is_visible()
+            page.keyboard.press('Escape')
+            assert not menu.locator('a').first.is_visible()
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+            page.screenshot(path=f'/tmp/permissions-qa/users-{width}.png',full_page=True)
+            page.goto(base+'/admin/users?q=Publisher')
+            assert page.locator('[data-user-card]:visible').count()==1
+            page.locator('[data-user-search]').fill('')
+            assert page.locator('[data-user-card]:visible').count()>=4
             page.close()
         assert admin.request.get(base+'/admin/roles').ok
         assert admin.request.get(base+'/admin/audit').ok

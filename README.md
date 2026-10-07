@@ -467,7 +467,7 @@ Plugin contract: opt in with `PuzzleType.collaboration(state, action, solution) 
 
 ## Roles and Permissions
 
-Open **Admin > Users > Profile and Permissions** for account details, security actions, assigned roles and grouped permission overrides. **Admin > Roles** creates, duplicates and edits roles; **Audit Log** records permission changes and account security actions with actor, timestamp and before/after values. Role changes affect every assigned account. User and role controls show high-privilege warnings and the user page previews effective access before saving.
+Open **Admin > Users** for a searchable, status-filtered account grid. The add button opens account creation, and each account has Profile, Access, Security and Activity tabs. Access includes assigned roles, searchable grouped overrides and an effective-permission preview; filtered or hidden fields remain part of the save. Security actions require confirmation and preserve one-time password setup links and API token delivery. Activity shows recorded logins, API use, recent puzzle progress and authorized audit events, not inferred connected devices. **Admin > Roles** creates, duplicates and edits roles; **Audit Log** records permission changes and account security actions with actor, timestamp and before/after values. Role changes affect every assigned account. User and role controls show high-privilege warnings.
 
 Default editable presets:
 - **Player:** library, personal play/progress, print, dictionary reads, joining/inviting groups, API access.

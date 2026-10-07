@@ -1,0 +1,69 @@
+<a href="/admin/users" class="user-back">&larr; Users</a>
+{% if request.query_params.get('message') %}<p class="notice">{{ request.query_params.get('message') }}</p>{% endif %}
+{% set can_edit_target = managed_user.id == current_user.id or not managed_user.can('roles.manage') or current_user.can('roles.manage') %}
+<header class="user-detail-header">
+  <div class="user-avatar user-color-{{ managed_user.id % 4 }}"><span>{{ managed_user.display_name[:2]|upper }}</span></div>
+  <div><h1>{{ managed_user.display_name }}</h1><p class="muted">{{ 'Enabled' if managed_user.is_active else 'Disabled' }} &middot; {% for role in managed_user.roles %}{{ role.name }}{% if not loop.last %}, {% endif %}{% else %}No roles{% endfor %}</p></div>
+</header>
+<nav class="user-tabs" role="tablist" aria-label="User settings">
+{% for name in ['profile','access','security','activity'] %}<button type="button" role="tab" id="user-tab-{{ name }}" aria-controls="user-panel-{{ name }}" aria-selected="{{ 'true' if active_tab == name else 'false' }}" tabindex="{{ '0' if active_tab == name else '-1' }}" data-user-tab="{{ name }}">{{ name|title }}</button>{% endfor %}
+</nav>
+<section class="user-tab-panel" role="tabpanel" id="user-panel-profile" aria-labelledby="user-tab-profile" data-user-panel="profile" {% if active_tab != 'profile' %}hidden{% endif %}>
+<h2>Profile</h2>
+{% if can_edit_target and (current_user.can('users.edit') or current_user.can('users.disable')) %}
+<form method="post" action="/admin/users/{{ managed_user.id }}">
+<label>Display name<input name="display_name" value="{{ managed_user.display_name }}" {% if not current_user.can('users.edit') %}readonly{% endif %} required></label>
+<label>Email<input name="email" type="email" value="{{ managed_user.email or '' }}" {% if not current_user.can('users.edit') %}readonly{% endif %}></label>
+{% if current_user.can('users.disable') %}
+<input type="hidden" name="is_active" value="off">
+<label class="check-row"><input name="is_active" type="checkbox" {% if managed_user.is_active %}checked{% endif %}> Enabled</label>
+{% endif %}
+<button>Save Profile</button>
+</form>
+{% else %}<p>{{ managed_user.email or 'No email' }}</p>{% endif %}
+</section>
+<section class="user-tab-panel" role="tabpanel" id="user-panel-access" aria-labelledby="user-tab-access" data-user-panel="access" {% if active_tab != 'access' %}hidden{% endif %}>
+<h2>Access</h2>
+<label class="permission-search">Find a permission<input type="search" data-permission-search placeholder="Search permissions"></label>
+<form method="post" action="/admin/users/{{ managed_user.id }}/permissions" data-permission-form data-active="{{ 'true' if managed_user.is_active else 'false' }}">
+<fieldset {% if not current_user.can('roles.manage') %}disabled{% endif %}>
+<legend>Assigned Roles</legend>
+{% for role in roles %}<label class="check-row"><input type="checkbox" name="roles" value="{{ role.id }}" data-grants='{{ role.permissions|tojson }}' {% if role in managed_user.roles %}checked{% endif %}> {{ role.name }}</label>{% endfor %}
+</fieldset>
+<p data-preview-count aria-live="polite">{{ effective|length }} effective permissions</p>
+{% for section_name, items in permission_groups.items() %}
+<details {% if loop.first %}open{% endif %}>
+<summary>{{ section_name }}</summary>
+{% if current_user.can('roles.manage') %}<div class="action-row"><button type="button" data-bulk="allow">Allow Section</button><button type="button" data-bulk="deny">Deny Section</button><button type="button" data-bulk="inherit">Inherit Section</button></div>{% endif %}
+{% for item in items %}
+<div class="permission-row">
+<label for="perm-{{ loop.index }}-{{ section_name|replace(' ','-') }}">{{ item.label }}{% if item.name in dangerous %}<small>High privilege</small>{% endif %}</label>
+<select id="perm-{{ loop.index }}-{{ section_name|replace(' ','-') }}" name="permission:{{ item.name }}" data-permission="{{ item.name }}" {% if not current_user.can('roles.manage') %}disabled{% endif %}>
+<option value="inherit" {% if item.name not in managed_user.permission_overrides %}selected{% endif %}>Inherited from roles</option>
+<option value="allow" {% if managed_user.permission_overrides.get(item.name) == true %}selected{% endif %}>Explicitly allowed</option>
+<option value="deny" {% if managed_user.permission_overrides.get(item.name) == false %}selected{% endif %}>Explicitly denied</option>
+</select>
+<span data-effective>{{ 'Allowed' if item.name in effective else 'Denied' }}</span>
+</div>
+{% endfor %}
+</details>
+{% endfor %}
+{% if current_user.can('roles.manage') %}<button>Save Permissions</button>{% endif %}
+</form>
+{% if current_user.can('roles.manage') %}<form method="post" action="/admin/users/{{ managed_user.id }}/permissions/reset"><button class="ghost-button">Reset to Role Defaults</button></form>{% endif %}
+</section>
+<section class="user-tab-panel" role="tabpanel" id="user-panel-security" aria-labelledby="user-tab-security" data-user-panel="security" {% if active_tab != 'security' %}hidden{% endif %}><h2>Authentication and Security</h2>
+{% for capability, endpoint, label, heading, value in [('users.reset','reset-password','Reset Password','Password','Setup required' if managed_user.must_change_password or not managed_user.password_hash else 'Configured'),('users.sessions','revoke-sessions','Revoke Sessions','Sessions','Last login: ' ~ (managed_user.last_login_at or 'Never')),('users.tokens','api-token','Rotate API Token','API token',(managed_user.api_token_prefix ~ '...') if managed_user.api_token_prefix else 'Not configured')] %}
+<div class="user-security-row"><div><h3>{{ heading }}</h3><p class="muted">{{ value }}</p></div>
+{% if can_edit_target and current_user.can(capability) %}<form method="post" action="/admin/users/{{ managed_user.id }}/{{ endpoint }}"><button class="ghost-button">{{ label }}</button></form>{% endif %}</div>
+{% endfor %}
+</section>
+<section class="user-tab-panel" role="tabpanel" id="user-panel-activity" aria-labelledby="user-tab-activity" data-user-panel="activity" {% if active_tab != 'activity' %}hidden{% endif %}>
+<h2>Activity</h2>
+<dl class="user-facts"><div><dt>Account created</dt><dd>{{ managed_user.created_at.strftime('%b %d, %Y') }}</dd></div><div><dt>Last login</dt><dd>{{ managed_user.last_login_at or 'Never' }}</dd></div><div><dt>Last API use</dt><dd>{{ managed_user.api_token_last_used_at or 'Never' }}</dd></div></dl>
+{% if current_user.can('activity.view') %}<h3>Recent puzzles</h3>
+{% for progress in recent_progress %}<div class="user-activity-row"><a href="/puzzles/{{ progress.puzzle_id }}">{{ progress.puzzle.title }}</a><time>{{ progress.updated_at }}</time></div>{% else %}<p class="muted">No puzzle activity recorded.</p>{% endfor %}{% endif %}
+{% if events %}<h3>Account changes</h3>{% for event in events %}<details><summary>{{ event.action }} &middot; {{ event.created_at }}</summary><pre class="user-audit-data">Before: {{ event.before|tojson(indent=2) }}
+After: {{ event.after|tojson(indent=2) }}</pre></details>{% endfor %}{% endif %}
+</section>
+<script src="/static/users.js?v=1" defer></script>

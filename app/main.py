@@ -2779,8 +2779,6 @@ def admin_context(
     admin_users = db.scalars(select(User).order_by(User.display_name)).all()
     if not user.can('users.view'):
         admin_users = []
-    elif section == 'users' and (query := request.query_params.get('q', '').strip().lower()):
-        admin_users = [u for u in admin_users if query in u.display_name.lower() or query in (u.email or '').lower()]
     dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags)
     return {
         "request": request,
@@ -3064,7 +3062,7 @@ def admin_update_user(
     protect_last_admin(db)
     audit(db, admin, 'user', user.id, 'user.updated', before, {'display_name':user.display_name, 'email':user.email, 'active':user.is_active, 'roles':[r.id for r in user.roles]})
     db.commit()
-    return RedirectResponse(url="/admin/users?message=User%20updated.", status_code=303)
+    return RedirectResponse(url=f"/admin/users/{user.id}?tab=profile&message=User%20updated.", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/reset-password")

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from app.database import get_db
-from app.models import PermissionRole, PermissionAudit, User
+from app.models import PermissionRole, PermissionAudit, User, PuzzleProgress
 from app.permissions import CATALOG, DANGEROUS, ADMIN_CORE, effective_permissions, require, lock_permissions, protect_last_admin, audit
 
 router = APIRouter()
@@ -46,6 +46,8 @@ def permission_user_page(user_id: int, request: Request, db=Depends(get_db)):
         'roles':db.scalars(select(PermissionRole).order_by(PermissionRole.name)).all(),
         'permission_groups':groups(), 'inherited':inherited, 'effective':effective_permissions(user),
         'dangerous':DANGEROUS, 'events':events,
+        'active_tab': request.query_params.get('tab') if request.query_params.get('tab') in {'profile', 'access', 'security', 'activity'} else 'profile',
+        'recent_progress': db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id).order_by(PuzzleProgress.updated_at.desc()).limit(15)).all() if actor.can('activity.view') else [],
     })
 
 
@@ -78,7 +80,7 @@ async def save_user_permissions(user_id: int, request: Request, db=Depends(get_d
     user.permissions_initialized = True
     audit(db, actor, 'user', user.id, 'permissions.updated', before, state(user))
     finish(db)
-    return RedirectResponse(f'/admin/users/{user.id}', status_code=303)
+    return RedirectResponse(f'/admin/users/{user.id}?tab=access', status_code=303)
 
 
 @router.get('/admin/roles')
