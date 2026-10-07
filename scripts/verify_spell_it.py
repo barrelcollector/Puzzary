@@ -54,6 +54,14 @@ for mode in ['off','exact','decoy','hint_triggered']:
         assert not missing - Counter(e['bank'])
         assert len(e['bank']) == len(e['hidden']) + (3 if mode == 'decoy' else 0)
         assert bool(public['bank']) == (mode in ('exact','decoy'))
+for count in [0,1,7,20]:
+    overridden = game.manual({'entries':[{**items[0],'difficulty':'hard'}],'letter_bank':'decoy','decoy_count':count})
+    entry=overridden.solution_payload['entries'][0]
+    assert entry['settings']['letter_bank']=='decoy' and len(entry['bank'])==len(entry['hidden'])+count
+    assert sum(ch not in entry['answer'] for ch in entry['bank'])==count
+    assert len(overridden.play_payload['entries'][0]['bank'])==len(entry['bank'])
+assert game.manual({'entries':[{**items[0],'difficulty':'hard'}]}).solution_payload['entries'][0]['settings']['letter_bank']=='off'
+assert game.manual({'entries':[{**items[0],'difficulty':'hard'}],'letter_bank':'exact'}).solution_payload['entries'][0]['settings']['letter_bank']=='exact'
 for entry in [{'answer':'CAT'}, {'answer':'CAT','definition':'x','hidden':[]}, {'answer':'CAT','definition':'x','hidden':[1,1]}, {'answer':'CAT','definition':'x','hidden':[99]}, {'answer':'---','definition':'x'}]:
     rejects(lambda: game.manual({'entries':[entry]}))
 rejects(lambda: game.manual({'entries':items,'mask_percent':20.5}))
@@ -75,7 +83,7 @@ with SessionLocal() as db:
     db.add(admin); db.commit(); initialize_permissions(db)
     player = User(display_name='Speller',is_active=True,permissions_initialized=True,roles=[db.scalar(select(PermissionRole).where(PermissionRole.name=='Player'))])
     db.add(player); db.flush(); ids={'admin':admin.id,'player':player.id}
-    for name, options in [('series',{'entries':items,'letter_bank':'exact'}), ('hint',{'entries':items[:1],'letter_bank':'hint_triggered','hint_limit':1}), ('off',{'entries':items[:1],'letter_bank':'off'}), ('private',{'entries':items[:1]})]:
+    for name, options in [('series',{'entries':items,'letter_bank':'exact'}), ('hint',{'entries':items[:1],'letter_bank':'hint_triggered','hint_limit':1}), ('off',{'entries':items[:1],'letter_bank':'off'}), ('private',{'entries':items[:1]}), ('decoy',{'entries':items[:1],'letter_bank':'decoy','decoy_count':7})]:
         generated=game.manual(options)
         db.add(Puzzle(id=name,puzzle_type='spell_it',title=f'Spell {name}',theme='',difficulty='easy',created_by_id=admin.id,
             prompt=generated.prompt,print_payload=generated.print_payload,play_payload=generated.play_payload,solution_payload=generated.solution_payload,
@@ -146,6 +154,20 @@ try:
                 db.commit()
         print('PASS: authenticated generation, private answers, series checks, reveal quotas and reset',flush=True)
         errors=[]
+        wizard=admin.new_page(); wizard.on('pageerror',lambda error:errors.append(str(error)))
+        wizard.goto(base+'/generate'); wizard.locator('[data-puzzle-type]').select_option('spell_it')
+        wizard.locator('[data-wizard-next]').click(); wizard.locator('[name="word_bank_slugs"]').select_option('spell-qa'); wizard.locator('[data-wizard-next]').click()
+        assert wizard.locator('[name="gen_decoy_count"]').is_disabled()
+        wizard.locator('[name="gen_letter_bank"]').select_option('decoy'); assert wizard.locator('[name="gen_decoy_count"]').is_enabled()
+        wizard.locator('[name="gen_decoy_count"]').fill('7'); wizard.locator('[data-wizard-next]').click()
+        assert wizard.locator('[data-generation-summary]').inner_text().find('Extra letters (Decoy bank)')>=0
+        with wizard.expect_navigation(): wizard.locator('[data-wizard-submit]').click()
+        wizard.wait_for_selector('.spell-slot.blank:not([disabled])')
+        public=admin.request.get(endpoint+wizard.url.split('/')[-1]).json()['play_payload']['entries'][0]
+        assert public['settings']['decoy_count']==7 and len(public['bank'])==len(public['hidden'])+7
+        assert wizard.locator('.spell-bank-tile').count()==len(public['bank'])
+        print('PASS: decoy wizard controls and requested extra letters survive generation and web play',flush=True)
+        wizard.close()
         page=player.new_page(); page.on('pageerror',lambda error:errors.append(str(error)))
         for width in [1280,390]:
             page.set_viewport_size({'width':width,'height':900})
@@ -201,6 +223,15 @@ try:
         editor=admin.new_page(); editor.on('pageerror',lambda error:errors.append(str(error)))
         editor.goto(base+'/admin/puzzles/manual'); editor.locator('[data-manual-puzzle-type]').select_option('spell_it')
         editor.wait_for_function("document.querySelector('.spell-editor-entry') && document.querySelector('[data-level-toolbar] p[role=status]').textContent.includes('valid')")
+        assert editor.locator('[name="manual_decoy_count"]').is_disabled()
+        editor.locator('[name="manual_letter_bank"]').select_option('decoy')
+        assert editor.locator('[name="manual_decoy_count"]').is_enabled()
+        editor.locator('[name="manual_decoy_count"]').fill('7')
+        editor.locator('.spell-editor-entry details').first.locator('summary').click()
+        with editor.expect_response(lambda response: '/spell-it/editor-preview' in response.url and response.request.method=='POST') as preview_result:
+            editor.locator('.spell-editor-entry details select').first.select_option('hard')
+        preview_entry=preview_result.value.json()['play_payload']['entries'][0]
+        assert preview_entry['settings']['letter_bank']=='decoy' and len(preview_entry['bank'])==len(preview_entry['hidden'])+7
         editor.get_by_label('Word bank',exact=True).select_option(label='Spell QA')
         editor.wait_for_function("document.querySelector('[data-level-toolbar] select').value && document.querySelectorAll('[data-level-toolbar] select')[1].options.length > 1")
         editor.get_by_label('Word and definition',exact=True).select_option(index=1)

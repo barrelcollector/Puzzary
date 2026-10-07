@@ -1274,6 +1274,7 @@ def serialize_generation_field(field) -> dict:
         "options": list(field.options),
         "minimum": field.minimum,
         "maximum": field.maximum,
+        "enabled_when": dict(field.enabled_when),
         "validation": validation,
     }
 

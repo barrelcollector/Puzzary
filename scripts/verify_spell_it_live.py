@@ -57,6 +57,13 @@ with sync_playwright() as p:
         page.locator('[data-manual-puzzle-type]').select_option('spell_it')
         page.wait_for_function("document.querySelector('[data-level-editor=spell_it]') && document.querySelector('[data-level-toolbar] p[role=status]').textContent.includes('valid')")
         assert page.locator('.spell-editor-mask .spell-slot').count()==10
+        assert page.locator('[name="manual_decoy_count"]').is_disabled()
+        page.locator('[name="manual_letter_bank"]').select_option('decoy')
+        assert page.locator('[name="manual_decoy_count"]').is_enabled()
+        with page.expect_response(lambda response: '/spell-it/editor-preview' in response.url and response.request.method=='POST') as preview:
+            page.locator('[name="manual_decoy_count"]').fill('7')
+        entry=preview.value.json()['play_payload']['entries'][0]
+        assert entry['settings']['letter_bank']=='decoy' and len(entry['bank'])==len(entry['hidden'])+7
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
         page.close()
     assert not errors,errors

@@ -79,6 +79,20 @@
     return control;
   }
 
+  function applyFieldConditions(form) {
+    const manual = form.hasAttribute('data-manual-form');
+    const prefix = manual ? 'manual_' : 'gen_';
+    const selector = manual ? '[data-manual-puzzle-type]' : '[data-puzzle-type]';
+    const schema = schemas[form.querySelector(selector)?.value] || {};
+    const fields = manual ? schema.manual_editor_fields : schema.generation_fields;
+    const active = !manual || form.querySelector('input[data-manual-mode]:checked')?.value === 'helper';
+    (fields || []).forEach(field => {
+      if (!Object.keys(field.enabled_when || {}).length) return;
+      const control = form.querySelector(`[name="${prefix}${field.name}"]`);
+      if (control) control.disabled = !active || !Object.entries(field.enabled_when).every(([name, value]) => form.querySelector(`[name="${prefix}${name}"]`)?.value === value);
+    });
+  }
+
   function renderFields(form, schema) {
     const target = form.querySelector("[data-generation-fields]");
     if (!target) return;
@@ -103,6 +117,7 @@
       }
       target.appendChild(label);
     });
+    applyFieldConditions(form);
   }
 
   function selectedText(control) {
@@ -239,7 +254,7 @@
     }
 
     form.addEventListener("input", () => renderSummary(form));
-    form.addEventListener("change", () => renderSummary(form));
+    form.addEventListener("change", () => { applyFieldConditions(form); renderSummary(form); });
   });
 
   function manualEditorValues() {
@@ -274,6 +289,7 @@
         control.disabled = !visible;
       });
     });
+    applyFieldConditions(form);
   }
 
   function renderManualFields(form) {
@@ -317,6 +333,7 @@
   }
 
   manualForms.forEach((form) => {
+    form.addEventListener('change', () => applyFieldConditions(form));
     renderManualFields(form);
     updateManualMode(form);
     const typeSelect = form.querySelector("[data-manual-puzzle-type]");

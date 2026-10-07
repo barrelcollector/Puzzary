@@ -1227,7 +1227,7 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=8"></script>
+  <script src="/static/generation-form.js?v=9"></script>
   {% for puzzle_type in puzzle_types %}{% if puzzle_type.manual_editor_script %}<script src="/static/{{ puzzle_type.manual_editor_script }}"></script>{% endif %}{% endfor %}
   <script src="/static/manual-builder.js?v=3"></script>
   {% if section == "publishing" %}<script src="/static/publishing.js?v=1"></script>{% endif %}

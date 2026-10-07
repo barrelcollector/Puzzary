@@ -74,7 +74,7 @@ def build_entry(item, defaults, rng, index):
     # A per-entry difficulty override uses its own percentage unless explicitly overridden.
     if item.get("difficulty") and item.get("mask_percent") in (None, ""):
         config["mask_percent"] = DIFFICULTIES[config["difficulty"]]
-    if item.get("difficulty") and item.get("letter_bank") in (None, ""):
+    if item.get("difficulty") and item.get("letter_bank") in (None, "") and defaults.get('_bank_is_default', True):
         config["letter_bank"] = "exact" if config["difficulty"] in ("very_easy", "easy") else "off"
     eligible = letters[1:-1] if config["preserve_edges"] and len(letters) > 2 else letters[-1:] if config["preserve_edges"] else letters
     if "hidden" in item:
@@ -86,7 +86,9 @@ def build_entry(item, defaults, rng, index):
         count = min(len(eligible), max(1, math.floor(len(eligible) * config["mask_percent"] / 100 + .5)))
         hidden = sorted(rng.sample(eligible, count))
     bank = [answer[p] for p in hidden]
-    if config["letter_bank"] == "decoy": bank.extend(rng.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(config["decoy_count"]))
+    if config["letter_bank"] == "decoy":
+        distractors = ''.join(ch for ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if ch not in answer) or "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        bank.extend(rng.choice(distractors) for _ in range(config["decoy_count"]))
     rng.shuffle(bank)
     hints = item.get("hints", [])
     if isinstance(hints, str): hints = [line.strip() for line in hints.splitlines() if line.strip()]
@@ -101,6 +103,7 @@ def public_entry(entry):
 
 def assemble(items, options, difficulty, theme, seed):
     config = settings(options, difficulty)
+    config['_bank_is_default'] = options.get('letter_bank') in (None, '', 'default')
     if not isinstance(items, list) or not 1 <= len(items) <= 30: raise ValueError("Spell It needs 1 to 30 entries")
     rng = random.Random(str(seed))
     entries = [build_entry(item, config, rng, i) for i, item in enumerate(items)]
@@ -198,7 +201,7 @@ FIELDS = (
     GenerationField("mask_percent", "Hidden letters (%)", "number", "", minimum=1, maximum=100),
     GenerationField("preserve_edges", "Protect first and last letters", "select", "yes", options=({"value": "yes", "label": "Yes"}, {"value": "no", "label": "No"})),
     GenerationField("letter_bank", "Letter bank", "select", "default", options=tuple({"value": k, "label": k.replace('_', ' ').title()} for k in BANK_MODES)),
-    GenerationField("decoy_count", "Decoy letters", "number", 3, minimum=0, maximum=20),
+    GenerationField("decoy_count", "Extra letters (Decoy bank)", "number", 3, minimum=0, maximum=20, enabled_when=(("letter_bank", "decoy"),)),
     GenerationField("hint_limit", "Letter hints per entry", "number", 1, minimum=0, maximum=20),
 )
 register_puzzle_type(PuzzleType(
@@ -216,7 +219,7 @@ register_puzzle_type(PuzzleType(
         GenerationField("entries", "Entries", "textarea", '[{"answer":"ASTRONOMER","definition":"A person who studies stars and celestial objects."}]', required=True),
         *FIELDS, GenerationField("seed", "Mask seed", default="manual-spell-it"),
     ),
-    manual_builder=manual, manual_editor_script="spell-it-editor.js?v=1",
+    manual_builder=manual, manual_editor_script="spell-it-editor.js?v=2",
     play_script="spell-it.js?v=1", router=router, preview_builder=preview,
     private_metadata_keys=("manual_editor_options",), supports_solution_reveal=False,
     print_layout=PrintLayout(slug="spell_it", sheet_class="print-layout-spell-it", instructions="Fill the missing letters."),

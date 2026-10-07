@@ -18,6 +18,7 @@ class GenerationField:
     options: tuple[dict[str, str], ...] = ()
     minimum: int | None = None
     maximum: int | None = None
+    enabled_when: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

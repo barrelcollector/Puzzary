@@ -40,7 +40,14 @@ window.PuzzaryManualEditors.spell_it = (form, parts) => {
     } catch (error) { status.textContent = error.message; }
   });
   wordSelect.addEventListener('change', () => { addBank.disabled = wordSelect.value === ''; });
-  function sync() { source.value = JSON.stringify(entries); version += 1; clearTimeout(previewTimer); previewTimer = setTimeout(preview, 260); }
+  function sync() {
+    const bankMode = form.querySelector('[name="manual_letter_bank"]')?.value || 'default';
+    entries.forEach((entry,index) => {
+      const count = parts.canvas.querySelector(`[data-entry="${index}"] [data-field="decoy_count"]`);
+      if (count) count.disabled = (entry.letter_bank || bankMode) !== 'decoy';
+    });
+    source.value = JSON.stringify(entries); version += 1; clearTimeout(previewTimer); previewTimer = setTimeout(preview, 260);
+  }
   function options() {
     const result = {entries, _difficulty:form.querySelector('[name="difficulty"]')?.value || 'easy'};
     form.querySelectorAll('[name^="manual_"]').forEach(el => { const key = el.name.slice(7); if (key !== 'entries' && !el.disabled && el.value !== '') result[key] = el.value; });
@@ -96,7 +103,7 @@ window.PuzzaryManualEditors.spell_it = (form, parts) => {
       for (const [name,label,values] of [
         ['difficulty','Difficulty',['','very_easy','easy','medium','hard','expert']], ['letter_bank','Letter bank',['','default','off','exact','decoy','hint_triggered']], ['preserve_edges','Protect first/last',['','yes','no']]
       ]) { const l=create('label',label), select=create('select'); values.forEach(value => select.add(new Option(value ? value.replaceAll('_',' ') : 'Puzzle default',value))); select.value=entry[name] || ''; select.addEventListener('change',()=> { entry[name]=select.value; delete entry.hidden; sync(); }); l.append(select); details.append(l); }
-      details.append(field('mask_percent','Hidden letters (%)','number'),field('decoy_count','Decoy count','number'),field('hint_limit','Letter hint limit','number'),field('hints','More clues','textarea'));
+      details.append(field('mask_percent','Hidden letters (%)','number'),field('decoy_count','Extra letters (Decoy bank)','number'),field('hint_limit','Letter hint limit','number'),field('hints','More clues','textarea'));
       article.append(details); const bank=create('p'); bank.className='spell-editor-bank'; bank.setAttribute('aria-label','Preview letter bank'); article.append(bank);
       article.addEventListener('dragstart', event => { if (event.target.closest('input,textarea,select,button')) { event.preventDefault(); return; } dragIndex=index; event.dataTransfer.effectAllowed='move'; event.dataTransfer.setData('text/plain',String(index)); });
       article.addEventListener('dragover', event => event.preventDefault()); article.addEventListener('drop',event => { event.preventDefault(); if (dragIndex !== null && dragIndex !== index) { entries.splice(index,0,entries.splice(dragIndex,1)[0]); dragIndex=null; render(); } }); parts.canvas.append(article);

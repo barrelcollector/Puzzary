@@ -35,6 +35,10 @@ Decoy adds distractors. Both typing and tile selection consume the same inventor
 and removing/replacing letters returns tiles. Off has no inventory restriction;
 Hint-triggered supplies a bank only after requesting it.
 
+The extra-letter count is enabled only for Decoy banks. Distractors use letters
+absent from the answer when available; explicit bank choices are preserved when
+an entry overrides difficulty.
+
 Check Word distinguishes incomplete, incorrect and correct entries. Series
 advance after checking each word. Progress, revealed letters and bank activation
 survive reloads. Clear Word preserves consumed reveals; Reset Puzzle clears all
