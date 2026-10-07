@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from app.database import get_db
-from app.models import PermissionRole, PermissionAudit, User, PuzzleProgress
+from app.user_activity import account_activity
+from app.models import PermissionRole, PermissionAudit, User
 from app.permissions import CATALOG, DANGEROUS, ADMIN_CORE, effective_permissions, require, lock_permissions, protect_last_admin, audit
 
 router = APIRouter()
@@ -47,7 +48,7 @@ def permission_user_page(user_id: int, request: Request, db=Depends(get_db)):
         'permission_groups':groups(), 'inherited':inherited, 'effective':effective_permissions(user),
         'dangerous':DANGEROUS, 'events':events,
         'active_tab': request.query_params.get('tab') if request.query_params.get('tab') in {'profile', 'access', 'security', 'activity'} else 'profile',
-        'recent_progress': db.scalars(select(PuzzleProgress).where(PuzzleProgress.user_id == user.id).order_by(PuzzleProgress.updated_at.desc()).limit(15)).all() if actor.can('activity.view') else [],
+        'activity': account_activity(db, user, viewer=actor) if actor.can('activity.view') else None,
     })
 
 

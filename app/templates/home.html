@@ -155,7 +155,8 @@
     <div class="puzzle-card-grid">
       {% for puzzle in puzzles %}
         {% set preview = previews_by_puzzle[puzzle.id] %}
-        <a class="puzzle-card" href="/puzzles/{{ puzzle.id }}?return_to={{ library_return_to }}" aria-label="Open {{ puzzle.title }}">
+        {% set progress = progress_by_puzzle.get(puzzle.id, {'found':0,'total':0,'status':'not_started'}) %}
+        <a class="puzzle-card" data-library-puzzle="{{ puzzle.id }}" data-progress-status="{{ progress.status }}" href="/puzzles/{{ puzzle.id }}?return_to={{ library_return_to }}" aria-label="Open {{ puzzle.title }}">
           <div class="puzzle-preview puzzle-preview-{{ preview.kind }}">
             {% if preview.kind == "word_search" %}
               <div class="preview-word-grid" style="--preview-grid-size: {{ preview.grid | length if preview.grid else 1 }}">
@@ -232,12 +233,13 @@
           </div>
           <div class="puzzle-card-body">
             <span class="puzzle-type-pill">{{ labels_by_type.get(puzzle.puzzle_type, puzzle.puzzle_type.replace("_", " ").title()) }}</span>
+            <div class="library-status-row"><span class="library-progress-status status-{{ progress.status }}">{{ 'Completed' if progress.status == 'completed' else 'In progress' if progress.status == 'in_progress' else 'Not started' }}</span>{% if puzzle.puzzle_metadata.get('draft') %}<span class="library-progress-status">Draft</span>{% elif puzzle.archived_at %}<span class="library-progress-status">Archived</span>{% endif %}</div>
             <h2>{{ puzzle.title }}</h2>
             <p class="muted">{{ puzzle.theme if puzzle.theme else "No theme" }} / {{ puzzle.difficulty }}</p>
             <div class="puzzle-card-meta">
               <span>{{ preview.meta }}</span>
               {% if puzzle.id in progress_by_puzzle %}
-                <span>{{ progress_by_puzzle[puzzle.id].found }} / {{ progress_by_puzzle[puzzle.id].total }} complete</span>
+                <span>{{ progress.found }} / {{ progress.total }} correct</span>
               {% else %}
                 <span>Not started</span>
               {% endif %}

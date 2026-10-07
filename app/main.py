@@ -55,6 +55,7 @@ from app.models import (
     WordBankWord,
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
+from app.user_activity import account_activity, progress_states
 from app.permissions import authorize_request, initialize_permissions, require as require_permission, can_view, require_owned, can_owned, audit, lock_permissions, protect_last_admin
 from app.schemas import (
     DictionaryDefinitionPatch,
@@ -162,6 +163,7 @@ def default_auto_archive_value() -> str:
 
 templates.env.globals["local_datetime_value"] = local_datetime_value
 templates.env.globals["local_datetime_label"] = local_datetime_label
+templates.env.globals["activity_datetime_label"] = lambda value: local_datetime_label(datetime.fromisoformat(value))
 templates.env.globals["default_auto_archive_value"] = default_auto_archive_value
 templates.env.globals["puzzary_timezone"] = PUZZARY_TIMEZONE
 
@@ -914,34 +916,8 @@ def parse_date_boundary(value: str, end_of_day: bool = False) -> datetime | None
     return parsed.astimezone(timezone.utc)
 
 
-def progress_map_for_user(db: Session, user: User, puzzles: list[Puzzle]) -> dict[str, dict[str, int | str]]:
-    progress_by_puzzle = {
-        puzzle.id: {
-            "found": 0,
-            "total": progress_response(puzzle, user, None).expected_count,
-            "status": "not_started",
-        }
-        for puzzle in puzzles
-        if get_puzzle_type(puzzle.puzzle_type) is not None
-    }
-    if not progress_by_puzzle:
-        return progress_by_puzzle
-    progress_rows = db.scalars(
-        select(PuzzleProgress).where(PuzzleProgress.user_id == user.id, PuzzleProgress.puzzle_id.in_(list(progress_by_puzzle.keys())))
-    ).all()
-    puzzles_by_id = {puzzle.id: puzzle for puzzle in puzzles}
-    for progress in progress_rows:
-        puzzle = puzzles_by_id.get(progress.puzzle_id)
-        if puzzle is None:
-            continue
-        response = progress_response(puzzle, user, progress)
-        status = "completed" if response.expected_count and response.found_count >= response.expected_count else "in_progress"
-        progress_by_puzzle[progress.puzzle_id] = {
-            "found": response.found_count,
-            "total": response.expected_count,
-            "status": status,
-        }
-    return progress_by_puzzle
+def progress_map_for_user(db: Session, user: User, puzzles: list[Puzzle]) -> dict:
+    return progress_states(db, user, puzzles)
 
 
 def library_filter_state(request: Request, current_user: User) -> dict:
@@ -1141,6 +1117,7 @@ def filtered_library(
     include_archived_for_admin: bool = True,
 ) -> dict:
     all_puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
+    all_puzzles = [puzzle for puzzle in all_puzzles if can_view(current_user, puzzle)]
     filters = library_filter_state(request, current_user)
     options = library_options(db, all_puzzles, current_user)
     progress_by_puzzle = progress_map_for_user(db, current_user, all_puzzles)
@@ -2591,6 +2568,7 @@ def password_setup(
 
 
 @app.get("/account/password", response_class=HTMLResponse)
+@app.get("/account", response_class=HTMLResponse)
 def account_password_page(request: Request, db: Session = Depends(get_db)):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
@@ -2602,8 +2580,14 @@ def account_password_page(request: Request, db: Session = Depends(get_db)):
             "current_user": user,
             "error": request.query_params.get("error", ""),
             "message": request.query_params.get("message", ""),
+            "activity": account_activity(db, user),
         },
     )
+
+
+@app.get("/api/account/stats")
+def account_stats_api(request: Request, db: Session = Depends(get_db)):
+    return account_activity(db, require_api_user(request, db))
 
 
 @app.post("/account/password")

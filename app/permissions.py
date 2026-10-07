@@ -152,8 +152,10 @@ def authorize_request(request, db, user, administrative=False):
         require(user,'api.use')
     if name in ROUTE_PERMISSIONS:
         require(user,ROUTE_PERMISSIONS[name]); return
-    if path.startswith('/account/') or path in ['/login','/logout','/password/setup']:
+    if path.startswith('/account/') or path in ['/account','/login','/logout','/password/setup']:
         return
+    if path == '/api/account/stats':
+        require(user, 'library.view'); return
     if path.startswith('/admin/roles') or path.endswith('/permissions') or path.endswith('/permissions/reset'):
         require(user,'roles.manage'); return
     if path.startswith('/admin/audit'):

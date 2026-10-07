@@ -1,0 +1,26 @@
+<div class="account-stats" data-account-stats data-user-id="{{ activity.user_id }}">
+  <h2>Puzzle Stats</h2>
+  <dl class="account-metrics">
+    {% for key, label in [('played','Puzzles played'),('completed','Completed'),('in_progress','In progress'),('attempts','Attempts')] %}
+      <div><dt>{{ label }}</dt><dd data-stat="{{ key }}">{{ activity.totals[key] }}</dd></div>
+    {% endfor %}
+  </dl>
+  {% if activity.by_type %}
+    <div class="account-stats-table">
+      <table role="table">
+        <caption>By Puzzle Type</caption>
+        <thead><tr><th scope="col">Puzzle type</th><th scope="col">Played</th><th scope="col">Completed</th><th scope="col">In progress</th><th scope="col">Attempts</th><th scope="col">Correct attempts</th></tr></thead>
+        <tbody>{% for row in activity.by_type %}<tr data-stat-type="{{ row.puzzle_type }}"><th scope="row">{{ row.label }}</th><td data-label="Played">{{ row.played }}</td><td data-label="Completed">{{ row.completed }}</td><td data-label="In progress">{{ row.in_progress }}</td><td data-label="Attempts">{{ row.attempts }}</td><td data-label="Correct attempts">{{ row.correct_attempts }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+    <h3>Recent Activity</h3>
+    <ul class="account-recent">
+      {% for item in activity.recent %}
+      <li data-activity-puzzle="{{ item.id }}">
+        <div>{% if item.url %}<a href="{{ item.url }}">{{ item.title }}</a>{% else %}<span>{{ item.title }}</span>{% endif %}<small class="muted">{{ item.label }}{% if item.archived %} &middot; Archived{% endif %}</small></div>
+        <div><span class="library-progress-status status-{{ item.status }}">{{ 'Completed' if item.status == 'completed' else 'In progress' }}</span><small>{{ item.attempts }} {{ 'attempt' if item.attempts == 1 else 'attempts' }}</small>{% if item.last_activity %}<time datetime="{{ item.last_activity }}">{{ activity_datetime_label(item.last_activity) }}</time>{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ul>
+  {% else %}<p class="muted">No puzzle activity yet.</p>{% endif %}
+</div>

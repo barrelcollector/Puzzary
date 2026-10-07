@@ -61,8 +61,7 @@
 <section class="user-tab-panel" role="tabpanel" id="user-panel-activity" aria-labelledby="user-tab-activity" data-user-panel="activity" {% if active_tab != 'activity' %}hidden{% endif %}>
 <h2>Activity</h2>
 <dl class="user-facts"><div><dt>Account created</dt><dd>{{ managed_user.created_at.strftime('%b %d, %Y') }}</dd></div><div><dt>Last login</dt><dd>{{ managed_user.last_login_at or 'Never' }}</dd></div><div><dt>Last API use</dt><dd>{{ managed_user.api_token_last_used_at or 'Never' }}</dd></div></dl>
-{% if current_user.can('activity.view') %}<h3>Recent puzzles</h3>
-{% for progress in recent_progress %}<div class="user-activity-row"><a href="/puzzles/{{ progress.puzzle_id }}">{{ progress.puzzle.title }}</a><time>{{ progress.updated_at }}</time></div>{% else %}<p class="muted">No puzzle activity recorded.</p>{% endfor %}{% endif %}
+{% if activity %}{% include 'account_stats.html' %}{% endif %}
 {% if events %}<h3>Account changes</h3>{% for event in events %}<details><summary>{{ event.action }} &middot; {{ event.created_at }}</summary><pre class="user-audit-data">Before: {{ event.before|tojson(indent=2) }}
 After: {{ event.after|tojson(indent=2) }}</pre></details>{% endfor %}{% endif %}
 </section>

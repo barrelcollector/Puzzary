@@ -7,7 +7,7 @@
   {% if print_pdf_css %}
     <style>{{ print_pdf_css | safe }}</style>
   {% else %}
-    <link rel="stylesheet" href="/static/styles.css?v=34">
+    <link rel="stylesheet" href="/static/styles.css?v=35">
   {% endif %}
 </head>
 <body>
@@ -23,7 +23,7 @@
         {% if current_user.can_manage %}
           <a class="nav-link" href="/admin">Admin</a>
         {% endif %}
-        <a class="nav-link" href="/account/password">Account</a>
+        <a class="nav-link" href="/account">Account</a>
         <span class="user-pill">{{ current_user.display_name }}</span>
         <form method="post" action="/logout" class="logout-form">
           <button type="submit" class="ghost-button">Log out</button>
