@@ -2,18 +2,7 @@
 {% block title %}Admin - Puzzary{% endblock %}
 {% block content %}
 <section class="admin-shell">
-  <nav class="admin-nav" aria-label="Admin">
-    <a class="{% if section == 'dashboard' %}active{% endif %}" href="/admin">Dashboard</a>
-    <a class="{% if section == 'generate' %}active{% endif %}" href="/admin/generate">Generate</a>
-    <a class="{% if section in ['puzzles', 'puzzle_edit'] %}active{% endif %}" href="/admin/puzzles">Puzzles</a>
-    <a class="{% if section in ['dictionary', 'word_detail'] %}active{% endif %}" href="/admin/dictionary">Dictionary</a>
-    <a class="{% if section in ['word_banks', 'word_bank_detail'] %}active{% endif %}" href="/admin/word-banks">Word Banks</a>
-    <a class="{% if section in ['tags', 'tag_detail'] %}active{% endif %}" href="/admin/tags">Tags</a>
-    <a class="{% if section == 'activity' %}active{% endif %}" href="/admin/activity">Activity</a>
-    <a class="{% if section == 'users' %}active{% endif %}" href="/admin/users">Users</a>
-    <a class="{% if section == 'settings' %}active{% endif %}" href="/admin/settings">Settings</a>
-    <a class="{% if section == 'publishing' %}active{% endif %}" href="/admin/publishing">Publishing</a>
-  </nav>
+  {% include 'admin_nav.html' %}
 
   <div class="admin-main">
     {% if section == "dashboard" %}
@@ -247,7 +236,7 @@
                 <small>Auto-archives at {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
               {% endif %}
             </div>
-            <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/metadata">
+            {% if can_owned(current_user,'puzzles','metadata',puzzle.created_by_id) %}<form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/metadata">
               <label>
                 Category
                 <select name="category_id">
@@ -267,26 +256,26 @@
                   {% endfor %}
                 </div>
               </fieldset>
-              <label>
+              {% if can_owned(current_user,'puzzles','schedule',puzzle.created_by_id) %}<label>
                 Auto-archive
                 <input type="datetime-local" name="auto_archive_at" value="{{ local_datetime_value(puzzle.auto_archive_at) }}">
                 <small class="muted">{{ puzzary_timezone }}. Leave blank for no automatic archive.</small>
-              </label>
+              </label>{% endif %}
               <button type="submit">Save</button>
-            </form>
+            </form>{% endif %}
             <div class="action-row">
               <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
-              <a class="ghost-link" href="/admin/puzzles/{{ puzzle.id }}/edit">Edit</a>
-              <a class="ghost-link" href="/api/puzzles/{{ puzzle.id }}/export">Export</a>
-              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") %}
+              {% if can_owned(current_user,'puzzles','edit',puzzle.created_by_id) %}<a class="ghost-link" href="/admin/puzzles/{{ puzzle.id }}/edit">Edit</a>{% endif %}
+              {% if current_user.can('puzzles.export') %}<a class="ghost-link" href="/api/puzzles/{{ puzzle.id }}/export">Export</a>{% endif %}
+              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") and can_owned(current_user,'puzzles','publish',puzzle.created_by_id) %}
                 <form method="post" action="/admin/puzzles/{{ puzzle.id }}/publish"><button type="submit" class="ghost-button">Publish</button></form>
               {% endif %}
-              {% if puzzle.archived_at %}
+              {% if can_owned(current_user,'puzzles','archive',puzzle.created_by_id) %}{% if puzzle.archived_at %}
                 <form method="post" action="/admin/puzzles/{{ puzzle.id }}/unarchive"><button type="submit" class="ghost-button">Unarchive</button></form>
               {% else %}
                 <form method="post" action="/admin/puzzles/{{ puzzle.id }}/archive"><button type="submit" class="ghost-button">Archive</button></form>
-              {% endif %}
-              <form method="post" action="/admin/puzzles/{{ puzzle.id }}/delete"><button type="submit" class="danger-button">Delete</button></form>
+              {% endif %}{% endif %}
+              {% if can_owned(current_user,'puzzles','delete',puzzle.created_by_id) %}<form method="post" action="/admin/puzzles/{{ puzzle.id }}/delete"><button type="submit" class="danger-button" onclick="return confirm('Permanently delete this puzzle and its progress?')">Delete</button></form>{% endif %}
             </div>
           </div>
         {% else %}
@@ -313,7 +302,7 @@
           <span class="action-row">
             <a class="ghost-button" href="/puzzles/{{ selected_puzzle.id }}">Preview</a>
             <a class="ghost-button" href="/api/puzzles/{{ selected_puzzle.id }}/export">Export</a>
-            {% if is_draft %}
+            {% if is_draft and can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id) %}
               <form method="post" action="/admin/puzzles/{{ selected_puzzle.id }}/publish"><button type="submit">Publish</button></form>
             {% endif %}
           </span>
@@ -345,7 +334,7 @@
           Save mode
           <select name="draft">
             <option value="true" {% if is_draft %}selected{% endif %}>Draft: hide from library, allow preview</option>
-            <option value="false" {% if not is_draft %}selected{% endif %}>Publish: show in library</option>
+            {% if can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id if is_edit else current_user.id) %}<option value="false" {% if not is_draft %}selected{% endif %}>Publish: show in library</option>{% endif %}
           </select>
         </label>
 
@@ -463,11 +452,11 @@
           </label>
           <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
           <div data-generation-fields></div>
-          <label>
+          {% if can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
             Auto-archive
             <input type="datetime-local" name="auto_archive_at" value="{{ default_auto_archive_value() }}">
             <small class="muted">{{ puzzary_timezone }}. Defaults to 24 hours from creation; clear it for no automatic archive.</small>
-          </label>
+          </label>{% endif %}
         </section>
 
         <section class="wizard-panel is-hidden" data-wizard-step>
@@ -1196,7 +1185,7 @@
         <p class="muted">Use the Cloudflare Tunnel URL here so printed QR codes open the public Puzzary address instead of the local LAN address.</p>
         <label>
           Public base URL
-          <input name="public_base_url" value="{{ app_settings.public_base_url }}" placeholder="https://puzzary.example.com">
+          <input name="public_base_url" value="{{ app_settings.public_base_url }}" placeholder="https://puzzary.example.com" {% if not current_user.can('settings.manage') %}readonly{% endif %}>
           <small class="muted">Current default from environment: {{ app_settings.default_base_url }}</small>
         </label>
 
@@ -1210,6 +1199,7 @@
                 name="disabled_puzzle_types"
                 value="{{ puzzle_type.slug }}"
                 {% if puzzle_type.slug in app_settings.disabled_puzzle_types %}checked{% endif %}
+                {% if not current_user.can('plugins.manage') %}disabled{% endif %}
               >
               Disable {{ puzzle_type.label }}
               <small class="muted">{{ puzzle_type.slug }}{% if puzzle_type.digital_only %} / digital only{% endif %}{% if puzzle_type.supports_print %} / printable{% endif %}</small>
@@ -1246,6 +1236,7 @@
       {% endif %}
 
       <section class="admin-grid two">
+        {% if current_user.can('users.create') %}
         <form class="panel" method="post" action="/admin/users">
           <h2>Create User</h2>
           <label>
@@ -1261,19 +1252,21 @@
             <input name="password" type="password" autocomplete="new-password">
             <small class="muted">Leave blank to generate a one-time setup link.</small>
           </label>
-          <label class="check-row"><input type="checkbox" name="is_admin"> Admin</label>
+          {% if current_user.can('roles.manage') %}<label class="check-row"><input type="checkbox" name="is_admin"> Admin</label>{% endif %}
           <button type="submit">Create User</button>
         </form>
+        {% endif %}
 
         <div class="admin-list">
+          <form method="get" action="/admin/users"><label>Search Users<input name="q" type="search" value="{{ request.query_params.get('q','') }}"></label><button>Search</button></form>
           {% for managed_user in admin_users %}
-            <form class="panel edit-card" method="post" action="/admin/users/{{ managed_user.id }}">
+            <article class="panel edit-card">
               <div class="row">
                 <span>
                   <strong>{{ managed_user.display_name }}</strong>
                   <small>
                     {{ managed_user.email or "No email" }}
-                    / {{ "Admin" if managed_user.is_admin else "User" }}
+                    / {% for role in managed_user.roles %}{{ role.name }}{% if not loop.last %}, {% endif %}{% else %}No roles{% endfor %}
                     / {{ "Active" if managed_user.is_active else "Inactive" }}
                   </small>
                   {% if managed_user.must_change_password %}<span class="status-pill">Password setup needed</span>{% endif %}
@@ -1289,25 +1282,8 @@
                   None
                 {% endif %}
               </p>
-              <label>
-                Display name
-                <input name="display_name" value="{{ managed_user.display_name }}" required>
-              </label>
-              <label>
-                Email
-                <input name="email" type="email" value="{{ managed_user.email or '' }}">
-              </label>
-              <div class="action-row">
-                <label class="check-row"><input type="checkbox" name="is_admin" {% if managed_user.is_admin %}checked{% endif %}> Admin</label>
-                <label class="check-row"><input type="checkbox" name="is_active" {% if managed_user.is_active %}checked{% endif %}> Active</label>
-              </div>
-              <div class="action-row">
-                <button type="submit">Save</button>
-                <button type="submit" formaction="/admin/users/{{ managed_user.id }}/reset-password" formnovalidate class="ghost-button">Reset password</button>
-                <button type="submit" formaction="/admin/users/{{ managed_user.id }}/revoke-sessions" formnovalidate class="ghost-button">Revoke sessions</button>
-                <button type="submit" formaction="/admin/users/{{ managed_user.id }}/api-token" formnovalidate class="ghost-button">Regenerate API token</button>
-              </div>
-            </form>
+              <a class="button-link" href="/admin/users/{{ managed_user.id }}">Profile and Permissions</a>
+            </article>
           {% else %}
             <p class="muted">No users yet.</p>
           {% endfor %}

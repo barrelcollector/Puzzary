@@ -64,12 +64,21 @@ def participant_id(member):
 
 def guests_allowed(db, group):
     host = db.get(User, group.host_id)
-    return bool(group.allow_guests and host and host.is_active and host.is_admin)
+    return bool(group.allow_guests and host and host.can('groups.guests'))
+
+
+def can_manage_group(user, group):
+    return not getattr(user, 'is_guest', False) and (user.can('groups.manage_any') or (user.id == group.host_id and user.can('groups.moderate')))
 
 
 def require_group_user(request, db, group):
     try:
-        return core().require_api_user(request, db)
+        user = core().require_api_user(request, db)
+        from app.permissions import can_view, require
+        require(user, 'groups.join')
+        if not can_view(user, db.get(Puzzle, group.puzzle_id), play=True):
+            raise HTTPException(403, 'Puzzle access denied')
+        return user
     except HTTPException as error:
         if error.status_code != 401 or request.headers.get('authorization'):
             raise
@@ -121,7 +130,7 @@ def presence_members(db, group, user):
                       .where(GroupMember.group_id == group.id)).all()
     result = []
     for member, account in rows:
-        if member.status != 'active' and user.id != group.host_id:
+        if member.status != 'active' and not can_manage_group(user,group):
             continue
         online = bool(member.seen_at and (now()-utc(member.seen_at)).total_seconds() < 20)
         value = member.presence or {}
@@ -172,7 +181,8 @@ def snapshot(db, group, user):
             'participant_limit': group.participant_limit, 'server_limit': SERVER_LIMIT,
             'approval_required': group.approval_required,
             'allow_guests': guests_allowed(db, group),
-            'can_allow_guests': user.id == group.host_id and user.is_admin,
+            'can_allow_guests': can_manage_group(user, group) and user.can('groups.guests'),
+            'can_moderate': can_manage_group(user,group),
             'is_guest': getattr(user, 'is_guest', False),
             'url': f'/puzzles/{group.puzzle_id}?group={group.id}',
             'invite_url': f'/groups/{group.id}',
@@ -185,7 +195,7 @@ def snapshot(db, group, user):
 @router.post('/api/puzzles/{puzzle_id}/groups')
 def create_group(puzzle_id: str, payload: GroupOptions, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
-    if payload.allow_guests and not user.is_admin:
+    if payload.allow_guests and not user.can('groups.guests'):
         raise HTTPException(403, 'Only an admin host can allow guests')
     puzzle = db.get(Puzzle, puzzle_id)
     if not puzzle: raise HTTPException(404, 'Puzzle not found')
@@ -278,6 +288,14 @@ def read_group(group_id: str, request: Request, focus: str = '', db: Session = D
     return snapshot(db, group, user)
 
 
+@router.get('/api/groups/{group_id}/invite')
+def group_invitation(group_id: str, request: Request, db: Session = Depends(get_db)):
+    user = core().require_api_user(request, db)
+    group = group_for(db,group_id)
+    member_for(db,group,user)
+    return {'url':f'/groups/{group.id}'}
+
+
 @router.post('/api/groups/{group_id}/actions')
 def group_action(group_id: str, payload: Action, request: Request, db: Session = Depends(get_db)):
     group = group_for(db, group_id, True)
@@ -340,7 +358,7 @@ def update_presence(group_id: str, payload: Presence, request: Request, db: Sess
 def manage_member(group_id: str, payload: MemberControl, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
     group = group_for(db, group_id, True); writable(group)
-    if user.id != group.host_id: raise HTTPException(403, 'Only the host can manage participants')
+    if not can_manage_group(user, group): raise HTTPException(403, 'Group moderation permission required')
     if payload.user_id == group.host_id: raise HTTPException(400, 'The host cannot be removed')
     identity = ((GroupMember.id == -payload.user_id) & GroupMember.user_id.is_(None)) if payload.user_id < 0 else GroupMember.user_id == payload.user_id
     member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, identity))
@@ -374,7 +392,7 @@ def leave_group(group_id: str, request: Request, db: Session = Depends(get_db)):
 def close_group(group_id: str, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
     group = group_for(db, group_id, True)
-    if user.id != group.host_id: raise HTTPException(403, 'Only the host can close this session')
+    if not can_manage_group(user, group): raise HTTPException(403, 'Group moderation permission required')
     group.closed = True; db.commit()
     publish_state_change(group.id)
     return snapshot(db, group, user)
@@ -384,8 +402,8 @@ def close_group(group_id: str, request: Request, db: Session = Depends(get_db)):
 def group_settings(group_id: str, payload: GroupOptions, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
     group = group_for(db, group_id, True); writable(group)
-    if user.id != group.host_id: raise HTTPException(403, 'Only the host can change settings')
-    if payload.allow_guests and not user.is_admin:
+    if not can_manage_group(user, group): raise HTTPException(403, 'Group moderation permission required')
+    if payload.allow_guests and (not user.can('groups.guests') or not db.get(User, group.host_id).can('groups.guests')):
         raise HTTPException(403, 'Only an admin host can allow guests')
     active = db.scalar(select(func.count()).select_from(GroupMember).where(GroupMember.group_id == group.id, GroupMember.status == 'active'))
     if payload.participant_limit and payload.participant_limit < active: raise HTTPException(409, 'Limit is below current participant count')
@@ -406,14 +424,16 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
 def group_puzzles(group_id: str, request: Request, q: str = '', offset: int = 0, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
     group = group_for(db, group_id)
-    if user.id != group.host_id:
+    if not can_manage_group(user, group):
         raise HTTPException(403, 'Only the host can choose puzzles')
     supported = [p.slug for p in list_puzzle_types() if p.collaboration]
     query = select(Puzzle).where(Puzzle.puzzle_type.in_(supported), Puzzle.archived_at.is_(None),
                                 (Puzzle.auto_archive_at.is_(None)) | (Puzzle.auto_archive_at > now()))
     if q.strip():
         query = query.where(Puzzle.title.icontains(q.strip()[:160], autoescape=True))
-    puzzles = db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id).offset(max(0, offset)).limit(51)).all()
+    from app.permissions import can_view
+    puzzles = [p for p in db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id)) if can_view(user,p,play=True)]
+    puzzles = puzzles[max(0,offset):max(0,offset)+51]
     return {'puzzles': [{'id': p.id, 'title': p.title, 'puzzle_type': p.puzzle_type,
                          'difficulty': p.difficulty, 'visited': p.id in (group.puzzle_states or {}) or p.id == group.puzzle_id}
                         for p in puzzles[:50]], 'has_more': len(puzzles) > 50}
@@ -423,7 +443,7 @@ def group_puzzles(group_id: str, request: Request, q: str = '', offset: int = 0,
 def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
     group = group_for(db, group_id, True)
-    if user.id != group.host_id:
+    if not can_manage_group(user, group):
         raise HTTPException(403, 'Only the host can move the group')
     writable(group)
     if payload.revision != group.revision:
@@ -431,6 +451,8 @@ def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session 
     puzzle = db.get(Puzzle, payload.puzzle_id)
     if not puzzle:
         raise HTTPException(404, 'Puzzle not found')
+    from app.permissions import can_view
+    if not can_view(user, puzzle, play=True): raise HTTPException(403, 'Puzzle access denied')
     if puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()):
         raise HTTPException(409, 'Choose an active puzzle')
     plugin = get_puzzle_type(puzzle.puzzle_type)

@@ -5,7 +5,7 @@
   <div class="panel">
     <h1>Puzzle Library</h1>
     <p class="muted">Browse saved puzzles or start a new generated puzzle.</p>
-    <a class="button-link" href="/generate">Generate Puzzle</a>
+    {% if current_user.can('puzzles.generate') %}<a class="button-link" href="/generate">Generate Puzzle</a>{% endif %}
   </div>
 </section>
 

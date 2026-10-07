@@ -7,7 +7,7 @@
   {% if print_pdf_css %}
     <style>{{ print_pdf_css | safe }}</style>
   {% else %}
-    <link rel="stylesheet" href="/static/styles.css?v=32">
+    <link rel="stylesheet" href="/static/styles.css?v=33">
   {% endif %}
 </head>
 <body>
@@ -19,8 +19,8 @@
       {% if current_user and current_user.is_guest %}
         <span class="user-pill">{{ current_user.display_name }} (guest)</span>
       {% elif current_user %}
-        <a class="nav-link" href="/generate">Generate</a>
-        {% if current_user.is_admin %}
+        {% if current_user.can('puzzles.generate') %}<a class="nav-link" href="/generate">Generate</a>{% endif %}
+        {% if current_user.can_manage %}
           <a class="nav-link" href="/admin">Admin</a>
         {% endif %}
         <a class="nav-link" href="/account/password">Account</a>

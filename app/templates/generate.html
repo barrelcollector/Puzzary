@@ -67,11 +67,11 @@
     </label>
     <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
     <div data-generation-fields></div>
-    <label>
+    {% if can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
       Auto-archive
       <input type="datetime-local" name="auto_archive_at" value="{{ default_auto_archive_value() }}">
       <small class="muted">{{ puzzary_timezone }}. Defaults to 24 hours from creation; clear it for no automatic archive.</small>
-    </label>
+    </label>{% endif %}
   </section>
 
   <section class="wizard-panel is-hidden" data-wizard-step>

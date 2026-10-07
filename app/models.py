@@ -40,6 +40,33 @@ dictionary_definition_tag_links = Table(
 )
 
 
+user_role_links = Table(
+    'user_role_links', Base.metadata,
+    Column('user_id', ForeignKey('users.id'), primary_key=True),
+    Column('role_id', ForeignKey('permission_roles.id'), primary_key=True),
+)
+
+
+class PermissionRole(Base):
+    __tablename__ = 'permission_roles'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+    permissions: Mapped[list] = mapped_column(JSON, default=list)
+    description: Mapped[str] = mapped_column(String(255), default='')
+
+
+class PermissionAudit(Base):
+    __tablename__ = 'permission_audit'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    subject_type: Mapped[str] = mapped_column(String(40))
+    subject_id: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(80))
+    before: Mapped[dict] = mapped_column(JSON, default=dict)
+    after: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -59,6 +86,18 @@ class User(Base):
     session_version: Mapped[int] = mapped_column(Integer, default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    permissions_initialized: Mapped[bool] = mapped_column(Boolean, default=False)
+    permission_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    roles: Mapped[list[PermissionRole]] = relationship(secondary=user_role_links)
+
+    def can(self, permission: str) -> bool:
+        from app.permissions import effective_permissions
+        return permission in effective_permissions(self)
+
+    @property
+    def can_manage(self) -> bool:
+        from app.permissions import management_access
+        return management_access(self)
 
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="user")
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="user")

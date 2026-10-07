@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Permissions - Puzzary{% endblock %}
+{% block content %}
+<section class="admin-shell">
+{% include 'admin_nav.html' %}
+<div class="admin-main permission-admin">
+{% if section == 'user_detail' %}
+<a href="/admin/users">Back to Users</a>
+<h1>{{ managed_user.display_name }}</h1>
+<p>{{ 'Enabled' if managed_user.is_active else 'Disabled' }} &middot; {{ effective|length }} effective permissions</p>
+<section>
+<h2>Profile</h2>
+{% if current_user.can('users.edit') or current_user.can('users.disable') %}
+<form method="post" action="/admin/users/{{ managed_user.id }}">
+<label>Display name<input name="display_name" value="{{ managed_user.display_name }}" {% if not current_user.can('users.edit') %}readonly{% endif %} required></label>
+<label>Email<input name="email" type="email" value="{{ managed_user.email or '' }}" {% if not current_user.can('users.edit') %}readonly{% endif %}></label>
+{% if current_user.can('users.disable') %}
+<input type="hidden" name="is_active" value="off">
+<label class="check-row"><input name="is_active" type="checkbox" {% if managed_user.is_active %}checked{% endif %}> Enabled</label>
+{% endif %}
+<button>Save Profile</button>
+</form>
+{% else %}<p>{{ managed_user.email or 'No email' }}</p>{% endif %}
+</section>
+<section>
+<h2>Roles and Permissions</h2>
+<form method="post" action="/admin/users/{{ managed_user.id }}/permissions" data-permission-form data-active="{{ 'true' if managed_user.is_active else 'false' }}">
+<fieldset {% if not current_user.can('roles.manage') %}disabled{% endif %}>
+<legend>Assigned Roles</legend>
+{% for role in roles %}<label class="check-row"><input type="checkbox" name="roles" value="{{ role.id }}" data-grants='{{ role.permissions|tojson }}' {% if role in managed_user.roles %}checked{% endif %}> {{ role.name }}</label>{% endfor %}
+</fieldset>
+<p data-preview-count aria-live="polite">{{ effective|length }} effective permissions</p>
+{% for section_name, items in permission_groups.items() %}
+<details {% if loop.first %}open{% endif %}>
+<summary>{{ section_name }}</summary>
+{% if current_user.can('roles.manage') %}<div class="action-row"><button type="button" data-bulk="allow">Allow Section</button><button type="button" data-bulk="deny">Deny Section</button><button type="button" data-bulk="inherit">Inherit Section</button></div>{% endif %}
+{% for item in items %}
+<div class="permission-row">
+<label for="perm-{{ loop.index }}-{{ section_name|replace(' ','-') }}">{{ item.label }}{% if item.name in dangerous %}<small>High privilege</small>{% endif %}</label>
+<select id="perm-{{ loop.index }}-{{ section_name|replace(' ','-') }}" name="permission:{{ item.name }}" data-permission="{{ item.name }}" {% if not current_user.can('roles.manage') %}disabled{% endif %}>
+<option value="inherit" {% if item.name not in managed_user.permission_overrides %}selected{% endif %}>Inherited from roles</option>
+<option value="allow" {% if managed_user.permission_overrides.get(item.name) == true %}selected{% endif %}>Explicitly allowed</option>
+<option value="deny" {% if managed_user.permission_overrides.get(item.name) == false %}selected{% endif %}>Explicitly denied</option>
+</select>
+<span data-effective>{{ 'Allowed' if item.name in effective else 'Denied' }}</span>
+</div>
+{% endfor %}
+</details>
+{% endfor %}
+{% if current_user.can('roles.manage') %}<button>Save Permissions</button>{% endif %}
+</form>
+{% if current_user.can('roles.manage') %}<form method="post" action="/admin/users/{{ managed_user.id }}/permissions/reset"><button class="ghost-button">Reset to Role Defaults</button></form>{% endif %}
+</section>
+<section><h2>Authentication and Security</h2>
+<p>{{ 'Password configured' if managed_user.password_hash else 'Password setup required' }} &middot; {{ 'API token configured' if managed_user.api_token_hash else 'No API token' }}</p>
+<div class="action-row">
+{% for capability, endpoint, label in [('users.reset','reset-password','Reset Password'),('users.sessions','revoke-sessions','Revoke Sessions'),('users.tokens','api-token','Rotate API Token')] %}
+{% if current_user.can(capability) %}<form method="post" action="/admin/users/{{ managed_user.id }}/{{ endpoint }}"><button>{{ label }}</button></form>{% endif %}
+{% endfor %}
+</div></section>
+{% elif section == 'roles' %}
+<h1>Roles</h1>
+<details><summary>Create Role</summary>
+<form method="post" action="/admin/roles"><label>Name<input name="name" maxlength="80" required></label><label>Description<input name="description" maxlength="255"></label>
+{% for section_name, items in permission_groups.items() %}<details><summary>{{ section_name }}</summary>{% for item in items %}<label class="check-row"><input type="checkbox" name="permissions" value="{{ item.name }}"> {{ item.label }}{% if item.name in dangerous %} (high privilege){% endif %}</label>{% endfor %}</details>{% endfor %}<button>Create Role</button></form>
+</details>
+{% for role in roles %}<details><summary>{{ role.name }} &middot; {{ role.permissions|length }} permissions</summary>
+<form method="post" action="/admin/roles/{{ role.id }}" data-role-form>
+<label>Name<input name="name" value="{{ role.name }}" maxlength="80" required></label><label>Description<input name="description" value="{{ role.description }}" maxlength="255"></label>
+{% for section_name, items in permission_groups.items() %}<details><summary>{{ section_name }}</summary>{% for item in items %}<label class="check-row"><input type="checkbox" name="permissions" value="{{ item.name }}" {% if item.name in role.permissions %}checked{% endif %}> {{ item.label }}{% if item.name in dangerous %} (high privilege){% endif %}</label>{% endfor %}</details>{% endfor %}
+<div class="action-row"><button>Save Role</button><button type="submit" formaction="/admin/roles" data-duplicate>Duplicate Role</button></div>
+</form></details>{% endfor %}
+{% else %}<h1>Audit Log</h1>{% endif %}
+{% if events %}<section><h2>Recent Changes</h2><div class="permission-audit">{% for event in events %}<details><summary>{{ event.created_at }} &middot; {{ event.action }} &middot; {{ event.subject_type }} {{ event.subject_id }} &middot; actor {{ actors.get(event.actor_id, event.actor_id) if actors is defined else event.actor_id }}</summary><pre>Before: {{ event.before|tojson(indent=2) }}
+After: {{ event.after|tojson(indent=2) }}</pre></details>{% endfor %}</div></section>{% endif %}
+</div></section>
+<script src="/static/permissions.js" defer></script>
+{% endblock %}

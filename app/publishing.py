@@ -16,6 +16,7 @@ from app.database import get_db
 from app.models import PublishedIssue, Puzzle
 from app.print_pdf import render_pdf
 from app.booklet import booklet_layout, impose_booklet
+from app.permissions import can_owned, require_owned, can_view
 
 router = APIRouter()
 
@@ -94,7 +95,7 @@ def find_issue(db, issue_id, lock=False):
 
 
 def require_issue_access(issue, user):
-    if not user.is_admin and (issue.published_at is None or issue.archived_at is not None):
+    if not can_owned(user,'issues','edit',issue.created_by_id) and (issue.published_at is None or issue.archived_at is not None):
         raise HTTPException(404, "Issue not found")
 
 
@@ -111,13 +112,15 @@ def validate_puzzle(db, puzzle_id, publishing=False):
 
 
 def write_issue(db, user, payload, issue=None):
+    require_owned(user,'issues','edit',issue.created_by_id if issue else user.id)
     if issue is not None and issue.published_at is not None:
         raise HTTPException(409, "Published issues are immutable; duplicate this issue to make changes")
     if not payload.title.strip():
         raise HTTPException(422, "An issue title is required")
     for item in payload.modules:
         if item.kind == "puzzle":
-            validate_puzzle(db, item.puzzle_id)
+            puzzle = validate_puzzle(db, item.puzzle_id)
+            if not can_view(user,puzzle): raise HTTPException(403,'Puzzle access denied')
     if issue is None:
         issue = PublishedIssue(id=uuid.uuid4().hex[:12], created_by_id=user.id)
         db.add(issue)
@@ -150,7 +153,8 @@ def snapshot_modules(issue, request, db, publishing=False):
             "modules": entries}
 
 
-def publish_issue(db, issue, request):
+def publish_issue(db, issue, request, user):
+    require_owned(user,'issues','publish',issue.created_by_id)
     if issue.published_at is not None:
         return issue
     if issue.archived_at is not None:
@@ -235,9 +239,11 @@ def web_issue_save(request: Request, issue_id: str = Form(""), title: str = Form
         payload = IssueWrite(title=title, description=description, modules=json.loads(modules_json))
     except (ValidationError, ValueError, TypeError) as exc:
         raise HTTPException(422, "Invalid issue sections or missing content") from exc
-    issue = write_issue(db, user, payload, find_issue(db, issue_id, lock=True) if issue_id else None)
+    existing = find_issue(db, issue_id, lock=True) if issue_id else None
+    if action == 'publish': require_owned(user,'issues','publish',existing.created_by_id if existing else user.id)
+    issue = write_issue(db, user, payload, existing)
     if action == "publish":
-        issue = publish_issue(db, find_issue(db, issue.id, lock=True), request)
+        issue = publish_issue(db, find_issue(db, issue.id, lock=True), request, user)
     if action == "preview":
         return RedirectResponse(f"/issues/{issue.id}", status_code=303)
     return RedirectResponse(f"/admin/publishing/{issue.id}", status_code=303)
@@ -251,7 +257,7 @@ def web_issue_action(issue_id: str, action: str, request: Request, db: Session =
         return user
     issue = find_issue(db, issue_id, lock=True)
     if action == "publish":
-        publish_issue(db, issue, request)
+        publish_issue(db, issue, request, user)
     elif action in ("archive", "restore"):
         issue.archived_at = c.utcnow() if action == "archive" else None
         db.commit()
@@ -287,9 +293,7 @@ def web_issue_pdf(issue_id: str, request: Request, db: Session = Depends(get_db)
 def api_issue_list(request: Request, db: Session = Depends(get_db)):
     user = core().require_api_user(request, db)
     statement = select(PublishedIssue).where(PublishedIssue.archived_at.is_(None)).order_by(desc(PublishedIssue.created_at)).limit(100)
-    if not user.is_admin:
-        statement = statement.where(PublishedIssue.published_at.is_not(None))
-    return [issue_metadata(issue, db) for issue in db.scalars(statement)]
+    return [issue_metadata(issue, db) for issue in db.scalars(statement) if issue.published_at is not None or can_owned(user,'issues','edit',issue.created_by_id)]
 
 
 @router.get("/api/issues/latest")
@@ -326,8 +330,8 @@ def api_update_issue(issue_id: str, payload: IssueWrite, request: Request, db: S
 
 @router.post("/api/issues/{issue_id}/publish")
 def api_publish_issue(issue_id: str, request: Request, db: Session = Depends(get_db)):
-    core().require_admin_api(request, db)
-    return issue_metadata(publish_issue(db, find_issue(db, issue_id, lock=True), request), db)
+    user = core().require_admin_api(request, db)
+    return issue_metadata(publish_issue(db, find_issue(db, issue_id, lock=True), request, user), db)
 
 
 @router.get("/api/issues/{issue_id}")

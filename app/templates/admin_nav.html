@@ -1,0 +1,14 @@
+<nav class="admin-nav" aria-label="Administration">
+  <a href="/admin">Dashboard</a>
+  {% if current_user.can('puzzles.generate') %}<a href="/admin/generate">Generate</a>{% endif %}
+  {% if current_user.can('puzzles.edit.own') or current_user.can('puzzles.edit.any') or current_user.can('puzzles.create') %}<a href="/admin/puzzles">Puzzles</a>{% endif %}
+  {% if current_user.can('content.manage') %}
+  <a href="/admin/dictionary">Dictionary</a><a href="/admin/word-banks">Word Banks</a><a href="/admin/tags">Tags</a>
+  {% endif %}
+  {% if current_user.can('activity.view') %}<a href="/admin/activity">Activity</a>{% endif %}
+  {% if current_user.can('users.view') %}<a href="/admin/users">Users</a>{% endif %}
+  {% if current_user.can('roles.manage') %}<a href="/admin/roles">Roles</a>{% endif %}
+  {% if current_user.can('settings.manage') or current_user.can('plugins.manage') %}<a href="/admin/settings">Settings</a>{% endif %}
+  {% if current_user.can('issues.edit.own') or current_user.can('issues.edit.any') %}<a href="/admin/publishing">Publishing</a>{% endif %}
+  {% if current_user.can('audit.view') %}<a href="/admin/audit">Audit Log</a>{% endif %}
+</nav>

@@ -26,6 +26,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import TemplateNotFound
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import desc, select
@@ -54,6 +55,7 @@ from app.models import (
     WordBankWord,
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
+from app.permissions import authorize_request, initialize_permissions, require as require_permission, can_view, require_owned, can_owned, audit, lock_permissions, protect_last_admin
 from app.schemas import (
     DictionaryDefinitionPatch,
     DictionaryDefinitionWrite,
@@ -88,11 +90,14 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="Puzzary", version="0.1.0")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals['can_owned'] = can_owned
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 from app.publishing import router as publishing_router
 app.include_router(publishing_router)
 from app.groups import router as groups_router
 app.include_router(groups_router)
+from app.permission_admin import router as permission_router
+app.include_router(permission_router)
 
 DICTIONARY_SYNC_CHECK_SECONDS = 15 * 60
 
@@ -176,6 +181,7 @@ async def startup() -> None:
     init_db()
     with SessionLocal() as db:
         ensure_admin_user(db)
+        initialize_permissions(db)
         seed_word_banks(db)
         seed_word_definitions(db)
         apply_due_auto_archives(db)
@@ -263,6 +269,14 @@ def puzzle_print_url(puzzle_id: str, db: Session | None = None) -> str:
 
 def puzzle_print_render_url(puzzle_id: str, db: Session | None = None) -> str:
     return f"{app_base_url(db)}/puzzles/{puzzle_id}/print/render"
+
+
+def authorized_render_url(puzzle, user, request, db):
+    token = URLSafeTimedSerializer(SESSION_SECRET, salt='puzzary-print-render').dumps({
+        'puzzle_id':puzzle.id, 'user_id':user.id, 'session_version':user.session_version,
+        'api':bool(request.headers.get('authorization')),
+    })
+    return puzzle_print_render_url(puzzle.id,db) + '?' + urlencode({'render_token':token})
 
 
 def puzzle_qr_short_url(puzzle_id: str, db: Session | None = None) -> str:
@@ -623,6 +637,10 @@ def write_manual_puzzle(
     creator: User | None,
     puzzle: Puzzle | None = None,
 ) -> Puzzle:
+    if creator:
+        require_owned(creator, 'puzzles', 'edit', puzzle.created_by_id) if puzzle else require_permission(creator, 'puzzles.create')
+        if not payload.draft:
+            require_owned(creator, 'puzzles', 'publish', puzzle.created_by_id if puzzle else creator.id)
     valid, error = validate_manual_puzzle_payload(db, payload)
     if not valid:
         raise ValueError(error)
@@ -834,6 +852,8 @@ def import_portable_puzzles(
             "import_origin": origin,
             "import_schema": str(item.get("schema") or "puzzary.puzzle.item.v1"),
         }
+        draft = bool(creator and not can_owned(creator,'puzzles','publish',creator.id))
+        metadata['draft'] = draft
         puzzle = Puzzle(
             id=uuid.uuid4().hex[:12],
             puzzle_type=str(item.get("puzzle_type")),
@@ -846,7 +866,8 @@ def import_portable_puzzles(
             solution_payload=item.get("solution_payload") or {},
             puzzle_metadata=metadata,
             source="imported",
-            auto_archive_at=default_auto_archive_at(),
+            auto_archive_at=None if draft else default_auto_archive_at(),
+            archived_at=utcnow() if draft else None,
             created_by_id=creator.id if creator is not None else None,
         )
         db.add(puzzle)
@@ -1132,6 +1153,8 @@ def filtered_library(
     selected_tags = {int(tag_id) for tag_id in filters["tags"] if str(tag_id).isdigit()}
 
     def matches(puzzle: Puzzle) -> bool:
+        if not can_view(current_user, puzzle):
+            return False
         if filters["availability"] == "active" and puzzle.archived_at is not None:
             return False
         if filters["availability"] == "archived" and puzzle.archived_at is None:
@@ -2059,18 +2082,8 @@ def require_api_user(request: Request, db: Session) -> User:
     user = api_user_from_token(request, db) or current_user(request, db)
     if user is None:
         raise HTTPException(status_code=401, detail="API token required")
+    authorize_request(request, db, user)
     return user
-
-
-def active_admin_count(db: Session, excluding_user_id: int | None = None) -> int:
-    users = db.scalars(select(User).where(User.is_admin == True, User.is_active == True)).all()  # noqa: E712
-    return sum(1 for user in users if user.id != excluding_user_id)
-
-
-def can_remove_admin(db: Session, user: User) -> bool:
-    if not user.is_admin or not user.is_active:
-        return True
-    return active_admin_count(db, excluding_user_id=user.id) >= 1
 
 
 def normalized_email(value: str) -> str | None:
@@ -2094,6 +2107,13 @@ def create_user_record(
     if clean_email and db.scalar(select(User).where(User.email == clean_email)):
         raise HTTPException(status_code=400, detail="That email is already in use")
     user = User(display_name=clean_name, email=clean_email, is_admin=is_admin, is_active=True)
+    from app.models import PermissionRole
+    role = db.scalar(select(PermissionRole).where(PermissionRole.name == ('Admin' if is_admin else 'Player')))
+    if role is None:
+        initialize_permissions(db)
+        role = db.scalar(select(PermissionRole).where(PermissionRole.name == ('Admin' if is_admin else 'Player')))
+    user.roles = [role]
+    user.permissions_initialized = True
     db.add(user)
     db.flush()
     setup_token = None
@@ -2121,6 +2141,8 @@ def ensure_default_admin_account(db: Session) -> User:
         db.refresh(admin)
         return admin
     changed = False
+    if admin.permissions_initialized:
+        return admin
     if not admin.is_admin:
         admin.is_admin = True
         changed = True
@@ -2364,15 +2386,13 @@ def require_admin_user(request: Request, db: Session) -> User | RedirectResponse
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    authorize_request(request, db, user, administrative=True)
     return user
 
 
 def require_admin_api(request: Request, db: Session) -> User:
     user = require_api_user(request, db)
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    authorize_request(request, db, user, administrative=True)
     return user
 
 
@@ -2395,6 +2415,7 @@ def require_web_user(request: Request, db: Session) -> User | RedirectResponse:
     if user is None:
         target = safe_return_to(str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""))
         return RedirectResponse(url=f"/login?return_to={quote(target)}", status_code=303)
+    authorize_request(request, db, user)
     return user
 
 
@@ -2621,7 +2642,7 @@ def library(request: Request, db: Session = Depends(get_db)):
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    library_data = filtered_library(db, request, user, include_archived_for_admin=user.is_admin)
+    library_data = filtered_library(db, request, user, include_archived_for_admin=user.can('library.archived_view'))
     active_chips = active_filter_chips(library_data["filters"], library_data["options"])
     for chip in active_chips:
         chip["remove_url"] = query_without(request, chip["param"], chip["value"])
@@ -2675,7 +2696,7 @@ async def web_generate_puzzle(
     word_bank_slugs: list[str] = Form(default=[]),
     difficulty: str = Form("easy"),
     seed: str = Form(""),
-    auto_archive_at: str = Form(""),
+    auto_archive_at: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     user = require_web_user(request, db)
@@ -2683,6 +2704,7 @@ async def web_generate_puzzle(
         return user
     form = await request.form()
     puzzle_type_config = get_puzzle_type(puzzle_type)
+    if 'auto_archive_at' in form: require_owned(user,'puzzles','schedule',user.id)
     if puzzle_type_config is None or not is_puzzle_type_enabled(db, puzzle_type):
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
     needs_word_bank = bool(puzzle_type_config and "word_bank" in puzzle_type_config.source_requirements)
@@ -2703,8 +2725,8 @@ async def web_generate_puzzle(
         creator=user,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
-    if saved_puzzle:
-        saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at)
+    if saved_puzzle and 'auto_archive_at' in form and not puzzle_is_draft(saved_puzzle):
+        saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -2729,6 +2751,7 @@ def admin_context(
     manual_form_error: str = "",
 ) -> dict:
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
+    puzzles = [p for p in puzzles if can_view(user, p) or can_owned(user, 'puzzles', 'edit', p.created_by_id)]
     all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
     word_banks = [bank for bank in all_word_banks if bank.archived_at is None]
     categories = db.scalars(select(PuzzleCategory).order_by(PuzzleCategory.name)).all()
@@ -2747,17 +2770,23 @@ def admin_context(
     attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
+    if not user.can('activity.view'):
+        attempts, progress_rows, photos = [], [], []
     dictionary_words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
     recent_words = db.scalars(select(DictionaryWord).order_by(desc(DictionaryWord.created_at)).limit(8)).all()
     recent_word_banks = db.scalars(select(WordBank).order_by(desc(WordBank.created_at)).limit(8)).all()
     dictionary_import_sources = db.scalars(select(DictionaryImportSource).order_by(DictionaryImportSource.name)).all()
     admin_users = db.scalars(select(User).order_by(User.display_name)).all()
+    if not user.can('users.view'):
+        admin_users = []
+    elif section == 'users' and (query := request.query_params.get('q', '').strip().lower()):
+        admin_users = [u for u in admin_users if query in u.display_name.lower() or query in (u.email or '').lower()]
     dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags)
     return {
         "request": request,
         "current_user": user,
         "section": section,
-        "issues": db.scalars(select(PublishedIssue).order_by(desc(PublishedIssue.created_at))).all() if section == "publishing" else [],
+        "issues": [i for i in db.scalars(select(PublishedIssue).order_by(desc(PublishedIssue.created_at))) if can_owned(user,'issues','edit',i.created_by_id)] if section == "publishing" else [],
         "selected_issue": None,
         "publishing_puzzles": [
             {"id": puzzle.id, "title": puzzle.title, "puzzle_type": puzzle.puzzle_type,
@@ -2940,7 +2969,7 @@ def admin_settings_page(request: Request, db: Session = Depends(get_db)):
 @app.post("/admin/settings")
 def admin_update_settings(
     request: Request,
-    public_base_url: str = Form(""),
+    public_base_url: str | None = Form(None),
     disabled_puzzle_types: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
 ):
@@ -2948,11 +2977,15 @@ def admin_update_settings(
     if isinstance(user, RedirectResponse):
         return user
     try:
-        base_url = normalize_base_url(public_base_url) or DEFAULT_APP_BASE_URL
+        base_url = app_base_url(db) if public_base_url is None else normalize_base_url(public_base_url) or DEFAULT_APP_BASE_URL
     except ValueError as error:
         return RedirectResponse(url=f"/admin/settings?error={quote(str(error))}", status_code=303)
+    if base_url != app_base_url(db): require_permission(user, 'settings.manage')
+    form_disabled = set(disabled_puzzle_types) if user.can('plugins.manage') or disabled_puzzle_types else disabled_puzzle_type_slugs(db)
+    if form_disabled != disabled_puzzle_type_slugs(db):
+        require_permission(user, 'plugins.manage')
     set_app_setting(db, "public_base_url", base_url)
-    set_disabled_puzzle_type_slugs(db, disabled_puzzle_types)
+    set_disabled_puzzle_type_slugs(db, list(form_disabled))
     db.commit()
     return RedirectResponse(url="/admin/settings?message=Settings%20saved.", status_code=303)
 
@@ -2969,7 +3002,10 @@ def admin_create_user(
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    if is_admin == 'on': require_permission(user, 'roles.manage')
     new_user, setup_token = create_user_record(db, display_name, email, is_admin == "on", password)
+    audit(db, user, 'user', new_user.id, 'user.created', {}, {'display_name':new_user.display_name, 'roles':[r.id for r in new_user.roles]})
+    db.commit()
     if setup_token:
         return RedirectResponse(
             url=f"/admin/users?setup_user={quote(new_user.display_name)}&setup_token={quote(setup_token)}",
@@ -2982,40 +3018,51 @@ def admin_create_user(
 def admin_update_user(
     user_id: int,
     request: Request,
-    display_name: str = Form(""),
-    email: str = Form(""),
-    is_admin: str = Form(""),
-    is_active: str = Form(""),
+    display_name: str | None = Form(None),
+    email: str | None = Form(None),
+    is_admin: str | None = Form(None),
+    is_active: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     admin = require_admin_user(request, db)
     if isinstance(admin, RedirectResponse):
         return admin
+    lock_permissions(db)
+    if not (admin.can('users.edit') or admin.can('users.disable')):
+        raise HTTPException(403,'User editing or account status permission required')
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    requested_admin = is_admin == "on"
-    requested_active = is_active == "on"
-    if (user.is_admin and not requested_admin) or (user.is_active and not requested_active):
-        if not can_remove_admin(db, user):
-            return RedirectResponse(url="/admin/users?error=Keep%20at%20least%20one%20active%20admin.", status_code=303)
-    clean_name = display_name.strip()
+    if user.id != admin.id and user.can('roles.manage'): require_permission(admin,'roles.manage')
+    requested_active = user.is_active if is_active is None else is_active == 'on'
+    if requested_active != user.is_active: require_permission(admin, 'users.disable')
+    if is_admin is not None: require_permission(admin, 'roles.manage')
+    before = {'display_name':user.display_name, 'email':user.email, 'active':user.is_active, 'roles':[r.id for r in user.roles]}
+    clean_name = user.display_name if display_name is None else display_name.strip()
     if not clean_name:
         return RedirectResponse(url="/admin/users?error=Display%20name%20is%20required.", status_code=303)
     existing_name = db.scalar(select(User).where(User.display_name == clean_name, User.id != user.id))
     if existing_name:
         return RedirectResponse(url="/admin/users?error=That%20display%20name%20is%20already%20in%20use.", status_code=303)
-    clean_email = normalized_email(email)
+    clean_email = user.email if email is None else normalized_email(email)
+    if clean_name != user.display_name or clean_email != user.email:
+        require_permission(admin,'users.edit')
     if clean_email:
         existing_email = db.scalar(select(User).where(User.email == clean_email, User.id != user.id))
         if existing_email:
             return RedirectResponse(url="/admin/users?error=That%20email%20is%20already%20in%20use.", status_code=303)
     user.display_name = clean_name
     user.email = clean_email
-    user.is_admin = requested_admin
+    if is_admin is not None:
+        from app.models import PermissionRole
+        user.roles = [db.scalar(select(PermissionRole).where(PermissionRole.name == ('Admin' if is_admin == 'on' else 'Player')))]
+        user.permission_overrides = {}
+        user.is_admin = is_admin == 'on'
     if user.is_active != requested_active:
         user.session_version = (user.session_version or 1) + 1
     user.is_active = requested_active
+    protect_last_admin(db)
+    audit(db, admin, 'user', user.id, 'user.updated', before, {'display_name':user.display_name, 'email':user.email, 'active':user.is_active, 'roles':[r.id for r in user.roles]})
     db.commit()
     return RedirectResponse(url="/admin/users?message=User%20updated.", status_code=303)
 
@@ -3029,6 +3076,8 @@ def admin_reset_user_password(user_id: int, request: Request, db: Session = Depe
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     token = issue_password_setup_token(db, user)
+    audit(db, admin, 'user', user.id, 'password.reset', {}, {})
+    db.commit()
     return RedirectResponse(
         url=f"/admin/users?setup_user={quote(user.display_name)}&setup_token={quote(token)}",
         status_code=303,
@@ -3044,6 +3093,7 @@ def admin_revoke_user_sessions(user_id: int, request: Request, db: Session = Dep
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     user.session_version = (user.session_version or 1) + 1
+    audit(db, admin, 'user', user.id, 'sessions.revoked', {}, {})
     db.commit()
     return RedirectResponse(url="/admin/users?message=Sessions%20revoked.", status_code=303)
 
@@ -3148,24 +3198,11 @@ def admin_publish_manual_puzzle(puzzle_id: str, request: Request, db: Session = 
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-    payload = PuzzleManualWrite(
-        puzzle_type=puzzle.puzzle_type,
-        title=puzzle.title,
-        theme=puzzle.theme,
-        difficulty=puzzle.difficulty,
-        prompt=puzzle.prompt,
-        print_payload=puzzle.print_payload or {},
-        play_payload=puzzle.play_payload or {},
-        solution_payload=puzzle.solution_payload or {},
-        metadata=puzzle.puzzle_metadata or {},
-        hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
-        draft=False,
-    )
-    valid, error = validate_manual_puzzle_payload(db, payload, allow_draft=False)
-    if not valid:
+    error = manual_puzzle_publish_error(db, puzzle)
+    if error:
         return render_admin(request, db, "puzzle_edit", selected_puzzle=puzzle, manual_form_error=error)
     metadata = dict(puzzle.puzzle_metadata or {})
-    metadata["manual"] = True
+    if puzzle.source == 'manual': metadata["manual"] = True
     metadata["draft"] = False
     metadata["manual_published_at"] = utcnow().isoformat()
     puzzle.puzzle_metadata = metadata
@@ -3185,6 +3222,8 @@ def admin_issue_user_api_token(user_id: int, request: Request, db: Session = Dep
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     token = issue_api_token(db, user)
+    audit(db, admin, 'user', user.id, 'api_token.rotated', {}, {})
+    db.commit()
     return RedirectResponse(
         url=f"/admin/users?api_user={quote(user.display_name)}&api_token={quote(token)}",
         status_code=303,
@@ -3277,22 +3316,25 @@ async def admin_import_puzzles(
 
 
 @app.post("/admin/puzzles/{puzzle_id}/metadata")
-def admin_update_puzzle_metadata(
+async def admin_update_puzzle_metadata(
     puzzle_id: str,
     request: Request,
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
-    auto_archive_at: str = Form(""),
+    auto_archive_at: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
     puzzle = db.get(Puzzle, puzzle_id)
+    form = await request.form()
     if puzzle is not None:
         puzzle.category_id = category_id or None
         puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
-        puzzle.auto_archive_at = parse_local_datetime(auto_archive_at)
+        if 'auto_archive_at' in form:
+            require_owned(user,'puzzles','schedule',puzzle.created_by_id)
+            puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
         db.commit()
     return RedirectResponse(url="/admin/puzzles", status_code=303)
 
@@ -3309,7 +3351,7 @@ async def admin_generate_puzzle(
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
-    auto_archive_at: str = Form(""),
+    auto_archive_at: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3329,6 +3371,7 @@ async def admin_generate_puzzle(
     elif puzzle_type_config.theme_mode != "none":
         generation_theme = slugify(theme) if theme.strip() else puzzle_type_config.label
     form = await request.form()
+    if 'auto_archive_at' in form: require_owned(user,'puzzles','schedule',user.id)
     puzzle = create_puzzle_record(
         PuzzleGenerateRequest(
             puzzle_type=puzzle_type,
@@ -3348,7 +3391,8 @@ async def admin_generate_puzzle(
         source_tags = list(banks[0].tags) if len(banks) == 1 else []
         saved_puzzle.category_id = category_id or source_category
         saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else source_tags
-        saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at)
+        if 'auto_archive_at' in form and not puzzle_is_draft(saved_puzzle):
+            saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -4056,6 +4100,8 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
     is_guest = getattr(user, 'is_guest', False)
+    if not is_guest:
+        authorize_request(request, db, user)
     users = [] if is_guest else db.scalars(select(User).order_by(User.display_name)).all()
     attempts = [] if is_guest else db.scalars(
         select(PuzzleAttempt).where(PuzzleAttempt.puzzle_id == puzzle_id).order_by(desc(PuzzleAttempt.created_at)).limit(10)
@@ -4063,6 +4109,9 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     photos = [] if is_guest else db.scalars(
         select(PuzzlePhoto).where(PuzzlePhoto.puzzle_id == puzzle_id).order_by(desc(PuzzlePhoto.created_at)).limit(10)
     ).all()
+    if not is_guest and not user.can('activity.view'):
+        attempts = [a for a in attempts if a.user_id == user.id]
+        photos = [p for p in photos if p.user_id == user.id]
     progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
     progress_payload = progress.progress_payload if progress is not None else {}
     progress_answers = progress_payload.get("answers", {})
@@ -4115,7 +4164,22 @@ def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(ge
 
 @app.get("/puzzles/{puzzle_id}/print/render", response_class=HTMLResponse)
 def puzzle_print_render_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
-    return render_puzzle_print_page(puzzle_id, request, db, None, show_toolbar=False)
+    if token := request.query_params.get('render_token'):
+        try:
+            payload = URLSafeTimedSerializer(SESSION_SECRET,salt='puzzary-print-render').loads(token,max_age=900)
+        except BadSignature:
+            raise HTTPException(401,'Print link expired or invalid; request a new print preview')
+        user = db.get(User,payload.get('user_id'))
+        if payload.get('puzzle_id') != puzzle_id or not user or payload.get('session_version') != user.session_version:
+            raise HTTPException(401,'Print link expired or invalid')
+        if payload.get('api'): require_permission(user,'api.use')
+        authorize_request(request,db,user)
+    else:
+        user = require_api_user(request,db)
+    response = render_puzzle_print_page(puzzle_id, request, db, user, show_toolbar=False)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
 
 
 @app.get("/puzzles/{puzzle_id}/print.pdf")
@@ -4224,8 +4288,10 @@ def web_reset_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get
 
 @app.post("/api/users")
 def create_user(payload: UserCreate, request: Request, db: Session = Depends(get_db)) -> dict[str, int | str | bool]:
-    require_admin_api(request, db)
+    actor = require_admin_api(request, db)
     user, setup_token = create_user_record(db, payload.display_name)
+    audit(db, actor, 'user', user.id, 'user.created', {}, {'display_name':user.display_name,'roles':[r.id for r in user.roles]})
+    db.commit()
     return {
         "id": user.id,
         "display_name": user.display_name,
@@ -4838,6 +4904,8 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
     if selected_banks:
         generated.metadata["word_bank_slugs"] = [bank.slug for bank in selected_banks]
         generated.metadata["word_bank_names"] = [bank.name for bank in selected_banks]
+    draft = bool(creator and not can_owned(creator,'puzzles','publish',creator.id))
+    generated.metadata['draft'] = draft
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
@@ -4850,7 +4918,8 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         play_payload=generated.play_payload,
         solution_payload=generated.solution_payload,
         puzzle_metadata=generated.metadata,
-        auto_archive_at=default_auto_archive_at(),
+        auto_archive_at=None if draft else default_auto_archive_at(),
+        archived_at=utcnow() if draft else None,
         created_by_id=creator.id if creator is not None else None,
     )
     db.add(puzzle)
@@ -4881,7 +4950,7 @@ def list_puzzle_type_contracts(
 @app.get("/api/puzzles")
 def list_puzzles(request: Request, db: Session = Depends(get_db)) -> dict:
     user = require_api_user(request, db)
-    library_data = filtered_library(db, request, user, include_archived_for_admin=user.is_admin)
+    library_data = filtered_library(db, request, user, include_archived_for_admin=user.can('library.archived_view'))
     return {
         "items": [
             serialize_library_item(
@@ -4903,9 +4972,10 @@ def list_puzzles(request: Request, db: Session = Depends(get_db)) -> dict:
 
 @app.get("/api/puzzles/latest", response_model=PuzzleSummary)
 def get_latest_puzzle(request: Request, printable: bool = False, db: Session = Depends(get_db)) -> PuzzleSummary:
-    require_api_user(request, db)
+    user = require_api_user(request, db)
     puzzles = db.scalars(select(Puzzle).where(Puzzle.archived_at.is_(None)).order_by(desc(Puzzle.created_at))).all()
     for puzzle in puzzles:
+        if not can_view(user,puzzle): continue
         puzzle_type = get_puzzle_type(puzzle.puzzle_type)
         if printable and (puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only):
             continue
@@ -4920,8 +4990,9 @@ def api_export_puzzles(
     include_archived: bool = False,
     db: Session = Depends(get_db),
 ) -> dict:
-    require_admin_api(request, db)
+    user = require_admin_api(request, db)
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
+    puzzles = [p for p in puzzles if can_view(user,p)]
     if ids.strip():
         selected = {item.strip() for item in ids.split(",") if item.strip()}
         puzzles = [puzzle for puzzle in puzzles if puzzle.id in selected]
@@ -4999,7 +5070,7 @@ def get_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) 
 
 @app.get("/api/puzzles/{puzzle_id}/print-preview", response_model=PuzzlePrintPreview)
 def get_puzzle_print_preview(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzlePrintPreview:
-    require_api_user(request, db)
+    user = require_api_user(request, db)
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -5007,15 +5078,18 @@ def get_puzzle_print_preview(puzzle_id: str, request: Request, db: Session = Dep
     printable = bool(puzzle_type is not None and puzzle_type.supports_print and not puzzle_type.digital_only)
     if not printable or puzzle_type is None:
         raise HTTPException(status_code=404, detail="This puzzle does not support printing")
+    render_url = authorized_render_url(puzzle,user,request,db)
+    layout = print_layout_context(puzzle,puzzle_type,db)
+    layout['render_url'] = render_url
     return PuzzlePrintPreview(
         id=puzzle.id,
         puzzle_type=puzzle.puzzle_type,
         title=puzzle.title,
         printable=printable,
-        layout=print_layout_context(puzzle, puzzle_type, db),
+        layout=layout,
         url=puzzle_url(puzzle.id, db),
         print_url=puzzle_print_url(puzzle.id, db),
-        render_url=puzzle_print_render_url(puzzle.id, db),
+        render_url=render_url,
         pdf_url=f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.pdf",
     )
 
@@ -5070,7 +5144,9 @@ def submit_attempt(
     db: Session = Depends(get_db),
 ) -> PuzzleAttemptResponse:
     user = require_api_user(request, db)
-    user_id = payload.user_id if user.is_admin and payload.user_id is not None else user.id
+    if payload.user_id is not None and payload.user_id != user.id:
+        require_permission(user,'puzzles.progress.any')
+    user_id = payload.user_id if payload.user_id is not None else user.id
     return submit_puzzle_attempt(puzzle_id, payload.answer, user_id, db)
 
 
@@ -5117,7 +5193,9 @@ def upload_photo(
     db: Session = Depends(get_db),
 ) -> dict[str, str | int]:
     user = require_api_user(request, db)
-    photo_user_id = user_id if user.is_admin and user_id is not None else user.id
+    if user_id is not None and user_id != user.id:
+        require_permission(user,'puzzles.progress.any')
+    photo_user_id = user_id if user_id is not None else user.id
     return save_photo(puzzle_id, file, notes, photo_user_id, db)
 
 

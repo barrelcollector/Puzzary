@@ -74,7 +74,7 @@
       {% endif %}
     </details>
 
-    {% if current_user.is_admin %}
+    {% if not current_user.is_guest and current_user.can('puzzles.solutions') %}
       <section class="panel">
         <h2>Admin Solution</h2>
         {% if has_solution_template %}
@@ -150,7 +150,7 @@
 </section>
 {% endif %}
 <script src="/static/celebration.js?v=3"></script>
-<script src="/static/group-solve.js?v=7"></script>
+<script src="/static/group-solve.js?v=8"></script>
 <script src="/static/word-search.js?v=12"></script>
 <script src="/static/crossword.js?v=14"></script>
 <script src="/static/word-pyramid.js?v=3"></script>

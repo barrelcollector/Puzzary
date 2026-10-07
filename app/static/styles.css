@@ -1,3 +1,16 @@
+.permission-admin section { margin: 24px 0; }
+.permission-admin details { border-bottom: 1px solid #ddd; padding: 12px 0; }
+.permission-admin summary { cursor: pointer; font-weight: 600; }
+.permission-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(170px, 240px) 60px; gap: 12px; align-items: center; padding: 8px 0; }
+.permission-row label { margin: 0; }
+.permission-row small { display: block; color: #9b392d; }
+.permission-audit pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .permission-row { grid-template-columns: minmax(0, 1fr) 60px; } .permission-row label { grid-column: 1 / -1; } }
+@media (max-width: 700px) {
+  .admin-shell .admin-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 8px; }
+  .admin-shell .admin-nav a { padding: 8px; font-size: 14px; overflow-wrap: anywhere; }
+}
+
 :root {
   color-scheme: light;
   --bg: #f5f5f2;

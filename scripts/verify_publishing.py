@@ -56,7 +56,7 @@ class PublishingChecks(unittest.TestCase):
         with self.assertRaises(HTTPException) as hidden:
             api_get_issue(issue.id, request(2), self.db)
         self.assertEqual(hidden.exception.status_code, 404)
-        publish_issue(self.db, issue, request())
+        publish_issue(self.db, issue, request(), self.admin)
         result = api_get_issue(issue.id, request(2), self.db)
         self.assertEqual(result["status"], "published")
         self.assertEqual(result["modules"][0]["puzzle_id"], self.puzzle.id)
@@ -72,7 +72,7 @@ class PublishingChecks(unittest.TestCase):
 
     def test_snapshot_survives_source_changes_and_deletion(self):
         issue = write_issue(self.db, self.admin, self.payload)
-        publish_issue(self.db, issue, request())
+        publish_issue(self.db, issue, request(), self.admin)
         snapshot = deepcopy(issue.snapshot)
         self.puzzle.title = "Changed source title"
         self.puzzle.print_payload = {"kind": "word_search", "grid": [], "words": []}
@@ -93,18 +93,18 @@ class PublishingChecks(unittest.TestCase):
         self.assertEqual(missing.exception.status_code, 422)
         issue = write_issue(self.db, self.admin, IssueWrite(title="Empty"))
         with self.assertRaises(HTTPException) as empty:
-            publish_issue(self.db, issue, request())
+            publish_issue(self.db, issue, request(), self.admin)
         self.assertEqual(empty.exception.status_code, 422)
         self.puzzle.puzzle_metadata = {"draft": True}
         self.db.commit()
         issue = write_issue(self.db, self.admin, self.payload)
         with self.assertRaises(HTTPException) as unpublished:
-            publish_issue(self.db, issue, request())
+            publish_issue(self.db, issue, request(), self.admin)
         self.assertEqual(unpublished.exception.status_code, 422)
 
     def test_combined_pdf(self):
         issue = write_issue(self.db, self.admin, self.payload)
-        publish_issue(self.db, issue, request())
+        publish_issue(self.db, issue, request(), self.admin)
         output = Path("/tmp/puzzary-publishing-qa")
         output.mkdir(exist_ok=True)
         for size in ("zebra", "letter", "a4"):
@@ -114,9 +114,9 @@ class PublishingChecks(unittest.TestCase):
 
     def test_latest_and_api_token_access(self):
         first = write_issue(self.db, self.admin, self.payload)
-        publish_issue(self.db, first, request())
+        publish_issue(self.db, first, request(), self.admin)
         second = write_issue(self.db, self.admin, IssueWrite(title="Second issue", modules=self.payload.modules))
-        publish_issue(self.db, second, request())
+        publish_issue(self.db, second, request(), self.admin)
         self.player.api_token_hash = main.hash_secret("mock-publishing-token")
         self.db.commit()
         token_request = Request({"type": "http", "method": "GET", "path": "/", "session": {},
@@ -130,7 +130,7 @@ class PublishingChecks(unittest.TestCase):
     def test_fixed_pages_fit_tall_snapshot_with_footer(self):
         from playwright.sync_api import sync_playwright
         issue = write_issue(self.db, self.admin, self.payload)
-        publish_issue(self.db, issue, request())
+        publish_issue(self.db, issue, request(), self.admin)
         # Old published HTML must fit without rewriting the stored snapshot.
         issue.snapshot = {**issue.snapshot, "modules": [
             {"html": '<article class="print-sheet"><h2>Puzzle</h2>'

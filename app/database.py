@@ -54,6 +54,10 @@ def ensure_schema() -> None:
     dictionary_definition_columns = {column["name"] for column in inspector.get_columns("dictionary_definitions")} if "dictionary_definitions" in table_names else set()
     tag_columns = {column["name"] for column in inspector.get_columns("puzzle_tags")} if "puzzle_tags" in table_names else set()
     with engine.begin() as connection:
+        if 'permissions_initialized' not in user_columns:
+            connection.execute(text('ALTER TABLE users ADD COLUMN permissions_initialized BOOLEAN NOT NULL DEFAULT FALSE'))
+        if 'permission_overrides' not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN permission_overrides JSON NOT NULL DEFAULT '{}'"))
         if "group_solves" in table_names:
             group_columns = {c["name"] for c in inspector.get_columns("group_solves")}
             if "puzzle_states" not in group_columns:

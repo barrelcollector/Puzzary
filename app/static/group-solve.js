@@ -257,7 +257,7 @@
     setText(status,summary);
     if (ready && data.completed && !lastCompleted) window.PuzzaryCelebrate?.complete();
     lastCompleted = data.completed;
-    const host = data.user_id === data.host_id;
+    const host = data.can_moderate;
     panel.querySelector('#group-host').hidden = !host;
     const guestOption = panel.querySelector('#group-guests-option');
     if (guestOption) guestOption.hidden = !data.can_allow_guests;
@@ -355,6 +355,8 @@
   board.addEventListener('focusout',() => { focus = ''; });
   panel.querySelector('#group-copy').addEventListener('click',async () => {
     panel.querySelector('#group-invite').open = true;
+    try { await api(`/api/groups/${id}/invite`); }
+    catch (error) { message(error.message); return; }
     try { await navigator.clipboard.writeText(inviteUrl.href); message('Invite link copied.'); }
     catch (_) { message('Clipboard unavailable. The invite link is shown above.'); }
   });
