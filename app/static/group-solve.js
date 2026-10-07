@@ -6,7 +6,19 @@
   let adapter, snapshot, baseline = {}, busy = false, ready = false, focus = '', lastCompleted = false, notice = '';
   let renderedState = '', renderedRevision = -1, mutation = 0;
   let pendingState = null, stateGeneration = 0, groupSaveTimer = null, lastPoll = 0;
+  let moving = false, navigating = false;
+  function followPuzzle(data) {
+    if (snapshot && data.revision < snapshot.revision) return false;
+    if (data.puzzle_id === panel.dataset.puzzle) return false;
+    if (!navigating) {
+      navigating = true; ready = false; block(true); presenceSocket?.close();
+      status.textContent = 'The host moved the group. Opening the next puzzle...';
+      location.replace(data.url);
+    }
+    return true;
+  }
   function receiveState(data) {
+    if (followPuzzle(data)) return;
     stateGeneration++;
     if (!pendingState || data.revision >= pendingState.revision) pendingState = data;
     flushState();
@@ -206,8 +218,7 @@
   });
   function setText(element, value) { if (element.textContent !== value) element.textContent = value; }
   function message(value) { setText(panel.querySelector('#group-message'),value); }
-  const inviteUrl = new URL(`/puzzles/${panel.dataset.puzzle}`,location.origin);
-  inviteUrl.searchParams.set('group',id);
+  const inviteUrl = new URL(`/groups/${id}`,location.origin);
   panel.querySelector('#group-invite-url').value = inviteUrl.href;
   function applyState(state) {
     if (!adapter) return;
@@ -229,6 +240,7 @@
       .filter(k => (a[k] || '') !== (b[k] || '')).map(k => [k, a[k] || '']));
   }
   function show(data, preserve = {}) {
+    if (followPuzzle(data)) return;
     if (snapshot && data.revision < snapshot.revision) return;
     snapshot = data;
     panel.dataset.revision = data.revision;
@@ -295,7 +307,7 @@
     }
   };
   async function send(kind, target = '') {
-    if (!ready || busy || snapshot?.closed || !adapter) return;
+    if (!ready || busy || moving || snapshot?.closed || !adapter) return;
     const before = adapter.read(), changes = diff(before, baseline);
     if (kind !== 'patch' && Object.keys(changes).length) {
       if (!await send('patch')) return false;
@@ -311,7 +323,7 @@
       const bytes = crypto.getRandomValues(new Uint8Array(16)); bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
       const hex = [...bytes].map(b => b.toString(16).padStart(2,'0')).join('');
       const actionId = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
-      const data = await api(`/api/groups/${id}/actions`, {action_id:actionId,revision:snapshot.revision,kind,target,changes:kind === 'patch' ? changes : {}});
+      const data = await api(`/api/groups/${id}/actions`, {action_id:actionId,revision:snapshot.revision,puzzle_id:panel.dataset.puzzle,kind,target,changes:kind === 'patch' ? changes : {}});
       notice = ''; success = true;
       show(data, diff(adapter.read(), before));
     } catch (error) {
@@ -363,9 +375,56 @@
     try { show(await api(`/api/groups/${id}/settings`,options(event.target)),diff(adapter.read(),baseline)); message('Session settings saved.'); }
     catch(error) { message(error.message); }
   });
+  let puzzleOffset = 0, puzzleQuery = '', pickerGeneration = 0;
+  const picker = panel.querySelector('#group-puzzle-picker');
+  const moveForm = panel.querySelector('#group-move');
+  async function loadPuzzles() {
+    const generation = ++pickerGeneration;
+    const resultStatus = panel.querySelector('#group-puzzle-message');
+    resultStatus.textContent = 'Loading puzzles...';
+    moveForm.querySelector('button').disabled = true;
+    try {
+      const data = await api(`/api/groups/${id}/puzzles?q=${encodeURIComponent(puzzleQuery)}&offset=${puzzleOffset}`);
+      if (generation !== pickerGeneration) return;
+      const select = moveForm.elements.puzzle_id; select.replaceChildren();
+      for (const puzzle of data.puzzles) {
+        const option = document.createElement('option'); option.value = puzzle.id;
+        option.textContent = `${puzzle.title} - ${puzzle.puzzle_type} / ${puzzle.difficulty}${puzzle.visited ? ' (saved progress)' : ''}`;
+        option.disabled = puzzle.id === panel.dataset.puzzle; select.append(option);
+      }
+      const first = [...select.options].find(o => !o.disabled);
+      select.value = first?.value || '';
+      moveForm.querySelector('button').disabled = !first || snapshot?.closed;
+      panel.querySelector('#group-puzzles-previous').disabled = puzzleOffset === 0;
+      panel.querySelector('#group-puzzles-next').disabled = !data.has_more;
+      resultStatus.textContent = data.puzzles.length ? `${puzzleOffset+1}-${puzzleOffset+data.puzzles.length}` : 'No matching puzzles.';
+    } catch (error) { resultStatus.textContent = error.message; }
+  }
+  picker.addEventListener('toggle',() => { if (picker.open) loadPuzzles(); });
+  panel.querySelector('#group-puzzle-search').addEventListener('submit',event => {
+    event.preventDefault(); puzzleQuery = event.target.elements.q.value.trim(); puzzleOffset = 0; loadPuzzles();
+  });
+  for (const [selector,step] of [['#group-puzzles-previous',-50],['#group-puzzles-next',50]]) {
+    panel.querySelector(selector).addEventListener('click',() => { puzzleOffset += step; loadPuzzles(); });
+  }
+  moveForm.addEventListener('submit',async event => {
+    event.preventDefault();
+    if (!ready || busy || moving || snapshot?.closed || !moveForm.elements.puzzle_id.value) return;
+    if (adapter && Object.keys(diff(adapter.read(),baseline)).length && !await send('patch')) return;
+    if (busy || (adapter && Object.keys(diff(adapter.read(),baseline)).length)) {
+      message('Wait for your edits to save before moving the group.'); return;
+    }
+    moving = true; mutation++; block(true); moveForm.querySelector('button').disabled = true;
+    try {
+      show(await api(`/api/groups/${id}/puzzle`,{puzzle_id:moveForm.elements.puzzle_id.value,revision:snapshot.revision}));
+    } catch (error) { message(error.message); }
+    finally { moving = false; if (!navigating) { block(snapshot?.closed); moveForm.querySelector('button').disabled = !!snapshot?.closed; } }
+  });
   async function connect() {
     try {
       const joined = await api('/api/groups/join',{code:id});
+      if (joined.url && !joined.pending && followPuzzle(joined)) return;
+      if (joined.pending && joined.url !== location.pathname+location.search) { location.replace(joined.url); return; }
       if (joined.pending) { status.textContent = 'Waiting for host approval.'; setTimeout(connect,2000); return; }
       show(joined); ready = true;
       connectPresence(); requestAnimationFrame(animatePresence);
@@ -388,6 +447,7 @@
       const generation = mutation, stateVersion = stateGeneration;
       try {
         const data = await api(`/api/groups/${id}?focus=${encodeURIComponent(focus)}`);
+        if (followPuzzle(data)) return;
         if (busy || generation !== mutation || stateVersion !== stateGeneration || data.revision < snapshot.revision) { setTimeout(poll,1000); return; }
         if (adapter && !Object.keys(diff(adapter.read(),baseline)).length) show(data);
         if (data.closed) { show(data); return; }

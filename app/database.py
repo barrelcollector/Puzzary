@@ -54,6 +54,12 @@ def ensure_schema() -> None:
     dictionary_definition_columns = {column["name"] for column in inspector.get_columns("dictionary_definitions")} if "dictionary_definitions" in table_names else set()
     tag_columns = {column["name"] for column in inspector.get_columns("puzzle_tags")} if "puzzle_tags" in table_names else set()
     with engine.begin() as connection:
+        if "group_solves" in table_names:
+            group_columns = {c["name"] for c in inspector.get_columns("group_solves")}
+            if "puzzle_states" not in group_columns:
+                connection.execute(text("ALTER TABLE group_solves ADD COLUMN puzzle_states JSON NOT NULL DEFAULT '{}'"))
+            if "puzzle_started_revision" not in group_columns:
+                connection.execute(text("ALTER TABLE group_solves ADD COLUMN puzzle_started_revision INTEGER NOT NULL DEFAULT 0"))
         if "group_solves" in table_names and "allow_guests" not in {c["name"] for c in inspector.get_columns("group_solves")}:
             connection.execute(text("ALTER TABLE group_solves ADD COLUMN allow_guests BOOLEAN NOT NULL DEFAULT FALSE"))
         for table, additions in {

@@ -111,6 +111,8 @@ class GroupSolve(Base):
     revision: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[dict] = mapped_column(JSON, default=dict)
     cell_versions: Mapped[dict] = mapped_column(JSON, default=dict)
+    puzzle_states: Mapped[dict] = mapped_column(JSON, default=dict)
+    puzzle_started_revision: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     members: Mapped[list[GroupMember]] = relationship(cascade="all, delete-orphan")

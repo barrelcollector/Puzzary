@@ -4019,6 +4019,13 @@ def admin_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db
     return RedirectResponse(url="/admin/tags", status_code=303)
 
 
+@app.get('/groups/{group_id}')
+def group_invite(group_id: str, db: Session = Depends(get_db)):
+    from app.groups import group_for
+    group = group_for(db, group_id)
+    return RedirectResponse(f'/puzzles/{group.puzzle_id}?group={group.id}', status_code=303)
+
+
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
 def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
     group_id = request.query_params.get('group', '')
@@ -4027,7 +4034,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
         from app.groups import group_for, guests_allowed, require_group_user, member_for, writable
         group = group_for(db, group_id)
         if group.puzzle_id != puzzle_id:
-            raise HTTPException(404, 'Group Solve belongs to another puzzle')
+            return RedirectResponse(f'/groups/{group.id}', status_code=303)
         if guests_allowed(db, group):
             try:
                 user = require_group_user(request, db, group)
@@ -4066,7 +4073,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
         from app.groups import group_for
         group = group_for(db, group_id)
         if group.puzzle_id != puzzle_id:
-            raise HTTPException(404, 'Group Solve belongs to another puzzle')
+            return RedirectResponse(f'/groups/{group.id}', status_code=303)
         progress_payload = {}
         progress_answers = {}
     puzzle_template_name = f"puzzle_types/{puzzle.puzzle_type}.html"

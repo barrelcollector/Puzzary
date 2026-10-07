@@ -110,7 +110,7 @@ try:
         field=pages[0].locator('#group-invite-url')
         field.evaluate('(e)=>{e.focus();e.setSelectionRange(0,20)}')
         pages[0].wait_for_timeout(2500)
-        assert field.input_value()==base+data['url']
+        assert field.input_value()==base+data['invite_url']
         assert pages[0].locator('#group-invite').evaluate('(e)=>e.open')
         assert 'Clipboard unavailable' in pages[0].locator('#group-message').inner_text()
         assert field.evaluate('(e)=>document.activeElement===e && e.selectionStart===0 && e.selectionEnd===20')

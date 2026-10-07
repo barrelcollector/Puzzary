@@ -19,7 +19,7 @@ def verify_guests(browser, base, host, player, host_id):
     hp = host.new_page()
     hp.goto(base + info['url'])
     hp.wait_for_function("document.querySelector('#group-solve').dataset.revision==='0'")
-    hp.locator('#group-host summary').click()
+    hp.locator('#group-host > summary').click()
     hp.locator('#group-settings [name=allow_guests]').check()
     hp.locator('#group-settings button[type=submit]').click()
     hp.wait_for_function("document.querySelector('#group-message').textContent==='Session settings saved.'")

@@ -25,6 +25,22 @@
         {% endif %}
         <button type="submit">Save</button>
       </form>
+      <details id="group-puzzle-picker">
+        <summary>Move group to another puzzle</summary>
+        <form id="group-puzzle-search">
+          <label>Search puzzles <input name="q" type="search" maxlength="160"></label>
+          <button type="submit">Search</button>
+        </form>
+        <form id="group-move">
+          <label>Puzzle <select name="puzzle_id" required aria-label="Next group puzzle"></select></label>
+          <button type="submit" disabled>Move group</button>
+        </form>
+        <div class="group-tools">
+          <button type="button" id="group-puzzles-previous" disabled>Previous</button>
+          <button type="button" id="group-puzzles-next" disabled>Next</button>
+        </div>
+        <p id="group-puzzle-message" role="status"></p>
+      </details>
       <button type="button" id="group-close" class="danger-button">Close session</button>
     </details>
   {% elif puzzle_type_definition and puzzle_type_definition.collaboration %}

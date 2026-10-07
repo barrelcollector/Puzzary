@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import GroupSolve, GroupMember, GroupAction, Puzzle, User
-from app.puzzles import get_puzzle_type
+from app.puzzles import get_puzzle_type, list_puzzle_types
 from app.group_presence import publish_state_change
 
 router = APIRouter()
@@ -53,6 +53,11 @@ class GuestJoin(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
+class MoveGroup(BaseModel):
+    puzzle_id: str = Field(min_length=1, max_length=26)
+    revision: int = Field(ge=0)
+
+
 def participant_id(member):
     return member.user_id if member.user_id is not None else -member.id
 
@@ -86,6 +91,7 @@ def member_identity(user):
 class Action(BaseModel):
     action_id: uuid.UUID
     revision: int = Field(ge=0)
+    puzzle_id: str | None = Field(default=None, max_length=26)
     kind: Literal['patch', 'check', 'hint', 'reveal', 'clue', 'reveal_entry', 'check_entry'] = 'patch'
     target: str = Field(default='', max_length=80)
     changes: dict[str, str] = Field(default_factory=dict, max_length=4096)
@@ -154,6 +160,7 @@ def snapshot(db, group, user):
     members = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
                          .where(GroupMember.group_id == group.id)).all()
     recent = db.scalars(select(GroupAction).where(GroupAction.group_id == group.id)
+                        .where(GroupAction.revision > group.puzzle_started_revision)
                         .order_by(GroupAction.id.desc()).limit(20)).all()
     names = {participant_id(m): u.display_name if u else m.guest_name for m, u in members}
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
@@ -168,6 +175,7 @@ def snapshot(db, group, user):
             'can_allow_guests': user.id == group.host_id and user.is_admin,
             'is_guest': getattr(user, 'is_guest', False),
             'url': f'/puzzles/{group.puzzle_id}?group={group.id}',
+            'invite_url': f'/groups/{group.id}',
             'members': presence_members(db, group, user),
             'recent': [{'revision': a.revision, 'user_id': a.user_id if a.user_id is not None else -a.guest_member_id,
                         'name': names.get(a.user_id if a.user_id is not None else -a.guest_member_id, 'Player'),
@@ -275,6 +283,11 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
     group = group_for(db, group_id, True)
     user = require_group_user(request, db, group)
     member = member_for(db, group, user); writable(group)
+    if ((payload.puzzle_id is not None and payload.puzzle_id != group.puzzle_id)
+            or (group.puzzle_started_revision > 0 and payload.puzzle_id is None)):
+        raise HTTPException(409, 'The group moved; reload the current puzzle before editing')
+    if payload.revision < group.puzzle_started_revision:
+        raise HTTPException(409, 'The group moved to another puzzle; open the current puzzle')
     duplicate = db.scalar(select(GroupAction).where(GroupAction.group_id == group.id, GroupAction.action_id == str(payload.action_id)))
     if duplicate:
         owner = duplicate.user_id if duplicate.user_id is not None else -duplicate.guest_member_id
@@ -384,6 +397,59 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
             member.seen_at = None
             if member.status != 'removed':
                 member.status = 'left'
+    db.commit()
+    publish_state_change(group.id)
+    return snapshot(db, group, user)
+
+
+@router.get('/api/groups/{group_id}/puzzles')
+def group_puzzles(group_id: str, request: Request, q: str = '', offset: int = 0, db: Session = Depends(get_db)):
+    user = core().require_api_user(request, db)
+    group = group_for(db, group_id)
+    if user.id != group.host_id:
+        raise HTTPException(403, 'Only the host can choose puzzles')
+    supported = [p.slug for p in list_puzzle_types() if p.collaboration]
+    query = select(Puzzle).where(Puzzle.puzzle_type.in_(supported), Puzzle.archived_at.is_(None),
+                                (Puzzle.auto_archive_at.is_(None)) | (Puzzle.auto_archive_at > now()))
+    if q.strip():
+        query = query.where(Puzzle.title.icontains(q.strip()[:160], autoescape=True))
+    puzzles = db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id).offset(max(0, offset)).limit(51)).all()
+    return {'puzzles': [{'id': p.id, 'title': p.title, 'puzzle_type': p.puzzle_type,
+                         'difficulty': p.difficulty, 'visited': p.id in (group.puzzle_states or {}) or p.id == group.puzzle_id}
+                        for p in puzzles[:50]], 'has_more': len(puzzles) > 50}
+
+
+@router.post('/api/groups/{group_id}/puzzle')
+def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session = Depends(get_db)):
+    user = core().require_api_user(request, db)
+    group = group_for(db, group_id, True)
+    if user.id != group.host_id:
+        raise HTTPException(403, 'Only the host can move the group')
+    writable(group)
+    if payload.revision != group.revision:
+        raise HTTPException(409, 'Group changed; synchronize before moving')
+    puzzle = db.get(Puzzle, payload.puzzle_id)
+    if not puzzle:
+        raise HTTPException(404, 'Puzzle not found')
+    if puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()):
+        raise HTTPException(409, 'Choose an active puzzle')
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    if not plugin or not plugin.collaboration:
+        raise HTTPException(400, 'This puzzle type does not support Group Solve')
+    if puzzle.id == group.puzzle_id:
+        return snapshot(db, group, user)
+    history = {**(group.puzzle_states or {}), group.puzzle_id: group.state}
+    if puzzle.id not in history and len(history) >= 100:
+        raise HTTPException(409, 'This group has reached its 100-puzzle limit')
+    group.puzzle_states = history
+    group.puzzle_id = puzzle.id
+    group.state = history.get(puzzle.id, {'answers': {}})
+    group.revision += 1
+    group.puzzle_started_revision = group.revision
+    group.cell_versions = {key: group.revision for key in group.state.get('answers', {})}
+    for member in db.scalars(select(GroupMember).where(GroupMember.group_id == group.id)):
+        member.focus = ''
+        member.presence = None
     db.commit()
     publish_state_change(group.id)
     return snapshot(db, group, user)

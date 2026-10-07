@@ -242,7 +242,7 @@ try:
         link.evaluate('(input)=>{input.focus();input.setSelectionRange(0,24)}')
         a.wait_for_timeout(2500)
         assert a.locator('#group-invite').evaluate('(e)=>e.open')
-        assert link.input_value()==url
+        assert link.input_value()==base+data['invite_url']
         assert a.locator('#group-message').inner_text()=='Clipboard unavailable. The invite link is shown above.'
         assert link.evaluate('(e)=>document.activeElement===e && e.selectionStart===0 && e.selectionEnd===24')
         assert a.evaluate("window.memberButton === document.querySelector('#group-members button')")
@@ -256,7 +256,7 @@ try:
         # Clipboard success feedback is also independent from progress snapshots.
         a.evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.copiedInvite=value}}})")
         a.locator('#group-copy').click(); a.wait_for_timeout(1500)
-        assert a.evaluate('window.copiedInvite')==url
+        assert a.evaluate('window.copiedInvite')==base+data['invite_url']
         assert a.locator('#group-message').inner_text()=='Invite link copied.'
         host.set_offline(True)
         a.locator(f'.takuzu-play [data-key="{k1}"]').press('0'); a.wait_for_timeout(600)
@@ -410,6 +410,8 @@ try:
         assert not errors,errors
         from verify_group_guests import verify_guests
         verify_guests(browser, base, host, player, ids[0])
+        from verify_group_moves import verify_moves
+        verify_moves(browser, base, host, player)
         browser.close()
     print('Group API/auth/conflict/idempotency/approval/limits/removal/persistence/isolation and two-browser desktop/mobile tests passed.')
 finally:
