@@ -196,6 +196,48 @@ def preview(print_payload, play_payload, metadata):
     return {"kind": "fallback", "label": "Spell It!", "icon": "Aa", "meta": f"{len(play_payload.get('entries', []))} entries"}
 
 
+def collaboration(progress, action, solution):
+    from copy import deepcopy
+    result = deepcopy(progress)
+    answers = dict(result.get('answers', {}))
+    entries = solution['entries']
+    editable = {f"{e['index']}:{p}" for e in entries for p in e['hidden'] if p not in ledger(answers, e)}
+    kind = action['kind']
+    if kind == 'patch':
+        for key, value in action.get('changes', {}).items():
+            if key not in editable or not re.fullmatch('[A-Z]?', value):
+                raise ValueError('Letter is fixed or invalid')
+            if value: answers[key] = value
+            else: answers.pop(key, None)
+        normalized = normalize_progress(SimpleNamespace(answers=answers), solution)['answers']
+        if normalized != answers: raise ValueError('No remaining letter tile for that spelling')
+    elif kind == 'hint':
+        target = action.get('target') or str(next((i for i, entry in enumerate(entries) if state(entry, answers) != 'correct'), 0))
+        bank = target.startswith('bank:')
+        try: index = int(target.split(':')[-1])
+        except ValueError: raise ValueError('Invalid entry')
+        if not 0 <= index < len(entries): raise ValueError('Entry not found')
+        entry = entries[index]
+        if bank:
+            if entry['settings']['letter_bank'] != 'hint_triggered': raise ValueError('No hint-triggered bank')
+            answers[f'bank:{index}'] = '1'
+        else:
+            used = ledger(answers, entry)
+            if len(used) >= entry['settings']['hint_limit']: raise ValueError('No letter hints remain')
+            position = next((p for p in entry['hidden'] if p not in used and answers.get(f'{index}:{p}') != entry['answer'][p]), None)
+            if position is None: raise ValueError('All missing letters are correct')
+            answers[f'hint:{index}'] = ','.join(map(str, [*used, position]))
+            answers[f'{index}:{position}'] = entry['answer'][position]
+    elif kind != 'check':
+        raise ValueError('Unsupported action')
+    result['answers'] = normalize_progress(SimpleNamespace(answers=answers), solution)['answers']
+    if kind == 'check': result['checked'] = True
+    result['states'] = [state(e, result['answers']) for e in entries]
+    result['letter_banks'] = [e['bank'] if e['settings']['letter_bank'] in ('exact', 'decoy') or result['answers'].get(f"bank:{e['index']}") == '1' else [] for e in entries]
+    result['hints_remaining'] = [max(0, e['settings']['hint_limit'] - len(ledger(result['answers'], e))) for e in entries]
+    return result
+
+
 FIELDS = (
     GenerationField("spelling_difficulty", "Spelling difficulty", "select", "", options=({"value": "", "label": "Use puzzle difficulty"}, *tuple({"value": k, "label": k.replace('_', ' ').title()} for k in DIFFICULTIES))),
     GenerationField("mask_percent", "Hidden letters (%)", "number", "", minimum=1, maximum=100),
@@ -208,6 +250,7 @@ register_puzzle_type(PuzzleType(
     slug="spell_it", label="Spell It!", generator=generate, source_builder=build_source,
     answer_checker=check_answer, progress_normalizer=normalize_progress,
     progress_counter=count_progress, progress_merger=merge_progress,
+    collaboration=collaboration, collaboration_value_limit=80,
     description="Reconstruct missing letters from definitions.",
     source_requirements=("word_bank",), theme_mode="word_bank",
     word_bank_required_fields=("word", "definition"),
@@ -220,7 +263,7 @@ register_puzzle_type(PuzzleType(
         *FIELDS, GenerationField("seed", "Mask seed", default="manual-spell-it"),
     ),
     manual_builder=manual, manual_editor_script="spell-it-editor.js?v=2",
-    play_script="spell-it.js?v=1", router=router, preview_builder=preview,
+    play_script="spell-it.js?v=2", router=router, preview_builder=preview,
     private_metadata_keys=("manual_editor_options",), supports_solution_reveal=False,
     print_layout=PrintLayout(slug="spell_it", sheet_class="print-layout-spell-it", instructions="Fill the missing letters."),
 ))

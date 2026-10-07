@@ -76,6 +76,9 @@ class PuzzleType:
     preview_builder: Callable[[dict, dict, dict], dict] | None = None
     manual_editor_script: str = ""
     collaboration: Callable[[dict, dict, dict], dict] | None = None
+    collaboration_fields: tuple[GenerationField, ...] = ()
+    collaboration_setup: Callable[[dict, dict, dict], dict] | None = None
+    collaboration_value_limit: int = 16
     word_bank_fields: tuple[str, ...] = ("word", "definition", "clue", "tags", "properties")
     word_bank_required_fields: tuple[str, ...] = ("word",)
     word_bank_validator: Callable[[dict], list[str]] | None = None

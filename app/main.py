@@ -1324,6 +1324,7 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "supports_print": puzzle_type.supports_print,
         "supports_web_play": puzzle_type.supports_web_play,
         "supports_group_solve": puzzle_type.collaboration is not None,
+        "collaboration_fields": [serialize_generation_field(field) for field in puzzle_type.collaboration_fields],
         "digital_only": puzzle_type.digital_only,
         "supports_gimmes": puzzle_type.supports_gimmes,
         "gimme_modes": list(puzzle_type.gimme_modes),

@@ -4,6 +4,45 @@ from types import SimpleNamespace
 import re
 
 
+def row_collaboration():
+    """Shared rows use positional spaces so editing a gap cannot shift later letters."""
+    def apply(state, action, solution):
+        state = deepcopy(state)
+        answers = dict(state.get('answers', {}))
+        rows = solution['rows']
+        expected = {str(i): row['answer'].upper() for i, row in enumerate(rows)}
+        kind = action['kind']
+        target = action.get('target', '')
+        if kind == 'patch':
+            for key, value in action.get('changes', {}).items():
+                if key not in expected or rows[int(key)].get('gimme'):
+                    raise ValueError('Row is fixed or outside the puzzle')
+                if len(value) > len(expected[key]) or not re.fullmatch(r'[A-Z0-9 ]*', value):
+                    raise ValueError('Invalid row value')
+                if value: answers[key] = value
+                else: answers.pop(key, None)
+        elif kind in ('reveal', 'reveal_entry', 'hint'):
+            keys = list(expected) if kind == 'reveal' else [target] if target else [
+                next((k for k, v in expected.items() if answers.get(k) != v and not rows[int(k)].get('gimme')), '')]
+            for key in keys:
+                if key not in expected: raise ValueError('Row not found')
+                answers[key] = expected[key]
+            state['hints_used'] = state.get('hints_used', 0) + 1
+        elif kind == 'clue':
+            if target not in expected: raise ValueError('Row not found')
+            clues = state.setdefault('clues', {})
+            clues[target] = min(clues.get(target, 0) + 1, max(0, len(rows[int(target)].get('clues', [])) - 1))
+        elif kind != 'check':
+            raise ValueError('Unsupported action')
+        for key in expected:
+            if rows[int(key)].get('gimme'): answers[key] = expected[key]
+        state['answers'] = answers
+        if kind == 'check': state['checked'] = True
+        state['incorrect'] = [k for k, v in answers.items() if v != expected.get(k)] if state.get('checked') else []
+        return state
+    return apply
+
+
 def cell_collaboration(normalizer):
     def apply(state, action, solution):
         state = deepcopy(state)

@@ -2604,3 +2604,5 @@ input.spell-slot { width: 34px; margin: 0; }
 .spell-print-bank span { display: inline-block; margin-right: 5px; }
 @media(max-width:700px) { .level-editor[data-level-editor="spell_it"] { grid-template-columns: minmax(0,1fr); } }
 @media print { .spell-slot { font-size: 14px; width: 24px; flex-basis: 24px; height: 30px; } }
+.maze-player-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.maze-player-legend span { border-bottom: 3px solid currentColor; padding-bottom: 2px; }

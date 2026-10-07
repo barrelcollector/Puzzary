@@ -1,0 +1,11 @@
+{% for field in puzzle_type_definition.collaboration_fields %}
+<label>{{ field.label }}
+  {% if field.field_type == 'select' %}
+  <select name="group_option_{{ field.name }}" data-group-option="{{ field.name }}">
+    {% for option in field.options %}<option value="{{ option.value }}" {% if option.value == field.default %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
+  </select>
+  {% else %}
+  <input name="group_option_{{ field.name }}" data-group-option="{{ field.name }}" type="number" value="{{ field.default }}" min="{{ field.minimum }}" max="{{ field.maximum }}">
+  {% endif %}
+</label>
+{% endfor %}

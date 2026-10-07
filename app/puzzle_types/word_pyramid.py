@@ -6,6 +6,7 @@ from typing import Any
 
 from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
+from app.group_actions import row_collaboration
 
 
 GUARANTEED_CHAINS = [
@@ -515,6 +516,8 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        collaboration=row_collaboration(),
+        collaboration_value_limit=80,
         preview_builder=build_preview,
         description="A clue-driven chain where each answer grows by one letter.",
         supports_print=True,

@@ -116,6 +116,63 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return len(expected & found), expected_count
 
 
+def collaboration(progress, action, solution):
+    from copy import deepcopy
+    import re
+    result = deepcopy(progress)
+    answers = dict(result.get('answers', {}))
+    size = int(solution.get('settings', {}).get('grid_size', 10))
+    width = int(solution.get('settings', {}).get('grid_width', size))
+    height = int(solution.get('settings', {}).get('grid_height', size))
+
+    def coordinates(key):
+        match = re.fullmatch(r'guess:(\d+),(\d+):(\d+),(\d+)', key)
+        if not match: raise ValueError('Invalid selection')
+        x, y, ex, ey = map(int, match.groups())
+        if not (0 <= x < width and 0 <= ex < width and 0 <= y < height and 0 <= ey < height):
+            raise ValueError('Selection outside the grid')
+        dx, dy = ex - x, ey - y
+        if dx and dy and abs(dx) != abs(dy): return {(x, y), (ex, ey)}
+        count = max(abs(dx), abs(dy)) + 1
+        return {(x + i * ((dx > 0) - (dx < 0)), y + i * ((dy > 0) - (dy < 0))) for i in range(count)}
+
+    kind = action['kind']
+    if kind == 'patch':
+        for key, value in action.get('changes', {}).items():
+            coordinates(key)
+            if value not in ('', 'pending'): raise ValueError('Invalid selection state')
+            if value: answers[key] = value
+            else: answers.pop(key, None)
+    elif kind not in ('check', 'hint', 'reveal'):
+        raise ValueError('Unsupported action')
+    found = set(result.get('found_words', [])) | set(solution.get('gimmes', {}).get('words', []))
+    pending = {k: coordinates(k) for k, v in answers.items() if v == 'pending'}
+    matched = set()
+    auto = solution.get('settings', {}).get('auto_confirm', True)
+    if kind == 'check' or (kind == 'patch' and auto):
+        for placement in solution['placements']:
+            word = placement['word']
+            x, y = placement['start']; dx, dy = placement['direction']
+            cells = {(x + i * dx, y + i * dy) for i in range(len(word))}
+            candidates = {k: coords for k, coords in pending.items() if coords & cells}
+            complete = any(coords == cells for coords in candidates.values())
+            if not auto and candidates:
+                complete = complete or set().union(*candidates.values()) == cells
+            if complete:
+                found.add(word)
+                matched.update(k for k, coords in candidates.items() if coords <= cells)
+        for key in pending:
+            if key in matched: answers.pop(key, None)
+            elif kind == 'check' or auto: answers[key] = 'wrong'
+    if kind == 'reveal': found.update(solution['words'])
+    if kind == 'hint':
+        word = next((w for w in solution['words'] if w not in found), None)
+        if word: found.add(word)
+    result['answers'] = answers
+    result['found_words'] = sorted(found)
+    return result
+
+
 def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:
     payload = print_payload if isinstance(print_payload, dict) else play_payload
     grid = payload.get("grid", []) if isinstance(payload, dict) else []
@@ -413,6 +470,7 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        collaboration=collaboration,
         preview_builder=build_preview,
         description="A printable and interactive word-search grid.",
         supports_print=True,

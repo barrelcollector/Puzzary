@@ -38,7 +38,8 @@
     }
     return data;
   }
-  function options(form) { return {participant_limit:Number(form.elements.participant_limit.value), approval_required:form.elements.approval_required.checked, allow_guests:!!form.elements.allow_guests?.checked}; }
+  function options(form) { return {participant_limit:Number(form.elements.participant_limit.value), approval_required:form.elements.approval_required.checked, allow_guests:!!form.elements.allow_guests?.checked,
+    puzzle_options:Object.fromEntries([...form.querySelectorAll('[data-group-option]')].map(input => [input.dataset.groupOption,input.value]))}; }
   for (const [selector, url, body] of [
     ['#group-create', `/api/puzzles/${panel.dataset.puzzle}/groups`, options],
     ['#group-join', '/api/groups/join', form => ({code:form.elements.code.value.trim()})]
@@ -224,8 +225,8 @@
     if (!adapter) return;
     const encoded = JSON.stringify(state);
     const revision = snapshot?.revision ?? -1;
-    if (encoded === renderedState && renderedRevision === revision && !Object.keys(diff(adapter.read(),state.answers)).length) return;
-    adapter.apply(state); renderedState = encoded; renderedRevision = revision;
+    if (encoded === renderedState && renderedRevision === revision && !Object.keys(diff(adapter.read(),baseline)).length) return;
+    adapter.apply(state,snapshot); renderedState = encoded; renderedRevision = revision;
   }
   function block(disabled) {
     board.classList.toggle('group-blocked', disabled);
@@ -244,10 +245,19 @@
     if (snapshot && data.revision < snapshot.revision) return;
     snapshot = data;
     panel.dataset.revision = data.revision;
-    baseline = {...data.state.answers};
-    const merged = {...baseline};
+    baseline = adapter?.scope ? adapter.scope(data.state.answers || {},data) : {...data.state.answers};
+    const merged = {...data.state.answers};
     for (const [k,v] of Object.entries(preserve)) { if (v) merged[k] = v; else delete merged[k]; }
     applyState({...data.state, answers:merged});
+    const settingsForm = panel.querySelector('#group-settings');
+    const modeOptions = {maze_mode:data.state.maze_group?.mode, rally_legs:data.state.maze_group?.rally_legs};
+    const settingsKey = JSON.stringify(modeOptions);
+    if (settingsForm.dataset.puzzleOptions !== settingsKey) {
+      settingsForm.dataset.puzzleOptions = settingsKey;
+      settingsForm.querySelectorAll('[data-group-option]').forEach(input => {
+        if (modeOptions[input.dataset.groupOption] !== undefined) input.value = modeOptions[input.dataset.groupOption];
+      });
+    }
     block(data.closed);
     if (data.closed) renderPresence([]);
     setText(panel.querySelector('#group-code'),data.code);
@@ -300,7 +310,9 @@
     });
   }
   window.PuzzaryGroup = {
-    register(value) { adapter = value; renderedState = ''; if (snapshot) applyState(snapshot.state); flushState(); },
+    register(value) { adapter = value; renderedState = ''; if (snapshot) show(snapshot); flushState(); },
+    action(kind,target='') { return send(kind,target); },
+    color(userId) { return colors[Math.abs(userId)%colors.length]; },
     save() {
       if (groupSaveTimer !== null) return;
       groupSaveTimer = setTimeout(() => { groupSaveTimer = null; send('patch'); },40);
@@ -373,8 +385,12 @@
   });
   panel.querySelector('#group-settings').addEventListener('submit',async event => {
     event.preventDefault();
+    const next = options(event.target);
+    const maze = snapshot?.state.maze_group;
+    if (maze && (next.puzzle_options.maze_mode !== maze.mode || Number(next.puzzle_options.rally_legs) !== maze.rally_legs)
+        && !confirm('Changing maze mode or Rally legs clears the current paths. Continue?')) return;
     mutation++;
-    try { show(await api(`/api/groups/${id}/settings`,options(event.target)),diff(adapter.read(),baseline)); message('Session settings saved.'); }
+    try { show(await api(`/api/groups/${id}/settings`,next)); message('Session settings saved.'); }
     catch(error) { message(error.message); }
   });
   let puzzleOffset = 0, puzzleQuery = '', pickerGeneration = 0;

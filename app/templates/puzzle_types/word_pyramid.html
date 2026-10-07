@@ -20,6 +20,7 @@
                 maxlength="1"
                 data-row="{{ row.index }}"
                 data-cell="{{ cell_index }}"
+                data-key="{{ row.index }}:{{ cell_index }}"
                 data-gimme="{{ 'true' if row.gimme else 'false' }}"
                 value="{{ saved_answer[cell_index] if saved_answer | length > cell_index else '' }}"
                 aria-label="Row {{ row.number }}, letter {{ cell_index + 1 }}"
@@ -35,7 +36,7 @@
               <small>{{ row.length }} letters</small>
               {% if row.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
               {% if row.clues and row.clues | length > 1 %}
-                <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
+                <button type="button" class="ghost-button more-pyramid-clue" data-row="{{ row.index }}">More clues</button>
                 <span class="pyramid-clue-steps" hidden>
                   {% for extra_clue in row.clues[1:] %}
                     <small hidden>{{ extra_clue }}</small>
@@ -60,7 +61,7 @@
               <small>{{ row.length }} letters</small>
               {% if row.gimme %}<small class="gimme-pill">Gimme</small>{% endif %}
               {% if row.clues and row.clues | length > 1 %}
-                <button type="button" class="ghost-button more-pyramid-clue">More clues</button>
+                <button type="button" class="ghost-button more-pyramid-clue" data-row="{{ row.index }}">More clues</button>
                 <span class="pyramid-clue-steps" hidden>
                   {% for extra_clue in row.clues[1:] %}
                     <small hidden>{{ extra_clue }}</small>

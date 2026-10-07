@@ -40,20 +40,22 @@
 
   function rowAnswer(index) {
     return (inputsByRow.get(index) || [])
-      .map((input) => input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""))
+      .map((input) => input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || (window.PuzzaryGroup ? ' ' : ''))
       .join("");
   }
 
   function currentAnswers() {
     const answers = {};
     inputsByRow.forEach((_list, rowIndex) => {
-      const value = rowAnswer(rowIndex);
+      if (window.PuzzaryGroup && _list.every(input => input.disabled)) return;
+      const value = window.PuzzaryGroup ? rowAnswer(rowIndex).trimEnd() : rowAnswer(rowIndex);
       if (value) answers[String(rowIndex)] = value;
     });
     return answers;
   }
 
   function saveProgress() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     if (!progressUrl) return;
     window.fetch(progressUrl, {
       method: "POST",
@@ -186,11 +188,12 @@
   if (revealButton) revealButton.addEventListener("click", revealAll);
 
   rowRevealButtons.forEach((button) => {
-    button.addEventListener("click", () => revealRow(Number(button.dataset.row)));
+    button.addEventListener("click", () => window.PuzzaryGroup ? window.PuzzaryGroup.action('reveal_entry',button.dataset.row) : revealRow(Number(button.dataset.row)));
   });
 
   clueButtons.forEach((button) => {
     button.addEventListener("click", () => {
+      if (window.PuzzaryGroup) { window.PuzzaryGroup.action('clue',button.dataset.row); return; }
       const list = button.nextElementSibling;
       if (!list || !list.classList.contains("pyramid-clue-steps")) return;
       const hiddenSteps = Array.from(list.querySelectorAll("small[hidden]"));
@@ -201,5 +204,26 @@
       button.textContent = remaining ? `More clues (${remaining})` : "No more clues";
       button.disabled = remaining === 0;
     });
+  });
+  window.PuzzaryGroup?.register({read:currentAnswers,
+    scope(answers) { return Object.fromEntries(Object.entries(answers).filter(([key]) => inputsByRow.get(Number(key))?.some(input => !input.disabled))); },
+    apply(state) {
+      inputsByRow.forEach((list,index) => {
+        const value = state.answers[String(index)] || '';
+        list.forEach((input,position) => { if (!input.disabled && input.value !== (value[position]?.trim() || '')) input.value = value[position]?.trim() || ''; });
+        setRowState(index,state.checked && value ? state.incorrect?.includes(String(index)) ? 'incorrect' : 'correct' : '');
+      });
+      clueButtons.forEach(button => {
+        const list = button.nextElementSibling;
+        if (!list) return;
+        const count = state.clues?.[button.dataset.row] || 0;
+        list.hidden = !count;
+        const steps = [...list.querySelectorAll('small')];
+        steps.forEach((step,index) => { step.hidden = index >= count; });
+        button.disabled = count >= steps.length;
+        button.textContent = button.disabled ? 'No more clues' : `More clues (${steps.length-count})`;
+      });
+      progressSounds?.sync();
+    }
   });
 })();

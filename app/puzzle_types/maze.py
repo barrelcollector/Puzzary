@@ -177,13 +177,13 @@ def normalize_trace_path(raw_path: Any) -> list[dict[str, int]]:
     return path
 
 
-def trace_is_valid(path: list[dict[str, int]], solution_payload: dict) -> bool:
+def trace_is_valid(path: list[dict[str, int]], solution_payload: dict, start: dict | None = None) -> bool:
     grid = solution_payload.get("grid", [])
     height = len(grid)
     width = len(grid[0]) if height else 0
     if not path:
         return False
-    if path[0] != {"x": 0, "y": 0}:
+    if path[0] != (start or {"x": 0, "y": 0}):
         return False
     seen = set()
     previous = None
@@ -244,9 +244,104 @@ def normalize_progress(payload: Any, solution_payload: dict) -> dict:
 
 
 def count_progress(progress_payload: dict, _solution_payload: dict) -> tuple[int, int]:
+    config = progress_payload.get('maze_group', {})
+    answers = progress_payload.get('answers', {})
+    if config.get('mode') == 'companions':
+        players = progress_payload.get('_participants', [])
+        return sum(trace_is_complete(normalize_trace_path(answers.get(f'path:{p}', '')), _solution_payload) for p in players), len(players)
+    if config.get('mode') == 'rally':
+        checkpoints = config['checkpoints']
+        return sum(segment_complete(normalize_trace_path(answers.get(f'leg:{i}', '')), _solution_payload, checkpoints[i], checkpoints[i + 1]) for i in range(len(checkpoints) - 1)), len(checkpoints) - 1
+    if config:
+        return int(trace_is_complete(normalize_trace_path(answers.get('path', '')), _solution_payload)), 1
     answers = progress_payload.get("answers", {}) if isinstance(progress_payload, dict) else {}
     completed = str(answers.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
     return (1 if completed else 0), 1
+
+
+def segment_complete(path, solution, start, finish):
+    return bool(path and trace_is_valid(path, solution, start) and path[-1] == finish)
+
+
+def setup_collaboration(state, options, solution):
+    from copy import deepcopy
+    if set(options) - {'maze_mode', 'rally_legs'}: raise ValueError('Unknown maze group option')
+    previous = state.get('maze_group', {})
+    mode = options.get('maze_mode', previous.get('mode', 'co_op'))
+    if mode not in ('co_op', 'companions', 'rally'): raise ValueError('Unknown maze mode')
+    try: requested = int(options.get('rally_legs', previous.get('rally_legs', 4)))
+    except (TypeError, ValueError): raise ValueError('Rally legs must be a number')
+    if not 2 <= requested <= 50: raise ValueError('Rally needs 2 to 50 legs')
+    if previous.get('mode') == mode and previous.get('rally_legs') == requested: return deepcopy(state)
+    result = deepcopy(state)
+    result['answers'] = {}
+    config = {'mode': mode, 'rally_legs': requested}
+    if mode == 'rally':
+        route = solve_maze(solution['grid'])
+        legs = min(requested, len(route) - 1)
+        config['checkpoints'] = [route[i * (len(route) - 1) // legs] for i in range(legs + 1)]
+    result['maze_group'] = config
+    return result
+
+
+def collaboration(state, action, solution):
+    from copy import deepcopy
+    result = deepcopy(state)
+    if not result.get('maze_group'): result = setup_collaboration(result, {}, solution)
+    config = result['maze_group']
+    answers = dict(result.get('answers', {}))
+    actor = action['_actor']
+    participants = action['participants']
+    mode = config['mode']
+    start = {'x': 0, 'y': 0}
+    finish = solution.get('end') or {'x': len(solution['grid'][0]) - 1, 'y': len(solution['grid']) - 1}
+    key = f'path:{actor}' if mode == 'companions' else 'path'
+    if mode == 'rally':
+        checkpoints = config['checkpoints']
+        index = next((i for i in range(len(checkpoints) - 1) if not segment_complete(normalize_trace_path(answers.get(f'leg:{i}', '')), solution, checkpoints[i], checkpoints[i + 1])), None)
+        if index is None:
+            if action['kind'] == 'check': return result
+            raise ValueError('Rally is already complete')
+        if participants[index % len(participants)] != actor: raise ValueError('Wait for your Rally leg')
+        key = f'leg:{index}'
+        start, finish = checkpoints[index:index + 2]
+    kind = action['kind']
+    if kind == 'patch':
+        if set(action.get('changes', {})) - {key}: raise ValueError('You can only edit your active path')
+        if key in action.get('changes', {}):
+            value = action['changes'][key]
+            if not value: answers.pop(key, None)
+            else:
+                try: raw = json.loads(value)
+                except (ValueError, TypeError): raise ValueError('Invalid path JSON')
+                path = normalize_trace_path(raw)
+                if not isinstance(raw, list) or path != raw or not trace_is_valid(path, solution, start):
+                    raise ValueError('Path must start at your checkpoint and cannot cross walls or itself')
+                if finish in path[:-1]: raise ValueError('Stop at the next checkpoint')
+                answers[key] = json.dumps(path, separators=(',', ':'))
+    elif kind in ('hint', 'reveal'):
+        # Follow the shortest continuation from the current endpoint, without crossing the trace.
+        path = normalize_trace_path(answers.get(key, '')) or [start]
+        excluded = {(p['x'], p['y']) for p in path[:-1]}
+        queue = [(path[-1], [])]
+        seen = set(excluded)
+        extension = None
+        for point, tail in queue:
+            coordinate = (point['x'], point['y'])
+            if coordinate in seen: continue
+            seen.add(coordinate)
+            if point == finish: extension = tail; break
+            for direction, (dx, dy, _) in DIRECTIONS.items():
+                x, y = point['x'] + dx, point['y'] + dy
+                if 0 <= y < len(solution['grid']) and 0 <= x < len(solution['grid'][0]) and not solution['grid'][point['y']][point['x']]['walls'][direction]:
+                    next_point = {'x': x, 'y': y}
+                    queue.append((next_point, [*tail, next_point]))
+        if extension is None: raise ValueError('Backtrack out of this dead end before requesting a hint')
+        path += extension[:1] if kind == 'hint' else extension
+        answers[key] = json.dumps(path, separators=(',', ':'))
+    elif kind != 'check': raise ValueError('Unsupported action')
+    result['answers'] = answers
+    return result
 
 
 def build_preview(print_payload: dict, play_payload: dict, _metadata: dict) -> dict:
@@ -429,6 +524,14 @@ register_puzzle_type(
         answer_checker=check_answer,
         progress_normalizer=normalize_progress,
         progress_counter=count_progress,
+        collaboration=collaboration,
+        collaboration_setup=setup_collaboration,
+        collaboration_value_limit=32768,
+        collaboration_fields=(
+            GenerationField('maze_mode', 'Maze mode', 'select', 'co_op', options=(
+                {'value': 'co_op', 'label': 'Co-op'}, {'value': 'companions', 'label': 'Companions'}, {'value': 'rally', 'label': 'Rally'})),
+            GenerationField('rally_legs', 'Rally legs', 'number', 4, minimum=2, maximum=50),
+        ),
         preview_builder=build_preview,
         description="A printable maze with a start, finish, and admin-visible solution path.",
         supports_print=True,

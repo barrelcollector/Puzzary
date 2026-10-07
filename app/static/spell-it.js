@@ -71,7 +71,7 @@
         given.setAttribute('aria-label', slot === ' ' ? 'Space' : `Position ${position + 1}: ${slot}`); slots.append(given); return;
       }
       const input = element('input', undefined, 'spell-slot blank'); input.type = 'text'; input.maxLength = 1; input.autocomplete = 'off'; input.inputMode = 'text'; input.placeholder = ' ';
-      input.dataset.position = position; input.value = answers[key(position)] || ''; input.readOnly = hinted().includes(position);
+      input.dataset.position = position; input.dataset.key = key(position); input.value = answers[key(position)] || ''; input.readOnly = hinted().includes(position);
       input.setAttribute('aria-label', `Word ${current + 1}, letter ${position + 1}${input.readOnly ? ', revealed' : ''}`);
       input.addEventListener('focus', () => { focusedPosition = position; input.select(); });
       input.addEventListener('input', () => { if (!input.readOnly && edit(position, input.value) && input.value) focusNext(position, 1); });
@@ -99,6 +99,7 @@
   }
   function save() {
     clearTimeout(timer);
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return Promise.resolve(); }
     const snapshot = {...answers}, version = revision;
     chain = chain.catch(() => {}).then(async () => {
       const response = await fetch(root.dataset.progressUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({answers:snapshot})});
@@ -108,6 +109,7 @@
     return chain.catch(error => { message(error.message); throw error; });
   }
   async function request(kind, payload) {
+    if (window.PuzzaryGroup) return window.PuzzaryGroup.action(kind === 'attempts' ? 'check' : 'hint',payload.kind === 'bank' ? `bank:${current}` : String(current));
     if (busy || !ready) return;
     busy = true; draw();
     try {
@@ -138,11 +140,47 @@
     resetting = true; setTimeout(() => resetForm.requestSubmit(submitter), 0);
   });
   window.addEventListener('pagehide', () => {
+    if (window.PuzzaryGroup) return;
     if (!ready || savedRevision === revision) return;
     clearTimeout(timer);
     fetch(root.dataset.progressUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({answers}), keepalive:true}).catch(() => {});
   });
   draw();
+  if (window.PuzzaryGroup) {
+    window.PuzzaryGroup.register({
+      read() { return Object.fromEntries(Object.entries(answers).filter(([key]) => !key.startsWith('hint:') && !key.startsWith('bank:') && !String(answers[`hint:${key.split(':')[0]}`] || '').split(',').includes(key.split(':')[1]))); },
+      scope(values) { return Object.fromEntries(Object.entries(values).filter(([key]) => !key.startsWith('hint:') && !key.startsWith('bank:') && !String(values[`hint:${key.split(':')[0]}`] || '').split(',').includes(key.split(':')[1]))); },
+      apply(data) {
+        const focused = stage.querySelector('input:focus')?.dataset.position;
+        answers = {...data.answers};
+        states = data.states || entries.map(() => 'incomplete');
+        banks = data.letter_banks || entries.map(e => e.bank);
+        remaining = data.hints_remaining || entries.map(e => e.settings.hint_limit);
+        ready = true;
+        // Keep input nodes stable during shared edits so typing and cursor gestures continue.
+        const slots = [...stage.querySelectorAll('input[data-position]')];
+        if (!slots.length || slots.some(input => input.readOnly !== hinted().includes(Number(input.dataset.position)))) {
+          draw();
+          if (focused !== undefined) stage.querySelector(`[data-position="${focused}"]`)?.focus();
+        } else {
+          slots.forEach(input => { const value = answers[key(input.dataset.position)] || ''; if (input.value !== value) input.value = value; input.disabled = false; });
+          navigation();
+          bankDraw(stage.querySelector('.spell-letter-bank'));
+          // Hint availability and the next-word button depend on shared completion.
+          const actions = stage.querySelector('.action-row');
+          actions.querySelectorAll('button').forEach(b => { b.disabled = false; });
+          const hint = [...actions.querySelectorAll('button')].find(b => b.textContent.startsWith('Reveal Letter'));
+          if (hint) { hint.textContent = `Reveal Letter (${remaining[current]})`; hint.disabled = !remaining[current]; }
+          const next = [...actions.querySelectorAll('button')].find(b => b.textContent === 'Next Word');
+          if (next) next.disabled = states[current] !== 'correct';
+          const bankButton = [...actions.querySelectorAll('button')].find(b => b.textContent === 'Show Letter Bank');
+          if (bankButton) bankButton.hidden = banks[current].length > 0;
+        }
+        if (data.checked) message(states[current] === 'correct' ? 'Correct.' : states[current] === 'incorrect' ? 'Not quite. Try another spelling.' : 'Complete the missing letters first.');
+      }
+    });
+    return;
+  }
   fetch(`${root.dataset.api}/progress`).then(async response => { if (!response.ok) throw new Error('Progress could not be loaded.'); return response.json(); }).then(data => {
     answers = data.answers; states = data.states; banks = data.letter_banks; remaining = data.hints_remaining;
     states.forEach((s, i) => { if (s === 'correct') completed.add(i); });

@@ -43,6 +43,7 @@ class GroupOptions(BaseModel):
     participant_limit: int = Field(default=0, ge=0, le=SERVER_LIMIT)
     approval_required: bool = False
     allow_guests: bool = False
+    puzzle_options: dict[str, str] = Field(default_factory=dict, max_length=20)
 
 
 class Join(BaseModel):
@@ -161,11 +162,29 @@ def writable(group):
         raise HTTPException(409, 'This Group Solve is closed or expired')
 
 
+def collaboration_context(db, group):
+    return {'participants': [participant_id(m) for m in db.scalars(
+        select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.status == 'active')
+        .order_by(GroupMember.id))]}
+
+
+def configure_collaboration(plugin, state, options, solution):
+    if any(len(k) > 80 or len(v) > 80 for k, v in options.items()):
+        raise HTTPException(422, 'Group option too long')
+    if options and not plugin.collaboration_setup:
+        raise HTTPException(422, 'This puzzle has no group options')
+    try:
+        return plugin.collaboration_setup(state, options, solution) if plugin.collaboration_setup else state
+    except ValueError as error:
+        raise HTTPException(422, str(error))
+
+
 def snapshot(db, group, user):
     puzzle = db.get(Puzzle, group.puzzle_id)
     plugin = get_puzzle_type(puzzle.puzzle_type)
     if not plugin or not plugin.collaboration: raise HTTPException(410, 'Collaboration plugin is unavailable')
-    found, total = plugin.progress_counter(group.state, puzzle.solution_payload)
+    context = collaboration_context(db, group)
+    found, total = plugin.progress_counter({**group.state, '_participants': context['participants']}, puzzle.solution_payload)
     members = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
                          .where(GroupMember.group_id == group.id)).all()
     recent = db.scalars(select(GroupAction).where(GroupAction.group_id == group.id)
@@ -175,6 +194,7 @@ def snapshot(db, group, user):
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
             'host_id': group.host_id, 'user_id': user.id, 'revision': group.revision,
             'state': group.state, 'found_count': found, 'expected_count': total,
+            'context': context,
             'completed': total > 0 and found == total,
             'closed': group.closed or utc(group.expires_at) <= now(),
             'expires_at': group.expires_at.isoformat(),
@@ -206,7 +226,8 @@ def create_group(puzzle_id: str, payload: GroupOptions, request: Request, db: Se
     if count >= 20: raise HTTPException(429, 'Close an existing Group Solve before creating another')
     group = GroupSolve(id=uuid.uuid4().hex[:24], code=secrets.token_hex(5).upper(),
                        puzzle_id=puzzle.id, host_id=user.id, state={'answers': {}}, cell_versions={},
-                       expires_at=now()+timedelta(days=7), **payload.model_dump())
+                       expires_at=now()+timedelta(days=7), **payload.model_dump(exclude={'puzzle_options'}))
+    group.state = configure_collaboration(plugin, group.state, payload.puzzle_options, puzzle.solution_payload)
     db.add(group); db.flush()
     db.add(GroupMember(group_id=group.id, user_id=user.id, status='active', seen_at=now()))
     db.commit()
@@ -316,11 +337,15 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
         raise HTTPException(409, 'Group changed; retry after synchronizing')
     conflicts = [k for k in payload.changes if group.cell_versions.get(k, 0) > payload.revision]
     if conflicts: raise HTTPException(409, {'message': 'Another player changed these cells; your edit was not applied', 'keys': conflicts})
-    if any(len(k) > 80 or len(v) > 16 for k, v in payload.changes.items()): raise HTTPException(422, 'Cell value too long')
     puzzle = db.get(Puzzle, group.puzzle_id)
     plugin = get_puzzle_type(puzzle.puzzle_type)
     if not plugin or not plugin.collaboration: raise HTTPException(400, 'Plugin no longer supports Group Solve')
-    try: state = plugin.collaboration(group.state, payload.model_dump(mode='json'), puzzle.solution_payload)
+    if sum(len(k) + len(v) for k, v in payload.changes.items()) > 65536:
+        raise HTTPException(413, 'Group patch is too large')
+    if any(len(k) > 80 or len(v) > plugin.collaboration_value_limit for k, v in payload.changes.items()):
+        raise HTTPException(422, 'Cell value too long')
+    action = {**payload.model_dump(mode='json'), '_actor': user.id, **collaboration_context(db, group)}
+    try: state = plugin.collaboration(group.state, action, puzzle.solution_payload)
     except ValueError as error: raise HTTPException(422, str(error))
     before = group.state.get('answers', {})
     after = state.get('answers', {})
@@ -415,6 +440,14 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
             member.seen_at = None
             if member.status != 'removed':
                 member.status = 'left'
+    puzzle = db.get(Puzzle, group.puzzle_id)
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    previous = group.state
+    group.state = configure_collaboration(plugin, previous, payload.puzzle_options, puzzle.solution_payload)
+    if group.state != previous:
+        group.revision += 1
+        group.puzzle_started_revision = group.revision
+        group.cell_versions = {k: group.revision for k in set(previous.get('answers', {})) | set(group.state.get('answers', {}))}
     db.commit()
     publish_state_change(group.id)
     return snapshot(db, group, user)
@@ -465,7 +498,7 @@ def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session 
         raise HTTPException(409, 'This group has reached its 100-puzzle limit')
     group.puzzle_states = history
     group.puzzle_id = puzzle.id
-    group.state = history.get(puzzle.id, {'answers': {}})
+    group.state = history.get(puzzle.id) or configure_collaboration(plugin, {'answers': {}}, {}, puzzle.solution_payload)
     group.revision += 1
     group.puzzle_started_revision = group.revision
     group.cell_versions = {key: group.revision for key in group.state.get('answers', {})}

@@ -15,6 +15,12 @@
   let path = [];
   let drawing = false;
   let celebrationReady = false;
+  let pathKey = 'path', localValue = '', legIndex = null;
+  let startPoint = {x:0,y:0}, finishPoint = {x:width-1,y:height-1}, canDraw = true;
+  const groupLines = document.createElementNS('http://www.w3.org/2000/svg','g');
+  const checkpointLayer = document.createElementNS('http://www.w3.org/2000/svg','g');
+  const legend = document.createElement('div'); legend.className = 'maze-player-legend';
+  if (window.PuzzaryGroup) { svg.append(groupLines,checkpointLayer); root.append(legend); completeButton.hidden = true; }
 
   try {
     grid = JSON.parse(root.dataset.grid || "[]");
@@ -38,7 +44,7 @@
   }
 
   function isFinish(point) {
-    return point.x === width - 1 && point.y === height - 1;
+    return samePoint(point, finishPoint);
   }
 
   function setStatus(text) {
@@ -67,7 +73,7 @@
     root.classList.toggle("complete", completed);
     if (completed) {
       setStatus("Solved. The traced path reached Finish.");
-      if (celebrationReady && window.PuzzaryCelebrate) window.PuzzaryCelebrate.complete();
+      if (!window.PuzzaryGroup && celebrationReady && window.PuzzaryCelebrate) window.PuzzaryCelebrate.complete();
     } else if (path.length > 1) {
       setStatus(`${path.length} cells traced. Keep going to F.`);
     } else {
@@ -76,6 +82,7 @@
   }
 
   async function savePath(forceCompleted) {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     const completed = forceCompleted || isFinish(path[path.length - 1]);
     root.dataset.completed = completed ? "true" : "false";
     root.classList.toggle("complete", completed);
@@ -109,14 +116,16 @@
   }
 
   function visit(point) {
-    if (!point) return;
+    if (!point || !canDraw) return;
     const last = path[path.length - 1];
     if (samePoint(point, last)) return;
 
     const existingIndex = path.findIndex((item) => samePoint(item, point));
     if (existingIndex >= 0) {
       path = path.slice(0, existingIndex + 1);
+      localValue = JSON.stringify(path);
       renderPath();
+      if (window.PuzzaryGroup) savePath(false);
       return;
     }
 
@@ -126,19 +135,22 @@
     }
 
     path.push(point);
+    localValue = JSON.stringify(path);
     renderPath();
-    if (isFinish(point)) savePath(true);
+    if (window.PuzzaryGroup || isFinish(point)) savePath(isFinish(point));
   }
 
   if (svg) {
     svg.addEventListener("pointerdown", (event) => {
+      if (!canDraw) return;
       event.preventDefault();
       svg.setPointerCapture(event.pointerId);
       drawing = true;
       const point = cellFromEvent(event);
-      if (samePoint(point, { x: 0, y: 0 })) {
-        path = [{ x: 0, y: 0 }];
+      if (samePoint(point, startPoint)) {
+        path = [startPoint]; localValue = '';
         renderPath();
+        if (window.PuzzaryGroup) savePath(false);
       } else {
         visit(point);
       }
@@ -174,7 +186,8 @@
 
   if (clearButton) {
     clearButton.addEventListener("click", () => {
-      path = [{ x: 0, y: 0 }];
+      if (!canDraw) return;
+      path = [startPoint]; localValue = '';
       renderPath();
       savePath(false);
     });
@@ -182,4 +195,69 @@
 
   renderPath();
   celebrationReady = true;
+
+  function readPath(value) { try { const result = JSON.parse(value || '[]'); return Array.isArray(result) ? result : []; } catch (_) { return []; } }
+  function activeLeg(state) {
+    const checkpoints = state.maze_group?.checkpoints || [];
+    return checkpoints.slice(1).findIndex((finish,index) => !samePoint(readPath(state.answers?.[`leg:${index}`]).at(-1),finish));
+  }
+  function editableKey(state, data) {
+    const mode = state.maze_group?.mode || 'co_op';
+    if (mode === 'companions') return `path:${data.user_id}`;
+    if (mode === 'rally') {
+      const leg = activeLeg(state), players = data.context.participants;
+      return leg >= 0 && players[leg%players.length] === data.user_id ? `leg:${leg}` : null;
+    }
+    return 'path';
+  }
+  function svgNode(tag,attributes) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg',tag);
+    for (const [key,value] of Object.entries(attributes)) node.setAttribute(key,value);
+    return node;
+  }
+  window.PuzzaryGroup?.register({
+    read() { return pathKey && localValue ? {[pathKey]:localValue} : {}; },
+    scope(answers,data) { const key = editableKey({...data.state,answers},data); return key && answers[key] ? {[key]:answers[key]} : {}; },
+    apply(state,data) {
+      const mode = state.maze_group?.mode || 'co_op';
+      pathKey = editableKey(state,data); canDraw = !!pathKey && !data.closed;
+      const checkpoints = state.maze_group?.checkpoints || [];
+      legIndex = mode === 'rally' ? activeLeg(state) : null;
+      startPoint = mode === 'rally' && legIndex >= 0 ? checkpoints[legIndex] : {x:0,y:0};
+      finishPoint = mode === 'rally' && legIndex >= 0 ? checkpoints[legIndex+1] : {x:width-1,y:height-1};
+      localValue = state.answers?.[pathKey] || '';
+      path = readPath(localValue); if (!path.length) path = [startPoint];
+      renderPath();
+      trace.style.stroke = window.PuzzaryGroup.color(data.user_id);
+      const ownOffset = mode === 'companions' ? (data.context.participants.indexOf(data.user_id) % 5 - 2) * .9 : 0;
+      trace.setAttribute('transform',`translate(${ownOffset},${ownOffset})`);
+      svg.querySelectorAll('.maze-label').forEach(label => { label.style.display = mode === 'rally' ? 'none' : ''; });
+      clearButton.disabled = !canDraw;
+      groupLines.replaceChildren(); checkpointLayer.replaceChildren(); legend.replaceChildren();
+      for (const [key,value] of Object.entries(state.answers || {})) {
+        if (key === pathKey) continue;
+        const owner = mode === 'companions' ? Number(key.split(':')[1]) : mode === 'rally' ? data.context.participants[Number(key.split(':')[1])%data.context.participants.length] : data.host_id;
+        const color = window.PuzzaryGroup.color(owner);
+        const attributes = {points:readPath(value).map(center).join(' '),fill:'none',stroke:color,'stroke-width':3.5,'stroke-linecap':'round','stroke-linejoin':'round','vector-effect':'non-scaling-stroke',opacity:.8};
+        if (mode === 'companions') {
+          const offset = (data.context.participants.indexOf(owner) % 5 - 2) * .9;
+          attributes.transform = `translate(${offset},${offset})`;
+        }
+        groupLines.append(svgNode('polyline',attributes));
+      }
+      if (mode === 'companions') for (const member of data.members.filter(m => m.status === 'active')) {
+        const item = document.createElement('span'); item.textContent = member.name; item.style.color = window.PuzzaryGroup.color(member.user_id); legend.append(item);
+      }
+      if (mode === 'rally') {
+        checkpoints.forEach((point,index) => {
+          const [cx,cy] = center(point).split(',');
+          checkpointLayer.append(svgNode('circle',{cx,cy,r:cellSize*.28,fill:'#fff',stroke:'#555','stroke-width':1}));
+          const label = svgNode('text',{x:cx,y:Number(cy)+3,'text-anchor':'middle','font-size':10,fill:'#222'}); label.textContent = index+1; checkpointLayer.append(label);
+        });
+        const owner = legIndex >= 0 ? data.context.participants[legIndex%data.context.participants.length] : null;
+        const name = data.members.find(m => m.user_id === owner)?.name || 'Player';
+        setStatus(legIndex < 0 ? 'Rally complete.' : `Leg ${legIndex+1}: checkpoint ${legIndex+1} to ${legIndex+2}. ${canDraw ? 'Your turn.' : `${name}'s turn.`}`);
+      }
+    }
+  });
 })();

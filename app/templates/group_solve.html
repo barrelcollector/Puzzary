@@ -18,6 +18,7 @@
     <details id="group-host" hidden>
       <summary>Session settings</summary>
       <form id="group-settings">
+        {% include 'group_options.html' %}
         <label>Participant limit <input name="participant_limit" type="number" min="0" max="50" value="0"></label>
         <label><input name="approval_required" type="checkbox"> Require host approval</label>
         {% if not current_user.is_guest and current_user.can('groups.guests') %}
@@ -47,6 +48,7 @@
     <details>
       <summary>Group Solve</summary>
       {% if current_user.can('groups.host') %}<form id="group-create">
+        {% include 'group_options.html' %}
         <label>Participant limit <input name="participant_limit" type="number" min="0" max="50" value="0"></label>
         <label><input name="approval_required" type="checkbox"> Require host approval</label>
         {% if current_user.can('groups.guests') %}

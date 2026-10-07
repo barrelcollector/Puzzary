@@ -13,6 +13,7 @@
   const autoConfirm = grid.dataset.autoConfirm !== "false";
   const cells = Array.from(grid.querySelectorAll("button[data-letter]"));
   const cellsByCoord = new Map(cells.map((cell) => [`${cell.dataset.x},${cell.dataset.y}`, cell]));
+  cells.forEach(cell => { cell.dataset.key = `${cell.dataset.x},${cell.dataset.y}`; });
   let placements = [];
   let dragging = false;
   let activePointerId = null;
@@ -63,6 +64,7 @@
   }
 
   function saveProgress() {
+    if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
     if (!progressUrl) return;
     window.fetch(progressUrl, {
       method: "POST",
@@ -172,25 +174,28 @@
     clearSelected();
     cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
     syncFoundWords();
+    if (window.PuzzaryGroup) saveProgress();
   }
 
   function addGuess() {
     if (!selected.length) return;
     const key = selectionKey(selected);
-    const existing = guesses.find((guess) => guess.key === key);
+    const existing = guesses.find((guess) => guess.key === key || window.PuzzaryGroup && groupKey(guess) === groupKey({cells:selected}));
     if (existing) {
       existing.cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
       guesses = guesses.filter((guess) => guess.key !== key);
       clearSelected();
       if (status) status.textContent = "Selection removed.";
+      if (window.PuzzaryGroup) saveProgress();
       return;
     }
-    const rejected = rejectedGuesses.find((guess) => guess.key === key);
+    const rejected = rejectedGuesses.find((guess) => guess.key === key || window.PuzzaryGroup && groupKey(guess) === groupKey({cells:selected}));
     if (rejected) {
       rejected.cells.forEach((cell) => cell.classList.remove("selected", "miss"));
       rejectedGuesses = rejectedGuesses.filter((guess) => guess.key !== key);
       clearSelected();
       if (status) status.textContent = "Incorrect selection removed.";
+      if (window.PuzzaryGroup) saveProgress();
       return;
     }
     const forward = selectedWord();
@@ -208,6 +213,7 @@
     });
     selected = [];
     if (status) status.textContent = `${guesses.length} selection${guesses.length === 1 ? "" : "s"} ready to check.`;
+    if (window.PuzzaryGroup) saveProgress();
   }
 
   function checkGuesses() {
@@ -286,7 +292,7 @@
 
   function finishSelection() {
     if (!selected.length) return;
-    if (!autoConfirm) {
+    if (!autoConfirm || window.PuzzaryGroup) {
       addGuess();
       return;
     }
@@ -374,4 +380,29 @@
   if (revealButton) {
     revealButton.addEventListener("click", revealSolution);
   }
+  function groupKey(guess) {
+    const first = guess.cells[0], last = guess.cells.at(-1);
+    const ends = [`${first.dataset.x},${first.dataset.y}`,`${last.dataset.x},${last.dataset.y}`].sort();
+    return `guess:${ends[0]}:${ends[1]}`;
+  }
+  window.PuzzaryGroup?.register({
+    read() { return Object.fromEntries([...guesses.map(guess => [groupKey(guess),'pending']),...rejectedGuesses.map(guess => [groupKey(guess),'wrong'])]); },
+    apply(state) {
+      found.clear(); (state.found_words || []).forEach(word => found.add(word));
+      cells.forEach(cell => cell.classList.remove('found-cell','candidate-cell','miss'));
+      guesses = []; rejectedGuesses = [];
+      for (const [key,value] of Object.entries(state.answers || {})) {
+        const [,first,last] = key.split(':');
+        const line = lineCells(cellsByCoord.get(first),cellsByCoord.get(last));
+        if (!line.length) continue;
+        const forward = line.map(cell => cell.dataset.letter).join('').toUpperCase();
+        const guess = {key:selectionKey(line),cells:line,forward,reverse:[...forward].reverse().join('')};
+        if (value === 'wrong') rejectedGuesses.push(guess); else guesses.push(guess);
+        line.forEach(cell => cell.classList.add(value === 'wrong' ? 'miss' : 'candidate-cell'));
+      }
+      found.forEach(markStoredWord);
+      syncFoundWords();
+      if (status && (guesses.length || rejectedGuesses.length)) status.textContent = `${found.size} of ${words.size} words found. ${guesses.length} selections ready to check. ${rejectedGuesses.length} incorrect selections.`;
+    }
+  });
 })();
