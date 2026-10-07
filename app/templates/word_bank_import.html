@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Import Word Bank - Puzzary{% endblock %}
+{% block content %}
+<section class="admin-shell">
+  {% set section = 'word_banks' %}{% include 'admin_nav.html' %}
+  <div class="admin-main bank-import">
+    <header class="puzzle-head"><h1>Import Word Bank</h1><a href="/admin/word-banks" class="ghost-button">Word Banks</a></header>
+    <ol class="import-steps" aria-label="Import progress">
+      {% for key, label in [('source', 'Source'), ('mapping', 'Fields'), ('preview', 'Review'), ('summary', 'Imported')] %}<li {% if stage == key %}aria-current="step"{% endif %}>{{ label }}</li>{% endfor %}
+    </ol>
+    {% if error %}<p class="flash error" role="alert">{{ error }}</p>{% endif %}
+    {% if stage == 'source' %}
+    <form class="import-form" action="/admin/word-banks/import/source" method="post" enctype="multipart/form-data">
+      <input type="hidden" name="bank_id" value="{{ target_bank }}">
+      <h2>Source</h2>
+      <label>File <input type="file" name="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json"></label>
+      <label>Pasted words or data <textarea name="source_text" rows="8"></textarea></label>
+      <label>Source URL <input type="url" name="source_url" placeholder="https://"></label>
+      <label>Source API token <input type="password" name="api_token" autocomplete="off"></label>
+      <label>Format <select name="format"><option value="auto">Detect automatically</option><option value="txt">TXT</option><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+      <div class="action-row"><button type="submit">Continue</button></div>
+    </form>
+    {% elif stage == 'mapping' %}
+    <form action="/admin/word-banks/import/preview" method="post">
+      <input type="hidden" name="preview_id" value="{{ preview_id }}">
+      <h2>Destination</h2>
+      <div class="import-form">
+        <label>Word bank <select name="bank_id"><option value="">New word bank</option>{% for bank in banks if word_bank_mode(bank) == 'manual' %}<option value="{{ bank.id }}" {% if target_bank|string == bank.id|string %}selected{% endif %}>{{ bank.name }}</option>{% endfor %}</select></label>
+        <label>New bank name <input name="name" maxlength="120" value="{{ parsed.metadata.get('name', '') }}"></label>
+        <label>Description <textarea name="description" rows="2">{{ parsed.metadata.get('description', '') }}</textarea></label>
+        <label>Validate for puzzle type <select name="plugin"><option value="">Any word-bank puzzle</option>{% for plugin in plugins %}<option value="{{ plugin.slug }}">{{ plugin.label }}</option>{% endfor %}</select></label>
+      </div>
+      <h2>Fields</h2>
+      {% macro mapping_field(field) %}<label>{{ field.replace('_', ' ') | title }}<select name="map_{{ field }}"><option value="">Not mapped</option>{% for column in parsed.columns %}<option {% if parsed.mapping.get(field) == column %}selected{% endif %}>{{ column }}</option>{% endfor %}</select></label>{% endmacro %}
+      <div class="import-fields">{% for field in fields[:6] %}{{ mapping_field(field) }}{% endfor %}</div>
+      <details><summary>Additional Fields</summary><div class="import-fields">{% for field in fields[6:] %}{{ mapping_field(field) }}{% endfor %}</div></details>
+      <details {% if parsed.metadata.get('license') or parsed.metadata.get('attribution') %}open{% endif %}><summary>Attribution</summary><div class="import-fields">{% for field in ['source', 'license', 'attribution', 'language'] %}<label>{{ field | title }}<input name="{{ field }}" value="{{ parsed.metadata.get(field, '') }}"></label>{% endfor %}</div></details>
+      <h2>Source Sample</h2>
+      <div class="import-table"><table><thead><tr>{% for column in parsed.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in parsed.rows[:5] %}<tr>{% for column in parsed.columns %}<td>{{ row.get(column, '') }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+      <div class="action-row"><a class="ghost-button" href="/admin/word-banks/import">Start Over</a><button type="submit">Preview</button></div>
+    </form>
+    {% elif stage == 'preview' %}
+    <h2>{{ name }}</h2><p>{{ reviewed.valid }} valid / {{ reviewed.total }} entries. {{ reviewed.errors | length }} invalid.</p>
+    <div class="import-table"><table><thead><tr><th>Row</th><th>Word</th><th>Definitions</th><th>Review</th></tr></thead><tbody>
+      {% for entry in reviewed.entries[:100] %}<tr><td>{{ entry.row }}</td><td>{{ entry.display_text }}</td><td>{% for definition in entry.definitions %}<p>{{ definition.definition }}</p>{% endfor %}</td><td>{% for warning in entry.warnings %}<p>{{ warning }}</p>{% endfor %}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if reviewed.valid > 100 %}<p class="muted">Showing the first 100 valid entries of {{ reviewed.valid }}.</p>{% endif %}
+    {% if reviewed.errors %}<details open><summary>Invalid Rows</summary><ul>{% for item in reviewed.errors[:100] %}<li>Row {{ item.row }}: {{ item.error }}</li>{% endfor %}</ul></details>{% endif %}
+    <form class="import-form" action="/admin/word-banks/import/commit" method="post">
+      <input type="hidden" name="preview_id" value="{{ preview_id }}">
+      <label>Existing words <select name="policy"><option value="preserve">Keep local fields; add new definitions</option><option value="update">Merge definitions and update supplied fields</option><option value="skip">Skip existing dictionary words</option></select></label>
+      {% if reviewed.errors %}<label class="check-label"><input type="checkbox" name="skip_invalid" value="yes" required>Skip {{ reviewed.errors | length }} invalid rows</label>{% endif %}
+      <div class="action-row"><a class="ghost-button" href="/admin/word-banks/import/fields?preview_id={{ preview_id }}">Back to Fields</a><button type="submit" {% if not reviewed.valid %}disabled{% endif %}>Import</button></div>
+    </form>
+    {% elif stage == 'summary' %}
+    <h2>Import Complete</h2>
+    <dl class="import-summary">{% for key in ['added', 'updated', 'skipped', 'failed', 'definitions_added', 'duplicate_definitions', 'linked'] %}<div><dt>{{ key.replace('_', ' ') | title }}</dt><dd>{{ result[key] }}</dd></div>{% endfor %}</dl>
+    <div class="action-row"><a class="button-link" href="/admin/word-banks/{{ result.bank_id }}">Open Word Bank</a><a class="ghost-button" href="/admin/word-banks/import">Import Another</a></div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -498,3 +498,10 @@ Migration preserves existing administrators and existing player generation/hosti
 ## AI Assistance Disclosure
 
 This project includes AI-assisted scaffolding, implementation, and testing.
+## Word-bank transfers
+
+Word Banks includes an import wizard for UTF-8 TXT, CSV and JSON, pasted data,
+raw URLs, GitHub/Gists, Pastebin and other Puzzary servers. Preview field mapping,
+errors and duplicates before importing into a new or existing bank. Export from
+a bank's page to transfer its definitions and attribution.
+See [word-bank format, API and security limits](docs/word-bank-imports.md).

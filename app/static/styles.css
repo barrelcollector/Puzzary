@@ -2564,3 +2564,18 @@ summary {
     color: var(--ink);
   }
 }
+/* Dictionary-backed word-bank import wizard. */
+.bank-import { min-width: 0; }
+.import-provenance { overflow-wrap: anywhere; }
+.import-steps { display: flex; gap: 8px; list-style: none; padding: 0; margin: 0 0 24px; border-bottom: 1px solid #ccc; }
+.import-steps li { padding: 10px 12px; color: #555; border-bottom: 3px solid transparent; }
+.import-steps [aria-current="step"] { color: #176e62; border-bottom-color: #176e62; font-weight: 700; }
+.import-form { max-width: 660px; display: grid; gap: 12px; margin-bottom: 24px; }
+.import-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 20px; margin-bottom: 24px; }
+.import-table { max-width: 100%; overflow: auto; margin-bottom: 24px; }
+.import-table table { width: 100%; border-collapse: collapse; }
+.import-table th, .import-table td { border-bottom: 1px solid #ccc; padding: 10px; text-align: left; vertical-align: top; min-width: 110px; max-width: 340px; overflow-wrap: anywhere; }
+.import-table p { margin: 0 0 6px; }
+.import-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 18px; }
+.import-summary dd { margin: 6px 0; font-size: 24px; font-weight: 700; }
+@media (max-width: 480px) { .import-steps { gap: 0; } .import-steps li { padding: 8px; font-size: 14px; } .import-fields { grid-template-columns: minmax(0, 1fr); } }

@@ -499,6 +499,7 @@
       <section class="puzzle-head">
         <div>
           <h1>Word Banks</h1>
+          <a class="button-link" href="/admin/word-banks/import">Import</a>
           <p class="muted">Curated lists that point back to the one true dictionary entry for each word.</p>
         </div>
       </section>
@@ -560,8 +561,19 @@
       <section class="puzzle-head">
         <div>
           <a class="ghost-link" href="/admin/word-banks">Back to Word Banks</a>
+          <div class="action-row">
+            <a class="button-link" href="/admin/word-banks/import?bank_id={{ bank.id }}">Import Entries</a>
+            <a class="ghost-button" href="/admin/word-banks/{{ bank.id }}/export">Export</a>
+          </div>
           <h1>{{ bank.name }}</h1>
           <p class="muted">{{ bank.slug }} / {{ word_bank_mode(bank) }}</p>
+          {% set bank_properties = bank.payload.get('properties', {}) %}
+          {% if bank_properties.get('imports') %}
+          <details class="import-provenance"><summary>Import Provenance</summary>
+            <dl>{% for field in ['source', 'license', 'attribution', 'language', 'updated_at'] %}{% if bank_properties.get(field) %}<dt>{{ field.replace('_', ' ') | title }}</dt><dd>{{ bank_properties[field] }}</dd>{% endif %}{% endfor %}</dl>
+            {% for import in bank_properties['imports'] | reverse %}<p class="muted">{{ import.imported_at }} &middot; {{ import.sources | join(', ') }}</p>{% endfor %}
+          </details>
+          {% endif %}
           {% if bank.archived_at %}<span class="status-pill">Archived</span>{% endif %}
         </div>
       </section>

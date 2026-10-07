@@ -99,6 +99,8 @@ from app.groups import router as groups_router
 app.include_router(groups_router)
 from app.permission_admin import router as permission_router
 app.include_router(permission_router)
+from app.word_bank_admin import router as word_bank_router
+app.include_router(word_bank_router)
 
 DICTIONARY_SYNC_CHECK_SECONDS = 15 * 60
 
@@ -1314,6 +1316,8 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "needs_word_bank": needs_word_bank,
         "theme_mode": puzzle_type.theme_mode,
         "source_requirements": list(puzzle_type.source_requirements),
+        "word_bank_fields": list(puzzle_type.word_bank_fields) if needs_word_bank else [],
+        "word_bank_required_fields": list(puzzle_type.word_bank_required_fields) if needs_word_bank else [],
         "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
         "manual_editor_fields": [serialize_generation_field(field) for field in puzzle_type.manual_editor_fields],
         "manual_editor_script": puzzle_type.manual_editor_script,
@@ -1768,7 +1772,7 @@ def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[
                     continue
                 if excluded_tag_ids & word_tag_ids:
                     continue
-                entries.append({"word": word, "definition": definition})
+                entries.append({"word": word, "definition": definition, "properties": {**(word.properties or {}), **((definition.properties or {}) if definition else {})}})
         return entries
 
     for link in sorted(bank.word_links, key=lambda item: item.position):
@@ -1782,7 +1786,7 @@ def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[
             continue
         if definition is not None and excluded_tag_ids & {tag.id for tag in definition.tags}:
             continue
-        entries.append({"word": word, "definition": definition})
+        entries.append({"word": word, "definition": definition, "properties": {**(word.properties or {}), **((definition.properties or {}) if definition else {})}})
     return entries
 
 

@@ -86,6 +86,9 @@ def clues_for_definition(definition: Any) -> list[str]:
     if definition is None:
         return []
     clues = typed_tag_values(getattr(definition, "tags", []), "Clue")
+    for clue in (getattr(definition, "properties", {}) or {}).get("clues", []):
+        if isinstance(clue, str) and clue.strip() and clue.strip() not in clues:
+            clues.append(clue.strip())
     definition_text = str(getattr(definition, "definition", "")).strip()
     definition_clue = f"Definition: {definition_text}" if definition_text else ""
     if definition_clue and definition_clue not in clues:
