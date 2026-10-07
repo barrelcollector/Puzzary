@@ -87,6 +87,7 @@
   window.PuzzaryCelebrate = {
     complete: showCelebration,
     hide: hideCelebration,
+    reset() { hasShown = false; hideCelebration(); },
   };
 
   if (closeButton) closeButton.addEventListener("click", hideCelebration);

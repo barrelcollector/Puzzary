@@ -24,7 +24,8 @@
     flushState();
   }
   function flushState() {
-    if (!pendingState || !adapter || busy || Object.keys(diff(adapter.read(),baseline)).length) return;
+    if (!pendingState || !adapter || busy) return;
+    if (pendingState.puzzle_epoch === snapshot?.puzzle_epoch && Object.keys(diff(adapter.read(),baseline)).length) return;
     const data = pendingState; pendingState = null; show(data);
   }
   const memberNodes = new Map();
@@ -223,7 +224,7 @@
   panel.querySelector('#group-invite-url').value = inviteUrl.href;
   function applyState(state) {
     if (!adapter) return;
-    const encoded = JSON.stringify(state);
+    const encoded = JSON.stringify([state,snapshot?.context,snapshot?.closed]);
     const revision = snapshot?.revision ?? -1;
     if (encoded === renderedState && renderedRevision === revision && !Object.keys(diff(adapter.read(),baseline)).length) return;
     adapter.apply(state,snapshot); renderedState = encoded; renderedRevision = revision;
@@ -243,6 +244,13 @@
   function show(data, preserve = {}) {
     if (followPuzzle(data)) return;
     if (snapshot && data.revision < snapshot.revision) return;
+    const reset = snapshot && data.puzzle_epoch !== snapshot.puzzle_epoch;
+    if (reset) {
+      preserve = {};
+      clearTimeout(groupSaveTimer); groupSaveTimer = null;
+      notice = '';
+      window.PuzzaryCelebrate?.reset();
+    }
     snapshot = data;
     panel.dataset.revision = data.revision;
     baseline = adapter?.scope ? adapter.scope(data.state.answers || {},data) : {...data.state.answers};
@@ -280,10 +288,12 @@
       let item = memberNodes.get(member.user_id);
       if (!item) {
         item = document.createElement('span'); item.className = 'group-member';
+        item.dataset.player = member.user_id;
         item.append(document.createElement('span'),document.createElement('span'));
         memberNodes.set(member.user_id,item); list.append(item);
       }
       setText(item.firstElementChild,`${member.name}${member.user_id === data.host_id ? ' (host)' : member.guest ? ' (guest)' : ''} - ${member.status === 'pending' ? 'awaiting approval' : member.online ? 'online' : 'away'}`);
+      item.classList.toggle('current-turn',adapter?.activePlayer?.(data) === member.user_id);
       const actions = `${host}:${data.closed}:${member.status}`;
       if (item.dataset.actions === actions) continue;
       item.dataset.actions = actions;

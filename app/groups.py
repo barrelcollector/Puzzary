@@ -193,6 +193,7 @@ def snapshot(db, group, user):
     names = {participant_id(m): u.display_name if u else m.guest_name for m, u in members}
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
             'host_id': group.host_id, 'user_id': user.id, 'revision': group.revision,
+            'puzzle_epoch': group.puzzle_started_revision,
             'state': group.state, 'found_count': found, 'expected_count': total,
             'context': context,
             'completed': total > 0 and found == total,

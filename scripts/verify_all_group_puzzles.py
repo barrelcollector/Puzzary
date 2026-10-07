@@ -39,6 +39,9 @@ with SessionLocal() as db:
     for kind, item in generated.items():
         db.add(Puzzle(id='all-'+kind, puzzle_type=kind, title='QA '+kind, theme='', difficulty='easy', prompt=item.prompt,
                       play_payload=item.play_payload, print_payload=item.print_payload, solution_payload=item.solution_payload, puzzle_metadata={}, source='test'))
+    second_maze = get_puzzle_type('maze').generator('', 'easy', None, 'second-group-maze', {'maze_size':'custom','custom_width':5,'custom_height':5,'allow_loops':'no'})
+    db.add(Puzzle(id='all-maze-second', puzzle_type='maze', title='QA Second Maze', theme='', difficulty='easy', prompt=second_maze.prompt,
+                  play_payload=second_maze.play_payload, print_payload=second_maze.print_payload, solution_payload=second_maze.solution_payload, puzzle_metadata={}, source='test'))
     db.commit()
 
 def cookie(uid):
@@ -191,6 +194,71 @@ try:
         assert data['completed']
         b.wait_for_function('document.querySelector("#maze-status").textContent === "Rally complete."')
         a.screenshot(path=str(artifacts / 'all-groups-maze-rally-desktop.png'), full_page=True)
+        # Move through the real host UI, change legs, then play without reloading.
+        a.locator('#group-host').evaluate('(el)=>el.open=true')
+        a.locator('#group-puzzle-picker').evaluate('(el)=>el.open=true')
+        a.wait_for_function('!!document.querySelector("#group-move option[value=all-maze-second]")')
+        a.locator('#group-move select').select_option('all-maze-second')
+        a.locator('#group-move button').click()
+        for page in pages:
+            page.wait_for_url('**/puzzles/all-maze-second?group=*')
+            page.wait_for_function('!document.querySelector(".puzzle-layout > .panel").inert')
+            page.evaluate('''() => {
+                window.progressChimes = 0;
+                window.PuzzarySounds.progress = () => { window.progressChimes += 1; };
+                window.mazeNode = document.querySelector('.maze-play');
+                const original = window.fetch;
+                window.fetch = async (...args) => {
+                    const response = await original(...args);
+                    if (String(args[0]).endsWith('/actions') && args[1]?.method === 'POST') await new Promise(resolve => setTimeout(resolve,350));
+                    return response;
+                };
+            }''')
+        a.locator('#group-host').evaluate('(el)=>el.open=true')
+        a.locator('#group-settings [data-group-option=maze_mode]').select_option('rally')
+        a.locator('#group-settings [data-group-option=rally_legs]').fill('3')
+        a.once('dialog', lambda dialog:dialog.accept())
+        a.locator('#group-settings button[type=submit]').click()
+        for page in pages: page.wait_for_function('document.querySelectorAll(".maze-turn-order li").length === 3')
+        current = host.request.get(endpoint).json()
+        checkpoints = current['state']['maze_group']['checkpoints']
+        new_route = second_maze.solution_payload['path']
+        for leg in range(3):
+            active_page = pages[leg%2]
+            start = new_route.index(checkpoints[leg]); finish = new_route.index(checkpoints[leg+1])
+            draw_path(active_page,new_route[start:finish+1])
+            next_leg = leg + 1
+            for page in pages:
+                page.wait_for_function('(n)=>document.querySelectorAll(".maze-turn-order .leg-complete").length === n',arg=next_leg)
+                assert page.evaluate('window.mazeNode === document.querySelector(".maze-play")'), 'Unexpected page refresh'
+                assert page.evaluate('window.progressChimes') == min(next_leg,2), 'Chime must play once per non-final leg'
+            if next_leg < 3:
+                expected_player = ids[next_leg%2]
+                for page in pages:
+                    page.wait_for_function('(id)=>document.querySelector("#group-members .current-turn")?.dataset.player === String(id)',arg=expected_player)
+        # Reset leg count through host controls; both players must immediately resume.
+        a.locator('#group-settings [data-group-option=rally_legs]').fill('4')
+        a.once('dialog', lambda dialog:dialog.accept())
+        a.locator('#group-settings button[type=submit]').click()
+        for page in pages: page.wait_for_function('document.querySelectorAll(".maze-turn-order li").length === 4')
+        for page in pages: assert page.locator('#completion-celebration').is_hidden(), 'Resetting legs must clear the old completion banner'
+        current = host.request.get(endpoint).json()
+        checkpoints = current['state']['maze_group']['checkpoints']
+        finish = new_route.index(checkpoints[1])
+        draw_path(a,new_route[:finish+1])
+        for page in pages: page.wait_for_function('document.querySelectorAll(".maze-turn-order .leg-complete").length === 1')
+        assert a.evaluate('window.progressChimes') == 3
+        a.set_viewport_size({'width':390,'height':844})
+        a.screenshot(path=str(artifacts / 'maze-rally-turn-order-mobile.png'),full_page=True)
+        assert a.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        a.set_viewport_size({'width':1280,'height':900})
+        a.screenshot(path=str(artifacts / 'maze-rally-turn-order-desktop.png'),full_page=True)
+        # Return to the first maze for the original guest regression checks.
+        data = host.request.get(endpoint).json()
+        response = host.request.post(endpoint+'/puzzle',data={'puzzle_id':'all-maze','revision':data['revision']})
+        assert response.ok,response.text()
+        for page in pages: page.wait_for_url('**/puzzles/all-maze?group=*')
+        print('Real host move/settings/leg-count reset and delayed browser saves passed without refresh; turn highlighting/order and non-duplicate progress chimes passed.')
         response = host.request.post(endpoint+'/settings', data={'allow_guests':True, 'puzzle_options':{'maze_mode':'co_op'}})
         assert response.ok, response.text()
         guest = browser.new_context(viewport={'width':390, 'height':844}, has_touch=True)

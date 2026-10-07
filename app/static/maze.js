@@ -16,11 +16,13 @@
   let drawing = false;
   let celebrationReady = false;
   let pathKey = 'path', localValue = '', legIndex = null;
+  let rallyEpoch = null, knownLegs = null;
   let startPoint = {x:0,y:0}, finishPoint = {x:width-1,y:height-1}, canDraw = true;
   const groupLines = document.createElementNS('http://www.w3.org/2000/svg','g');
   const checkpointLayer = document.createElementNS('http://www.w3.org/2000/svg','g');
   const legend = document.createElement('div'); legend.className = 'maze-player-legend';
-  if (window.PuzzaryGroup) { svg.append(groupLines,checkpointLayer); root.append(legend); completeButton.hidden = true; }
+  const turns = document.createElement('ol'); turns.className = 'maze-turn-order'; turns.setAttribute('aria-label','Rally turn order');
+  if (window.PuzzaryGroup) { svg.append(groupLines,checkpointLayer); root.append(legend,turns); completeButton.hidden = true; }
 
   try {
     grid = JSON.parse(root.dataset.grid || "[]");
@@ -129,6 +131,7 @@
       return;
     }
 
+    if (window.PuzzaryGroup && samePoint(last, finishPoint)) return;
     if (!isValidStep(last, point)) {
       setStatus("That move crosses a wall.");
       return;
@@ -216,13 +219,20 @@
     return node;
   }
   window.PuzzaryGroup?.register({
+    activePlayer(data) {
+      if (data.state.maze_group?.mode !== 'rally') return null;
+      const leg = activeLeg(data.state), players = data.context.participants;
+      return leg >= 0 ? players[leg%players.length] : null;
+    },
     read() { return pathKey && localValue ? {[pathKey]:localValue} : {}; },
     scope(answers,data) { const key = editableKey({...data.state,answers},data); return key && answers[key] ? {[key]:answers[key]} : {}; },
     apply(state,data) {
       const mode = state.maze_group?.mode || 'co_op';
-      pathKey = editableKey(state,data); canDraw = !!pathKey && !data.closed;
+      const nextKey = editableKey(data.state,data);
+      if (pathKey !== nextKey || rallyEpoch !== data.puzzle_epoch) drawing = false;
+      pathKey = nextKey; canDraw = !!pathKey && !data.closed;
       const checkpoints = state.maze_group?.checkpoints || [];
-      legIndex = mode === 'rally' ? activeLeg(state) : null;
+      legIndex = mode === 'rally' ? activeLeg(data.state) : null;
       startPoint = mode === 'rally' && legIndex >= 0 ? checkpoints[legIndex] : {x:0,y:0};
       finishPoint = mode === 'rally' && legIndex >= 0 ? checkpoints[legIndex+1] : {x:width-1,y:height-1};
       localValue = state.answers?.[pathKey] || '';
@@ -233,7 +243,8 @@
       trace.setAttribute('transform',`translate(${ownOffset},${ownOffset})`);
       svg.querySelectorAll('.maze-label').forEach(label => { label.style.display = mode === 'rally' ? 'none' : ''; });
       clearButton.disabled = !canDraw;
-      groupLines.replaceChildren(); checkpointLayer.replaceChildren(); legend.replaceChildren();
+      groupLines.replaceChildren(); checkpointLayer.replaceChildren(); legend.replaceChildren(); turns.replaceChildren();
+      turns.hidden = mode !== 'rally';
       for (const [key,value] of Object.entries(state.answers || {})) {
         if (key === pathKey) continue;
         const owner = mode === 'companions' ? Number(key.split(':')[1]) : mode === 'rally' ? data.context.participants[Number(key.split(':')[1])%data.context.participants.length] : data.host_id;
@@ -249,6 +260,22 @@
         const item = document.createElement('span'); item.textContent = member.name; item.style.color = window.PuzzaryGroup.color(member.user_id); legend.append(item);
       }
       if (mode === 'rally') {
+        const completedLegs = new Set(checkpoints.slice(1).map((finish,index) => samePoint(readPath(data.state.answers?.[`leg:${index}`]).at(-1),finish) ? index : null).filter(index => index !== null));
+        if (rallyEpoch === data.puzzle_epoch && knownLegs && [...completedLegs].some(index => !knownLegs.has(index)) && !data.completed) window.PuzzarySounds?.progress();
+        knownLegs = completedLegs;
+        for (let index = 0; index < checkpoints.length-1; index++) {
+          const player = data.context.participants[index%data.context.participants.length];
+          const member = data.members.find(m => m.user_id === player);
+          const item = document.createElement('li'); item.dataset.player = player; item.dataset.leg = index;
+          item.style.setProperty('--player-color',window.PuzzaryGroup.color(player));
+          const name = document.createElement('strong'); name.textContent = member?.name || 'Player';
+          const description = document.createElement('span'); description.textContent = `Checkpoints ${index+1} to ${index+2}`;
+          const phase = document.createElement('span'); phase.className = 'maze-turn-phase';
+          phase.textContent = completedLegs.has(index) ? 'Complete' : index === legIndex ? player === data.user_id ? 'Your turn' : 'Playing now' : index === legIndex + 1 ? 'Up next' : 'Waiting';
+          if (index === legIndex) { item.classList.add('current-turn'); item.setAttribute('aria-current','step'); }
+          item.classList.toggle('leg-complete',completedLegs.has(index));
+          item.append(name,description,phase); turns.append(item);
+        }
         checkpoints.forEach((point,index) => {
           const [cx,cy] = center(point).split(',');
           checkpointLayer.append(svgNode('circle',{cx,cy,r:cellSize*.28,fill:'#fff',stroke:'#555','stroke-width':1}));
@@ -257,7 +284,10 @@
         const owner = legIndex >= 0 ? data.context.participants[legIndex%data.context.participants.length] : null;
         const name = data.members.find(m => m.user_id === owner)?.name || 'Player';
         setStatus(legIndex < 0 ? 'Rally complete.' : `Leg ${legIndex+1}: checkpoint ${legIndex+1} to ${legIndex+2}. ${canDraw ? 'Your turn.' : `${name}'s turn.`}`);
+      } else {
+        knownLegs = null;
       }
+      rallyEpoch = data.puzzle_epoch;
     }
   });
 })();

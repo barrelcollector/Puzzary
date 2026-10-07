@@ -2606,3 +2606,11 @@ input.spell-slot { width: 34px; margin: 0; }
 @media print { .spell-slot { font-size: 14px; width: 24px; flex-basis: 24px; height: 30px; } }
 .maze-player-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
 .maze-player-legend span { border-bottom: 3px solid currentColor; padding-bottom: 2px; }
+.maze-turn-order { display: grid; gap: 0; padding-left: 26px; margin: 16px 0 0; }
+.maze-turn-order li { padding: 10px 8px; border-bottom: 1px solid #d1d7d5; border-left: 4px solid transparent; }
+.maze-turn-order strong, .maze-turn-order span { display: block; overflow-wrap: anywhere; }
+.maze-turn-order strong { color: var(--player-color); }
+.maze-turn-order .current-turn { background: #e2f2ed; border-left-color: var(--player-color); }
+.maze-turn-phase { font-size: 12px; color: #54625d; }
+.maze-turn-order .leg-complete { opacity: .65; }
+#group-members .group-member.current-turn { background: #e2f2ed; border-color: #197667; box-shadow: inset 0 0 0 1px #197667; font-weight: 700; }
