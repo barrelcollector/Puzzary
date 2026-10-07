@@ -35,9 +35,21 @@ Verification included:
 The larger library exposed an existing admin-page query bottleneck: tag usage
 was calculated by loading four relationships for every tag. A separately tested
 query optimization uses four aggregate queries and batched dictionary
-relationship loading, reusing the same resolved entries for bank counts and
-dashboard review. It retains the same templates, matching rules and usage counts.
-Deploy that application change only after operator approval.
+relationship loading, with two aggregate bank-count queries instead of loading
+every matching entry for list counts. It retains matching rules and usage counts.
+The follow-up performance fix was deployed after the operator reported slow
+pages. Admin sections now load only the data they need; dictionary lists show
+100 searchable entries per page, and tag lists show 200 with search and type
+filters. Word-bank counts are resolved using two aggregate SQL queries. Library
+filters include only tags attached to visible puzzles, rather than every
+definition clue in the dictionary. Multi-bank generation shares a single loaded
+dictionary across its automatic banks.
+
+Live request checks measured roughly 0.10 seconds for the library, 0.02 seconds
+for generation, 0.17 seconds for the dictionary, 0.16 seconds for word banks,
+0.09 seconds for tags and 0.06 seconds for users. The dashboard was about 2.9
+seconds. Measurements are local service responses, not guarantees of latency
+through a public tunnel. Dictionary counts remained unchanged after deployment.
 
 See the [content pack](../content_packs/english-wordnet-5000-v1/README.md) for
 licenses, attribution, import and rebuild instructions.

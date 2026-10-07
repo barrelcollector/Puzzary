@@ -29,12 +29,13 @@ from jinja2 import TemplateNotFound
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import desc, select
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
+from app.dictionary_queries import dictionary_statement, tag_usage_counts, word_bank_entry_counts
 from app.print_pdf import render_pdf
 from app.models import (
     AppSetting,
@@ -739,6 +740,8 @@ def dashboard_review_context(
     dictionary_words: list[DictionaryWord],
     all_word_banks: list[WordBank],
     tags: list[PuzzleTag],
+    bank_counts: dict | None = None,
+    tag_usage: dict | None = None,
 ) -> dict:
     now = utcnow()
     soon_cutoff = now + timedelta(hours=24)
@@ -764,11 +767,12 @@ def dashboard_review_context(
     archived_banks = [bank for bank in all_word_banks if bank.archived_at is not None]
     empty_banks = [
         bank for bank in all_word_banks
-        if bank.archived_at is None and len(word_bank_entries(db, bank)) == 0
+        if bank.archived_at is None and (bank_counts[bank.id] if bank_counts is not None else len(word_bank_entries(db, bank))) == 0
     ]
+    usage = tag_usage if tag_usage is not None else tag_usage_counts(db, tags)
     unused_tags = [
         tag for tag in tags
-        if not tag.puzzles and not tag.word_banks and not tag.dictionary_words and not tag.dictionary_definitions
+        if usage[tag.id]["total"] == 0
     ]
     auto_archive_soon = [
         puzzle for puzzle in puzzles
@@ -1082,7 +1086,8 @@ def safe_return_to(value: str, default: str = "/library") -> str:
 
 
 def library_options(db: Session, puzzles: list[Puzzle], current_user: User) -> dict:
-    tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
+    visible_tag_ids = {tag.id for puzzle in puzzles for tag in puzzle.tags}
+    tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(visible_tag_ids)).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
     users = db.scalars(select(User).order_by(User.display_name)).all()
     theme_values: dict[str, str] = {}
     for puzzle in puzzles:
@@ -1123,7 +1128,10 @@ def filtered_library(
     current_user: User,
     include_archived_for_admin: bool = True,
 ) -> dict:
-    all_puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
+    all_puzzles = db.scalars(select(Puzzle).options(
+        selectinload(Puzzle.tags), selectinload(Puzzle.category), selectinload(Puzzle.word_bank),
+        selectinload(Puzzle.creator),
+    ).order_by(desc(Puzzle.created_at))).all()
     all_puzzles = [puzzle for puzzle in all_puzzles if can_view(current_user, puzzle)]
     filters = library_filter_state(request, current_user)
     options = library_options(db, all_puzzles, current_user)
@@ -1749,7 +1757,7 @@ templates.env.globals["word_bank_mode"] = word_bank_mode
 templates.env.globals["definition_clue"] = definition_clue
 
 
-def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[int] | None = None) -> list[dict]:
+def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[int] | None = None, dictionary_words: list[DictionaryWord] | None = None) -> list[dict]:
     if bank is None:
         return []
     excluded_tag_ids = excluded_tag_ids or set()
@@ -1758,7 +1766,7 @@ def word_bank_entries(db: Session, bank: WordBank | None, excluded_tag_ids: set[
         tag_ids = {tag.id for tag in bank.tags}
         if not tag_ids:
             return []
-        words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+        words = dictionary_words if dictionary_words is not None else db.scalars(dictionary_statement()).all()
         for word in words:
             if word.archived_at is not None or word.banned_at is not None:
                 continue
@@ -2280,8 +2288,9 @@ def word_banks_for_ids(db: Session, bank_ids: list[int]) -> list[WordBank]:
 def combined_word_bank_entries(db: Session, banks: list[WordBank], excluded_tag_ids: set[int] | None = None) -> list[dict]:
     entries = []
     seen = set()
+    dictionary_words = db.scalars(dictionary_statement()).all() if any(word_bank_mode(bank) == "automatic" for bank in banks) else None
     for bank in banks:
-        for entry in word_bank_entries(db, bank, excluded_tag_ids):
+        for entry in word_bank_entries(db, bank, excluded_tag_ids, dictionary_words):
             word = entry.get("word") if isinstance(entry, dict) else None
             definition = entry.get("definition") if isinstance(entry, dict) else None
             key = (getattr(word, "id", None), getattr(definition, "id", None) if definition is not None else None)
@@ -2750,31 +2759,61 @@ def admin_context(
     all_word_banks = db.scalars(select(WordBank).order_by(WordBank.name)).all()
     word_banks = [bank for bank in all_word_banks if bank.archived_at is None]
     categories = db.scalars(select(PuzzleCategory).order_by(PuzzleCategory.name)).all()
-    tags = db.scalars(select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)).all()
+    tag_statement = select(PuzzleTag).order_by(PuzzleTag.tag_type, PuzzleTag.name)
+    page_value = request.query_params.get("page", "1")[:6]
+    list_page = max(1, int(page_value)) if page_value.isdigit() else 1
+    tag_search = request.query_params.get("q", "").strip()[:120]
+    tag_type_filter = request.query_params.get("type", "").strip()[:80]
+    tag_total = 0
+    tag_type_counts = {}
+    if section == "tags":
+        count_statement = select(func.count(PuzzleTag.id))
+        tag_type_counts = dict(db.execute(select(PuzzleTag.tag_type, func.count()).group_by(PuzzleTag.tag_type)).all())
+        conditions = []
+        if tag_search:
+            conditions.append(PuzzleTag.name.icontains(tag_search, autoescape=True))
+        if tag_type_filter:
+            conditions.append(PuzzleTag.tag_type == tag_type_filter)
+        tag_total = db.scalar(count_statement.where(*conditions)) or 0
+        list_page = min(list_page, max(1, (tag_total + 199) // 200))
+        tag_statement = tag_statement.where(*conditions).offset((list_page - 1) * 200).limit(200)
+    if section not in {"dashboard", "tags", "tag_detail"}:
+        tag_statement = tag_statement.where(PuzzleTag.tag_type != "Clue")
+    tags = db.scalars(tag_statement).all()
     tag_groups: dict[str, list[PuzzleTag]] = {}
-    tag_usage: dict[int, dict[str, int]] = {}
+    tag_usage = tag_usage_counts(db, tags) if section in {"dashboard", "tags", "tag_detail"} else {}
     for tag in tags:
         tag_groups.setdefault(tag.tag_type or "General", []).append(tag)
-        tag_usage[tag.id] = {
-            "puzzles": len(tag.puzzles),
-            "word_banks": len(tag.word_banks),
-            "words": len(tag.dictionary_words),
-            "definitions": len(tag.dictionary_definitions),
-        }
-        tag_usage[tag.id]["total"] = sum(tag_usage[tag.id].values())
     attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
     if not user.can('activity.view'):
         attempts, progress_rows, photos = [], [], []
-    dictionary_words = db.scalars(select(DictionaryWord).order_by(DictionaryWord.word)).all()
+    dictionary_words = []
+    dictionary_page = list_page
+    dictionary_search = request.query_params.get("q", "").strip()[:80]
+    dictionary_total = 0
+    if section in {"dashboard", "dictionary", "word_bank_detail"}:
+        statement = dictionary_statement(include_properties=section == "word_bank_detail")
+        if section == "dictionary":
+            count_statement = select(func.count(DictionaryWord.id))
+            if dictionary_search:
+                match = DictionaryWord.display_text.icontains(dictionary_search, autoescape=True) | DictionaryWord.word.icontains(dictionary_search, autoescape=True)
+                statement = statement.where(match)
+                count_statement = count_statement.where(match)
+            dictionary_total = db.scalar(count_statement) or 0
+            dictionary_page = min(dictionary_page, max(1, (dictionary_total + 99) // 100))
+            statement = statement.offset((dictionary_page - 1) * 100).limit(100)
+        dictionary_words = db.scalars(statement).all()
     recent_words = db.scalars(select(DictionaryWord).order_by(desc(DictionaryWord.created_at)).limit(8)).all()
     recent_word_banks = db.scalars(select(WordBank).order_by(desc(WordBank.created_at)).limit(8)).all()
     dictionary_import_sources = db.scalars(select(DictionaryImportSource).order_by(DictionaryImportSource.name)).all()
     admin_users = db.scalars(select(User).order_by(User.display_name)).all()
     if not user.can('users.view'):
         admin_users = []
-    dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags)
+    bank_counts = word_bank_entry_counts(db, all_word_banks) if section in {"dashboard", "word_banks"} else {}
+    bank_entries = {selected_word_bank.id: word_bank_entries(db, selected_word_bank, dictionary_words=dictionary_words)} if selected_word_bank is not None else {}
+    dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags, bank_counts, tag_usage) if section == "dashboard" else {}
     return {
         "request": request,
         "current_user": user,
@@ -2799,13 +2838,24 @@ def admin_context(
         "archived_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is not None],
         "all_word_banks": all_word_banks,
         "word_banks": word_banks,
-        "word_bank_texts": {bank.id: word_bank_words(bank) for bank in all_word_banks},
-        "word_bank_entries": {bank.id: word_bank_entries(db, bank) for bank in all_word_banks},
+        "word_bank_texts": {selected_word_bank.id: word_bank_words(selected_word_bank)} if selected_word_bank is not None else {},
+        "word_bank_entries": bank_entries,
+        "word_bank_counts": bank_counts,
+        "dictionary_page": dictionary_page,
+        "dictionary_search": dictionary_search,
+        "dictionary_total": dictionary_total,
+        "dictionary_has_more": dictionary_page * 100 < dictionary_total,
         "categories": categories,
         "tags": tags,
         "assignable_tags": [tag for tag in tags if tag.tag_type != "Clue"],
         "tag_groups": tag_groups,
         "tag_usage": tag_usage,
+        "tag_page": list_page,
+        "tag_search": tag_search,
+        "tag_type_filter": tag_type_filter,
+        "tag_type_counts": tag_type_counts,
+        "tag_total": tag_total,
+        "tag_has_more": list_page * 200 < tag_total,
         "attempts": attempts,
         "progress_rows": progress_rows,
         "photos": photos,

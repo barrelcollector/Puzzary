@@ -543,9 +543,9 @@
               <small>{{ bank.slug }} / {{ word_bank_mode(bank) }}</small>
               {% if bank.archived_at %}<span class="status-pill">Archived</span>{% endif %}
               {% if word_bank_mode(bank) == "automatic" %}
-                <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} matching word/definition entries.</p>
+                <p class="muted">{{ word_bank_counts[bank.id] }} matching word/definition entries.</p>
               {% else %}
-                <p class="muted">{{ word_bank_entries[bank.id] | default([]) | length }} manually selected entries.</p>
+                <p class="muted">{{ word_bank_counts[bank.id] }} manually selected entries.</p>
               {% endif %}
               <div class="action-row">
                 <a class="button-link" href="/admin/word-banks/{{ bank.id }}">Open</a>
@@ -828,6 +828,11 @@
             {% endfor %}
           </div>
         </article>
+        <form method="get" action="/admin/dictionary" class="action-row">
+          <label>Search words <input type="search" name="q" value="{{ dictionary_search }}"></label>
+          <button type="submit" class="ghost-button">Search</button>
+          <span class="muted">{{ dictionary_total }} words</span>
+        </form>
         <div class="admin-list">
           {% for word in dictionary_words %}
             <a class="word-row" href="/admin/dictionary/{{ word.id }}">
@@ -844,9 +849,14 @@
               </span>
             </a>
           {% else %}
-            <p class="muted">No words yet.</p>
+            <p class="muted">No matching words.</p>
           {% endfor %}
         </div>
+        <nav class="action-row" aria-label="Dictionary pages">
+          {% if dictionary_page > 1 %}<a class="ghost-button" href="/admin/dictionary?page={{ dictionary_page - 1 }}&q={{ dictionary_search | urlencode }}">Previous</a>{% endif %}
+          <span class="muted">Page {{ dictionary_page }}</span>
+          {% if dictionary_has_more %}<a class="ghost-button" href="/admin/dictionary?page={{ dictionary_page + 1 }}&q={{ dictionary_search | urlencode }}">Next</a>{% endif %}
+        </nav>
       </section>
     {% endif %}
 
@@ -1000,15 +1010,21 @@
           <hr class="soft-divider">
           <h2>Tag Types</h2>
           <div class="tag-type-list">
-            {% for tag_type, group in tag_groups.items() %}
-              <a href="#tag-type-{{ tag_type | lower | replace(' ', '-') }}">
+            {% for tag_type, count in tag_type_counts.items() | sort %}
+              <a href="/admin/tags?type={{ tag_type | urlencode }}">
                 <strong>{{ tag_type }}</strong>
-                <span>{{ group | length }}</span>
+                <span>{{ count }}</span>
               </a>
             {% endfor %}
           </div>
         </div>
         <div class="tag-groups">
+          <form method="get" action="/admin/tags" class="action-row">
+            <label>Search tags <input type="search" name="q" value="{{ tag_search }}"></label>
+            <label>Type <select name="type"><option value="">All types</option>{% for kind in tag_type_counts | sort %}<option value="{{ kind }}" {% if kind == tag_type_filter %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
+            <button type="submit" class="ghost-button">Search</button>
+            <span class="muted">{{ tag_total }} tags</span>
+          </form>
           {% for tag_type, group in tag_groups.items() %}
             <section class="panel tag-group" id="tag-type-{{ tag_type | lower | replace(' ', '-') }}">
               <div class="section-heading">
@@ -1035,6 +1051,11 @@
               <p class="muted">Add your first tag to start organizing words and puzzle generation.</p>
             </section>
           {% endfor %}
+          <nav class="action-row" aria-label="Tag pages">
+            {% if tag_page > 1 %}<a class="ghost-button" href="/admin/tags?page={{ tag_page - 1 }}&q={{ tag_search | urlencode }}&type={{ tag_type_filter | urlencode }}">Previous</a>{% endif %}
+            <span class="muted">Page {{ tag_page }}</span>
+            {% if tag_has_more %}<a class="ghost-button" href="/admin/tags?page={{ tag_page + 1 }}&q={{ tag_search | urlencode }}&type={{ tag_type_filter | urlencode }}">Next</a>{% endif %}
+          </nav>
           <details class="panel">
             <summary>Optional categories</summary>
             <p class="muted">Categories are still available as one broad grouping for puzzles and word banks.</p>
