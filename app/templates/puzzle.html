@@ -69,7 +69,7 @@
           <li>{{ hint.text }}</li>
         {% endfor %}
       </ol>
-      {% if playable_puzzle_type %}
+      {% if playable_puzzle_type and puzzle_type_definition.supports_solution_reveal %}
         <button type="button" class="ghost-button" id="reveal-solution">Reveal Solution</button>
       {% endif %}
     </details>
@@ -157,4 +157,5 @@
 <script src="/static/sudoku.js?v=7"></script>
 <script src="/static/cross-equations.js?v=7"></script>
 <script src="/static/maze.js?v=3"></script>
+{% if puzzle_type_definition and puzzle_type_definition.play_script %}<script src="/static/{{ puzzle_type_definition.play_script }}"></script>{% endif %}
 {% endblock %}

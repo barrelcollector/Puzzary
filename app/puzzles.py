@@ -78,6 +78,11 @@ class PuzzleType:
     word_bank_fields: tuple[str, ...] = ("word", "definition", "clue", "tags", "properties")
     word_bank_required_fields: tuple[str, ...] = ("word",)
     word_bank_validator: Callable[[dict], list[str]] | None = None
+    play_script: str = ""
+    router: Any = None
+    progress_merger: Callable[[Any, dict, dict], dict] | None = None
+    private_metadata_keys: tuple[str, ...] = ()
+    supports_solution_reveal: bool = True
 
 
 def fallback_preview(kind: str, label: str) -> dict:

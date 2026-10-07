@@ -2579,3 +2579,28 @@ summary {
 .import-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 18px; }
 .import-summary dd { margin: 6px 0; font-size: 24px; font-weight: 700; }
 @media (max-width: 480px) { .import-steps { gap: 0; } .import-steps li { padding: 8px; font-size: 14px; } .import-fields { grid-template-columns: minmax(0, 1fr); } }
+.spell-navigation { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+.spell-navigation button { min-width: 38px; height: 38px; padding: 4px; }
+.spell-navigation [aria-current="step"] { outline: 2px solid #19776a; outline-offset: 2px; }
+.spell-navigation .correct { background: #d7eee4; color: #145b45; }
+.spell-slots { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 18px 0; }
+.spell-slot { flex: 0 0 34px; width: 34px; height: 42px; min-width: 0; padding: 0; text-align: center; border: 1px solid #777; border-radius: 2px; background: white; color: #111; font-size: 20px; font-weight: 700; box-sizing: border-box; }
+input.spell-slot { width: 34px; margin: 0; }
+.spell-slot.given { display: inline-flex; align-items: center; justify-content: center; background: #eee; }
+.spell-slot.space { border: 0; background: transparent; flex-basis: 14px; width: 14px; }
+.spell-slot[readonly] { background: #e1eee8; }
+.spell-definition, .spell-status { overflow-wrap: anywhere; }
+.spell-letter-bank { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0; }
+.spell-bank-tile { width: 40px; height: 40px; min-width: 0; padding: 0; font-weight: 700; }
+.spell-bank-tile:disabled { opacity: .3; }
+.spell-editor-entry { border-bottom: 1px solid #ccc; padding: 16px 0; }
+.spell-editor-entry h3 { margin: 0; }
+.spell-icon, .spell-drag { width: 36px; height: 36px; padding: 7px; display: inline-flex; align-items: center; justify-content: center; }
+.spell-icon img, .spell-drag img { width: 20px; height: 20px; }
+.spell-position { max-width: 65px; }
+.level-editor[data-level-editor="spell_it"] { grid-template-columns: minmax(120px,180px) minmax(0,1fr); }
+.level-editor[data-level-editor="spell_it"] .level-properties { display: none; }
+.spell-print-entry { break-inside: avoid; margin-bottom: 24px; }
+.spell-print-bank span { display: inline-block; margin-right: 5px; }
+@media(max-width:700px) { .level-editor[data-level-editor="spell_it"] { grid-template-columns: minmax(0,1fr); } }
+@media print { .spell-slot { font-size: 14px; width: 24px; flex-basis: 24px; height: 30px; } }

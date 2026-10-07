@@ -101,6 +101,9 @@ from app.permission_admin import router as permission_router
 app.include_router(permission_router)
 from app.word_bank_admin import router as word_bank_router
 app.include_router(word_bank_router)
+for plugin in list_puzzle_types():
+    if plugin.router is not None:
+        app.include_router(plugin.router)
 
 DICTIONARY_SYNC_CHECK_SECONDS = 15 * 60
 
@@ -393,6 +396,8 @@ def print_layout_context(puzzle: Puzzle, puzzle_type, db: Session | None = None)
 
 
 def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary:
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    private_keys = plugin.private_metadata_keys if plugin else ()
     return PuzzleSummary(
         id=puzzle.id,
         puzzle_type=puzzle.puzzle_type,
@@ -402,7 +407,7 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         url=puzzle_url(puzzle.id, db),
         print_payload=puzzle.print_payload,
         play_payload=puzzle.play_payload,
-        metadata=puzzle.puzzle_metadata or {},
+        metadata={key: value for key, value in (puzzle.puzzle_metadata or {}).items() if key not in private_keys},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
     )
 
@@ -1321,6 +1326,7 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "generation_fields": [serialize_generation_field(field) for field in puzzle_type.generation_fields],
         "manual_editor_fields": [serialize_generation_field(field) for field in puzzle_type.manual_editor_fields],
         "manual_editor_script": puzzle_type.manual_editor_script,
+        "play_script": puzzle_type.play_script,
         "supports_manual_editor": puzzle_type.manual_builder is not None,
         "print_layout": puzzle_type.print_layout.as_dict(),
         "templates": {
@@ -5101,15 +5107,19 @@ def save_progress(
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    if puzzle_type is None:
+        raise HTTPException(status_code=400, detail="Unsupported puzzle type")
+    if puzzle_type.progress_merger:
+        db.scalar(select(User).where(User.id == user.id).with_for_update())
     progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
     if progress is None:
         progress = PuzzleProgress(puzzle_id=puzzle_id, user_id=user.id, progress_payload={})
         db.add(progress)
-    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
-    if puzzle_type is None:
-        raise HTTPException(status_code=400, detail="Unsupported puzzle type")
-    progress.progress_payload = puzzle_type.progress_normalizer(payload, puzzle.solution_payload)
+    progress.progress_payload = (
+        puzzle_type.progress_merger(payload, puzzle.solution_payload, progress.progress_payload or {})
+        if puzzle_type.progress_merger else puzzle_type.progress_normalizer(payload, puzzle.solution_payload)
+    )
     db.commit()
     db.refresh(progress)
     return progress_response(puzzle, user, progress)
@@ -5189,6 +5199,9 @@ def reset_user_puzzle(puzzle_id: str, user_id: int, db: Session) -> Puzzle:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    if plugin and plugin.progress_merger:
+        db.scalar(select(User).where(User.id == user_id).with_for_update())
     progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user_id))
     if progress is not None:
         db.delete(progress)
