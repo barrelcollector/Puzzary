@@ -109,10 +109,10 @@ def count_progress(progress, solution):
     # Unmarked white squares may remain blank, but an incorrect fill or X cannot complete a puzzle.
     complete = all(answers.get(f"{x},{y}", "0") == str(value)
                    for y, row in enumerate(grid) for x, value in enumerate(row))
-    matched = sum(answers.get(f"{x},{y}") == str(value)
-                  for y, row in enumerate(grid) for x, value in enumerate(row))
     total = len(grid) ** 2
-    return total if complete else matched, total
+    filled = sum(1 for y, row in enumerate(grid) for x, _value in enumerate(row)
+                 if answers.get(f"{x},{y}") in ("0", "1"))
+    return total if complete else min(filled, max(0, total - 1)), total
 
 
 def check_answer(answer, solution):

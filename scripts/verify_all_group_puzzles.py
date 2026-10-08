@@ -6,6 +6,7 @@ os.environ['UPLOAD_DIR'] = '/tmp/all-groups-qa-uploads'
 import base64
 import json
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -48,8 +49,8 @@ def cookie(uid):
     return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id': uid, 'session_version': 1}).encode())).decode()
 
 base = 'http://127.0.0.1:8792'
-artifacts = Path('/app/qa-artifacts')
-artifacts.mkdir(exist_ok=True)
+artifacts = Path(os.environ.get('QA_ARTIFACT_DIR', Path(tempfile.gettempdir()) / 'puzzary-qa-artifacts'))
+artifacts.mkdir(parents=True, exist_ok=True)
 server = subprocess.Popen(['uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8792'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     with sync_playwright() as p:

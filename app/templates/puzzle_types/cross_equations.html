@@ -3,16 +3,15 @@
   class="cross-equations-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-answers='{{ progress_answers | tojson }}'
-  data-solution='{{ puzzle.solution_payload.answers | tojson }}'
-  data-equations='{{ puzzle.play_payload.equations | tojson }}'
-  data-value-max="{{ puzzle.play_payload.settings.result_max | default(9) }}"
-  data-grid-size="{{ puzzle.play_payload.settings.grid_size | default(3) }}"
+  data-equations='{{ play_payload.equations | tojson }}'
+  data-value-max="{{ play_payload.settings.result_max | default(9) }}"
+  data-grid-size="{{ play_payload.settings.grid_size | default(3) }}"
 >
   <div
     class="cross-equations-grid"
-    style="--cross-equations-size: {{ puzzle.play_payload.settings.rendered_size | default(puzzle.play_payload.cells | length) }}; --cross-equations-cell: {% if puzzle.play_payload.settings.grid_size | default(3) >= 5 %}44px{% elif puzzle.play_payload.settings.grid_size | default(3) >= 4 %}52px{% else %}62px{% endif %}"
+    style="--cross-equations-size: {{ play_payload.settings.rendered_size | default(play_payload.cells | length) }}; --cross-equations-cell: {% if play_payload.settings.grid_size | default(3) >= 5 %}44px{% elif play_payload.settings.grid_size | default(3) >= 4 %}52px{% else %}62px{% endif %}"
   >
-    {% for row in puzzle.play_payload.cells %}
+    {% for row in play_payload.cells %}
       {% for cell in row %}
         {% if cell.type == "number" %}
           <label class="cross-equations-cell number-cell {% if cell.given %}given{% endif %}" data-key="{{ cell.key }}">
@@ -43,7 +42,7 @@
   <section class="equation-list">
     <h2>Equations</h2>
     <div>
-      {% for equation in puzzle.play_payload.equations %}
+      {% for equation in play_payload.equations %}
         <span>{{ equation.label }}</span>
       {% endfor %}
     </div>

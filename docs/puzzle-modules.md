@@ -141,10 +141,12 @@ Supported manual field types are the generation field types plus `textarea`.
 
 Use separate payloads for separate audiences:
 
-- `play_payload`: browser interaction state, with no hidden answers unless the game intentionally needs them client-side.
+- `play_payload`: public browser interaction state. It must never contain hidden answers, placements, solution coordinates, or other data that can reconstruct the answer. Intentional givens belong here.
 - `print_payload`: stable paper layout data for `/puzzles/{id}/print` and `/puzzles/{id}/print/render`.
-- `solution_payload`: answer key, placements, reveal data, and admin-only solution details.
+- `solution_payload`: server-only answer key, placements, reveal data, and admin-only solution details. Player templates, page source, and ordinary puzzle API responses must not serialize it.
 - `metadata`: generation settings, seed, source references, and module-specific notes.
+
+Interactive checks, hints, and reveals must use the module's server-side `collaboration` action handler. Normal checks may report completion, but must not return per-cell correctness or partial match counts. Explicit hint and reveal actions may return only the answer material the player requested. Public puzzle rules, such as a duplicate in a Sudoku row, may still be validated in the browser because they do not require the stored solution.
 
 ## Templates
 

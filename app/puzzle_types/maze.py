@@ -219,10 +219,7 @@ def trace_is_complete(path: list[dict[str, int]], solution_payload: dict) -> boo
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     payload = parse_answer(answer)
     path = normalize_trace_path(payload.get("path", []))
-    completed = (
-        str(payload.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
-        or trace_is_complete(path, solution_payload)
-    )
+    completed = trace_is_complete(path, solution_payload)
     return completed, 1, 1 if completed else 0
 
 
@@ -231,10 +228,7 @@ def normalize_progress(payload: Any, solution_payload: dict) -> dict:
     path = normalize_trace_path(raw_answers.get("path", []))
     if path and not trace_is_valid(path, solution_payload):
         path = []
-    completed = (
-        str(raw_answers.get("completed", "")).lower() in {"true", "yes", "1", "done", "complete", "solved"}
-        or trace_is_complete(path, solution_payload)
-    )
+    completed = trace_is_complete(path, solution_payload)
     return {
         "answers": {
             "completed": "true" if completed else "",

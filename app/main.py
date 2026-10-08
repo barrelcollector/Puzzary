@@ -12,6 +12,7 @@ import hmac
 import math
 import secrets
 import time
+from copy import deepcopy
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -72,6 +73,7 @@ from app.schemas import (
     PuzzleGenerateRequest,
     PuzzleProgressResponse,
     PuzzleProgressUpdate,
+    PuzzlePlayAction,
     PuzzleImportRequest,
     PuzzleManualWrite,
     PuzzlePrintPreview,
@@ -407,10 +409,29 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         difficulty=puzzle.difficulty,
         url=puzzle_url(puzzle.id, db),
         print_payload=puzzle.print_payload,
-        play_payload=puzzle.play_payload,
+        play_payload=public_play_payload(puzzle),
         metadata={key: value for key, value in (puzzle.puzzle_metadata or {}).items() if key not in private_keys},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
     )
+
+
+def public_play_payload(puzzle: Puzzle) -> dict:
+    """Return only data that is safe to expose to an ordinary player."""
+    payload = deepcopy(puzzle.play_payload or {})
+    if puzzle.puzzle_type == "crossword":
+        payload["grid"] = [
+            [
+                {"open": bool(cell.get("open", cell.get("letter"))), "number": cell.get("number", "")}
+                for cell in row
+            ]
+            for row in payload.get("grid", [])
+        ]
+        payload["clues"] = [
+            {key: value for key, value in clue.items() if key != "answer"}
+            for clue in payload.get("clues", [])
+        ]
+        payload["gimmes"] = deepcopy((puzzle.solution_payload or {}).get("gimmes", {}))
+    return payload
 
 
 def portable_puzzle_item(puzzle: Puzzle, db: Session | None = None) -> dict:
@@ -4179,6 +4200,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
         {
             "request": request,
             "puzzle": puzzle,
+            "play_payload": public_play_payload(puzzle),
             "users": users,
             "attempts": attempts,
             "photos": photos,
@@ -5177,6 +5199,46 @@ def save_progress(
     return progress_response(puzzle, user, progress)
 
 
+@app.post("/api/puzzles/{puzzle_id}/actions")
+def play_action(
+    puzzle_id: str,
+    payload: PuzzlePlayAction,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_api_user(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    if puzzle_type is None or puzzle_type.collaboration is None:
+        raise HTTPException(status_code=400, detail="This puzzle does not support server-side play actions")
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
+    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
+    if progress is None:
+        progress = PuzzleProgress(puzzle_id=puzzle_id, user_id=user.id, progress_payload={})
+        db.add(progress)
+    state = deepcopy(progress.progress_payload or {})
+    try:
+        if payload.changes:
+            state = puzzle_type.collaboration(
+                state,
+                {"kind": "patch", "changes": payload.changes, "target": ""},
+                puzzle.solution_payload,
+            )
+        if payload.kind != "patch":
+            state = puzzle_type.collaboration(
+                state,
+                {"kind": payload.kind, "changes": {}, "target": payload.target},
+                puzzle.solution_payload,
+            )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    progress.progress_payload = state
+    db.commit()
+    return state
+
+
 @app.post("/api/puzzles/{puzzle_id}/reset", response_model=PuzzleProgressResponse)
 def reset_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleProgressResponse:
     user = require_api_user(request, db)
@@ -5226,8 +5288,10 @@ def submit_puzzle_attempt(
     return PuzzleAttemptResponse(
         is_correct=is_correct,
         message="Correct." if is_correct else "Not quite. Try again.",
-        expected_count=expected_count,
-        matched_count=matched_count,
+        # Playable puzzle modules use their dedicated server-side actions.
+        # Returning partial match counts here creates a generic probing oracle.
+        expected_count=None if puzzle_type.supports_web_play else expected_count,
+        matched_count=None if puzzle_type.supports_web_play else matched_count,
     )
 
 

@@ -115,8 +115,10 @@ def normalize_progress(payload, solution):
 def count_progress(progress, solution):
     answers = {**answers_from(progress,solution),**solution.get('givens',{})}
     grid = solution.get('grid',[])
-    matched = sum(answers.get(f'{x},{y}') == str(v) for y,row in enumerate(grid) for x,v in enumerate(row))
-    return matched,len(grid)**2
+    total = len(grid)**2
+    complete = total > 0 and all(answers.get(f'{x},{y}') == str(v) for y,row in enumerate(grid) for x,v in enumerate(row))
+    filled = sum(1 for y,row in enumerate(grid) for x,_v in enumerate(row) if answers.get(f'{x},{y}') in ('0','1'))
+    return (total if complete else min(filled,max(0,total-1))),total
 
 
 def check_answer(answer, solution):

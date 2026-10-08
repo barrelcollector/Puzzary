@@ -266,7 +266,7 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
         gimme_cells = {}
     answers = {**answers, **gimme_cells}
     expected_count = sum(1 for row in solution_payload.get("grid", []) for cell in row if cell)
-    found_count = 0
+    correct = 0
     for key, value in answers.items():
         try:
             x_text, y_text = str(key).split(",", 1)
@@ -276,8 +276,11 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
             continue
         grid = solution_payload.get("grid", [])
         if 0 <= y < len(grid) and 0 <= x < len(grid[y]) and str(grid[y][x]).upper() == str(value).upper():
-            found_count += 1
-    return found_count, expected_count
+            correct += 1
+    filled = sum(1 for key, value in answers.items() if value and key not in gimme_cells)
+    filled += len(gimme_cells)
+    complete = expected_count > 0 and correct == expected_count
+    return (expected_count if complete else min(filled, max(0, expected_count - 1))), expected_count
 
 
 def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:

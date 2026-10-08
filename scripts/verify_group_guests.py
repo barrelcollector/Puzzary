@@ -1,5 +1,6 @@
 """Guest browser/API regression checks, invoked against isolated Group Solve QA."""
 import json
+import time
 import uuid
 
 from websockets.sync.client import connect
@@ -22,8 +23,12 @@ def verify_guests(browser, base, host, player, host_id):
     hp.locator('#group-host > summary').click()
     hp.locator('#group-settings [name=allow_guests]').check()
     hp.locator('#group-settings button[type=submit]').click()
-    hp.wait_for_function("document.querySelector('#group-message').textContent==='Session settings saved.'")
-    assert host.request.get(endpoint).json()['allow_guests']
+    for _ in range(50):
+        if host.request.get(endpoint).json()['allow_guests']:
+            break
+        time.sleep(.1)
+    else:
+        raise AssertionError(hp.locator('#group-message').inner_text())
     page.goto(base + info['url'])
     page.locator('#guest-join [name=name]').fill('QA guest')
     page.locator('#guest-join button').click()

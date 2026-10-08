@@ -270,7 +270,7 @@
     if (data.closed) renderPresence([]);
     setText(panel.querySelector('#group-code'),data.code);
     let summary = data.closed ? 'Session closed. Shared progress is preserved.' :
-      data.completed ? 'Group puzzle complete.' : `${data.found_count} of ${data.expected_count} correct. Shared progress.`;
+      data.completed ? 'Group puzzle complete.' : `${data.found_count} of ${data.expected_count} filled. Shared progress.`;
     if (notice) summary = `${notice} ${summary}`;
     setText(status,summary);
     if (ready && data.completed && !lastCompleted) window.PuzzaryCelebrate?.complete();

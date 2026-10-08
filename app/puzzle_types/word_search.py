@@ -146,6 +146,7 @@ def collaboration(progress, action, solution):
     elif kind not in ('check', 'hint', 'reveal'):
         raise ValueError('Unsupported action')
     found = set(result.get('found_words', [])) | set(solution.get('gimmes', {}).get('words', []))
+    confirmed = set(result.get('confirmed_selections', []))
     pending = {k: coordinates(k) for k, v in answers.items() if v == 'pending'}
     matched = set()
     auto = solution.get('settings', {}).get('auto_confirm', True)
@@ -162,14 +163,23 @@ def collaboration(progress, action, solution):
                 found.add(word)
                 matched.update(k for k, coords in candidates.items() if coords <= cells)
         for key in pending:
-            if key in matched: answers.pop(key, None)
+            if key in matched:
+                answers.pop(key, None)
+                confirmed.add(key)
             elif kind == 'check' or auto: answers[key] = 'wrong'
-    if kind == 'reveal': found.update(solution['words'])
+    if kind == 'reveal':
+        found.update(solution['words'])
+        for placement in solution['placements']:
+            x, y = placement['start']; dx, dy = placement['direction']; length = len(placement['word'])
+            first, last = f'{x},{y}', f'{x + dx * (length - 1)},{y + dy * (length - 1)}'
+            ends = sorted((first, last))
+            confirmed.add(f'guess:{ends[0]}:{ends[1]}')
     if kind == 'hint':
         word = next((w for w in solution['words'] if w not in found), None)
         if word: found.add(word)
     result['answers'] = answers
     result['found_words'] = sorted(found)
+    result['confirmed_selections'] = sorted(confirmed)
     return result
 
 

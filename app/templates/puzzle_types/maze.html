@@ -3,15 +3,15 @@
   class="maze-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-completed="{{ 'true' if progress_answers.completed | default('') == 'true' else 'false' }}"
-  data-grid='{{ puzzle.play_payload.grid | tojson }}'
-  data-width="{{ puzzle.play_payload.settings.width | default(10) }}"
-  data-height="{{ puzzle.play_payload.settings.height | default(10) }}"
-  data-cell-size="{{ puzzle.play_payload.settings.cell_size | default(24) }}"
+  data-grid='{{ play_payload.grid | tojson }}'
+  data-width="{{ play_payload.settings.width | default(10) }}"
+  data-height="{{ play_payload.settings.height | default(10) }}"
+  data-cell-size="{{ play_payload.settings.cell_size | default(24) }}"
   data-path='{{ progress_answers.path | default("[]") }}'
 >
-  {% set cell = puzzle.play_payload.settings.cell_size | default(24) %}
-  {% set width = puzzle.play_payload.settings.width | default(10) %}
-  {% set height = puzzle.play_payload.settings.height | default(10) %}
+  {% set cell = play_payload.settings.cell_size | default(24) %}
+  {% set width = play_payload.settings.width | default(10) %}
+  {% set height = play_payload.settings.height | default(10) %}
   <svg
     class="maze-board"
     viewBox="0 0 {{ width * cell }} {{ height * cell }}"
@@ -20,7 +20,7 @@
   >
     <rect class="maze-paper" x="0" y="0" width="{{ width * cell }}" height="{{ height * cell }}"></rect>
     <polyline class="maze-trace-path" points=""></polyline>
-    {% for row in puzzle.play_payload.grid %}
+    {% for row in play_payload.grid %}
       {% for maze_cell in row %}
         {% set x = maze_cell.x * cell %}
         {% set y = maze_cell.y * cell %}

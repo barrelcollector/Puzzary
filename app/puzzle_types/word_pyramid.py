@@ -294,11 +294,16 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     if not isinstance(answers, dict):
         answers = {}
     rows = solution_payload.get("rows", [])
-    found = 0
+    correct = 0
+    filled = 0
     for index, row in enumerate(rows):
-        if row.get("gimme") or normalize_word(answers.get(str(index), "")) == str(row.get("answer", "")).upper():
-            found += 1
-    return found, len(rows)
+        value = normalize_word(answers.get(str(index), ""))
+        if row.get("gimme") or value == str(row.get("answer", "")).upper():
+            correct += 1
+        if row.get("gimme") or len(value) == len(str(row.get("answer", ""))):
+            filled += 1
+    total = len(rows)
+    return (total if total > 0 and correct == total else min(filled, max(0, total - 1))), total
 
 
 def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:

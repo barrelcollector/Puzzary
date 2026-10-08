@@ -45,7 +45,7 @@ def cookie(user_id):
     return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':user_id,'session_version':1}).encode())).decode()
 
 base='http://127.0.0.1:8791'
-server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8791'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8791'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 try:
     with sync_playwright() as p:
         browser=p.chromium.launch()
@@ -374,18 +374,18 @@ try:
                 changed=page2.locator(f'.puzzle-layout input[data-key="{key}"]')
                 if changed.input_value()!=expected:
                     changed.fill(expected); changed.dispatch_event('input')
-                page1.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key)
-                try:
-                    page2.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("correct")',arg=key,timeout=5000)
-                except Exception as error:
-                    raise AssertionError((kind,key,expected,changed.input_value(),host.request.get(endpoint2).json()['state'],page2.locator('#group-status').inner_text())) from error
+                page1.wait_for_timeout(400)
+                assert host.request.get(endpoint2).json()['state'].get('incorrect',[]) == [], 'Server state must not expose wrong cells'
+                for page in [page1,page2]:
+                    cell=page.locator(f'.puzzle-layout input[data-key="{key}"]')
+                    assert not cell.evaluate('(e)=>e.parentElement.classList.contains("correct")'), 'Edits must not expose correct guesses'
                 wrong='Z' if kind=='crossword' else '1' if expected!='1' else '2'
                 changed.fill(wrong); changed.dispatch_event('input')
-                try:
-                    page1.wait_for_function('(key)=>document.querySelector(`.puzzle-layout input[data-key="${key}"]`).parentElement.classList.contains("incorrect")',arg=key,timeout=5000)
-                except Exception as error:
-                    raise AssertionError((kind,expected,wrong,host.request.get(endpoint2).json()['state'],page2.locator('#group-status').inner_text())) from error
-                assert not editable_cell.evaluate('(e)=>e.parentElement.classList.contains("correct")')
+                page1.wait_for_timeout(400)
+                assert host.request.get(endpoint2).json()['state'].get('incorrect',[]) == [], 'Server state must not expose wrong cells'
+                for page in [page1,page2]:
+                    cell=page.locator(f'.puzzle-layout input[data-key="{key}"]')
+                    assert not cell.evaluate('(e)=>e.parentElement.classList.contains("correct")')
             page1.get_by_text('Hints',exact=True).click(); page1.locator('#reveal-solution').click()
             page2.wait_for_function("document.querySelector('#group-status').textContent==='Group puzzle complete.'")
             assert host.request.get(endpoint2).json()['completed']

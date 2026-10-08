@@ -3,24 +3,23 @@
   class="sudoku-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   data-answers='{{ progress_answers | tojson }}'
-  data-solution='{{ puzzle.solution_payload.grid | tojson }}'
-  data-size="{{ puzzle.play_payload.settings.grid_size | default(9) }}"
-  data-box-rows="{{ puzzle.play_payload.settings.box_rows | default(3) }}"
-  data-box-cols="{{ puzzle.play_payload.settings.box_cols | default(3) }}"
-  data-check-mode="{{ puzzle.play_payload.settings.check_mode | default('check_puzzle') }}"
+  data-size="{{ play_payload.settings.grid_size | default(9) }}"
+  data-box-rows="{{ play_payload.settings.box_rows | default(3) }}"
+  data-box-cols="{{ play_payload.settings.box_cols | default(3) }}"
+  data-check-mode="{{ play_payload.settings.check_mode | default('check_puzzle') }}"
 >
   <div
     class="sudoku-grid"
-    style="--sudoku-size: {{ puzzle.play_payload.settings.grid_size | default(9) }}; --box-rows: {{ puzzle.play_payload.settings.box_rows | default(3) }}; --box-cols: {{ puzzle.play_payload.settings.box_cols | default(3) }}"
+    style="--sudoku-size: {{ play_payload.settings.grid_size | default(9) }}; --box-rows: {{ play_payload.settings.box_rows | default(3) }}; --box-cols: {{ play_payload.settings.box_cols | default(3) }}"
   >
-    {% for row in puzzle.play_payload.grid %}
+    {% for row in play_payload.grid %}
       {% set y = loop.index0 %}
       {% for value in row %}
         {% set x = loop.index0 %}
         {% set cell_key = x ~ ',' ~ y %}
-        {% set box_cols = puzzle.play_payload.settings.box_cols | default(3) %}
-        {% set box_rows = puzzle.play_payload.settings.box_rows | default(3) %}
-        {% set size = puzzle.play_payload.settings.grid_size | default(9) %}
+        {% set box_cols = play_payload.settings.box_cols | default(3) %}
+        {% set box_rows = play_payload.settings.box_rows | default(3) %}
+        {% set size = play_payload.settings.grid_size | default(9) %}
         <label
           class="sudoku-cell"
           data-x="{{ x }}"
@@ -41,7 +40,7 @@
       {% endfor %}
     {% endfor %}
   </div>
-  <p class="muted" id="sudoku-status">Fill the grid with digits 1 through {{ puzzle.play_payload.settings.grid_size | default(9) }}.</p>
+  <p class="muted" id="sudoku-status">Fill the grid with digits 1 through {{ play_payload.settings.grid_size | default(9) }}.</p>
   <div class="action-row">
     <button type="button" class="ghost-button" id="sudoku-check">Check</button>
     <button type="button" class="ghost-button" id="sudoku-clear">Clear Grid</button>

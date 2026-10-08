@@ -11,17 +11,11 @@
   const checkEntryButtons = Array.from(document.querySelectorAll(".check-entry"));
   const moreClueButtons = Array.from(document.querySelectorAll(".more-clue"));
   const progressUrl = root.dataset.progressUrl;
-  let solution = [];
+  const remote = window.PuzzaryGroup || window.PuzzarySolo;
   let entries = [];
   let settings = {};
   let saveTimer = null;
   let activeEntry = null;
-
-  try {
-    solution = JSON.parse(root.dataset.solution || "[]");
-  } catch (_error) {
-    solution = [];
-  }
 
   try {
     entries = JSON.parse(root.dataset.entries || "[]");
@@ -42,9 +36,8 @@
   entries.forEach((entry) => {
     const dx = entry.direction === "across" ? 1 : 0;
     const dy = entry.direction === "down" ? 1 : 0;
-    const answer = String(entry.answer || "");
     const keys = [];
-    for (let index = 0; index < answer.length; index += 1) {
+    for (let index = 0; index < Number(entry.length || 0); index += 1) {
       const key = `${Number(entry.x) + dx * index},${Number(entry.y) + dy * index}`;
       keys.push(key);
       const list = entriesByCell.get(key) || [];
@@ -53,11 +46,6 @@
     }
     cellsByEntry.set(entryId(entry), keys);
   });
-  const progressSounds = window.PuzzarySounds?.createProgressTracker(
-    () => entries.filter(entry => entryValues(entry).join("") === String(entry.answer || "").toUpperCase()).map(entryId),
-    () => inputs.length > 0 && inputs.every(input => input.value.trim().toUpperCase() === expectedFor(input))
-  );
-
   function currentAnswers() {
     const answers = {};
     inputs.forEach((input) => {
@@ -84,7 +72,7 @@
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveProgress, 250);
   }
-  window.PuzzaryGroup?.register({presence() {
+  remote?.register({presence() {
     return {entry: activeEntry && root.contains(document.activeElement) ? cellsByEntry.get(entryId(activeEntry)) || [] : []};
   }, read() {
     return Object.fromEntries(inputs.filter(input => !input.disabled && input.value.trim())
@@ -95,11 +83,10 @@
       if (!input.disabled && input.value !== value) input.value = value;
       input.closest('.crossword-cell').classList.toggle('incorrect',(state.incorrect || []).includes(input.dataset.key));
     });
-    const highlighted = new Set(settings.auto_highlight_correct ? entries.filter(entry => entryValues(entry).join('') === String(entry.answer || '').toUpperCase())
-      .flatMap(entry => cellsByEntry.get(entryId(entry)) || []) : []);
-    inputs.forEach(input => input.closest('.crossword-cell').classList.toggle('correct',
-      !!input.value && input.value === expectedFor(input) && !!(state.checked || state.revealed || (state.checked_keys || []).includes(input.dataset.key) || highlighted.has(input.dataset.key))));
-    progressSounds?.sync();
+    inputs.forEach(input => input.closest('.crossword-cell').classList.toggle('correct',!!state.revealed));
+    if (state.revealed) status.textContent = 'Solution revealed. Reset the puzzle to start over.';
+    else if (state.completed) { status.textContent = 'Crossword complete.'; window.PuzzaryCelebrate?.complete(); }
+    else if (state.checked) status.textContent = 'The crossword is not complete yet.';
     moreClueButtons.forEach(button => {
       const count = state.clues?.[`${button.dataset.entryNumber}:${button.dataset.entryDirection}`] || 0;
       const list = button.nextElementSibling, steps = [...list.querySelectorAll('li')];
@@ -109,39 +96,8 @@
     });
   }});
 
-  function expectedFor(input) {
-    const [xText, yText] = input.dataset.key.split(",");
-    const x = Number(xText);
-    const y = Number(yText);
-    return solution[y] && solution[y][x] ? String(solution[y][x]).toUpperCase() : "";
-  }
-
   function checkGrid() {
-    progressSounds?.check();
-    let filled = 0;
-    let correct = 0;
-    inputs.forEach((input) => {
-      const cell = input.closest(".crossword-cell");
-      const value = input.value.trim().toUpperCase();
-      const expected = expectedFor(input);
-      cell.classList.remove("correct", "incorrect");
-      if (!value) return;
-      filled += 1;
-      if (value === expected) {
-        correct += 1;
-        cell.classList.add("correct");
-      } else {
-        cell.classList.add("incorrect");
-      }
-    });
-    if (status) {
-      status.textContent = correct === inputs.length
-        ? "Crossword complete."
-        : `${correct} of ${inputs.length} letters correct.`;
-    }
-    if (inputs.length > 0 && correct === inputs.length && window.PuzzaryCelebrate) {
-      window.PuzzaryCelebrate.complete();
-    }
+    remote?.action('check');
   }
 
   function entryValues(entry) {
@@ -153,76 +109,19 @@
   }
 
   function checkEntry(entry) {
-    progressSounds?.check([entryId(entry)]);
-    const keys = cellsByEntry.get(entryId(entry)) || [];
-    const expected = String(entry.answer || "").toUpperCase();
-    const values = entryValues(entry);
-    const filled = values.every(Boolean);
-    const correct = values.join("") === expected;
-    keys.forEach((key, index) => {
-      const input = inputsByKey.get(key);
-      if (!input) return;
-      const cell = input.closest(".crossword-cell");
-      cell.classList.remove("correct", "incorrect");
-      if (!values[index]) return;
-      cell.classList.add(correct ? "correct" : "incorrect");
-    });
-    if (status) {
-      status.textContent = correct
-        ? `${entry.number} ${entry.direction} is correct.`
-        : filled
-          ? `${entry.number} ${entry.direction} needs another look.`
-          : `${entry.number} ${entry.direction} is not filled yet.`;
-    }
-    return correct;
+    return remote?.action('check_entry',entryId(entry));
   }
 
   function autoHighlightEntries() {
-    if (!settings.auto_highlight_correct) return;
-    progressSounds?.check();
-    entries.forEach((entry) => {
-      const expected = String(entry.answer || "").toUpperCase();
-      const values = entryValues(entry);
-      if (values.every(Boolean) && values.join("") === expected) {
-        (cellsByEntry.get(entryId(entry)) || []).forEach((key) => {
-          const input = inputsByKey.get(key);
-          if (input) input.closest(".crossword-cell").classList.add("correct");
-        });
-      }
-    });
+    return;
   }
 
   function revealSolution() {
-    inputs.forEach((input) => {
-      input.value = expectedFor(input);
-      input.closest(".crossword-cell").classList.remove("incorrect");
-      input.closest(".crossword-cell").classList.add("correct");
-    });
-    if (status) status.textContent = "Solution revealed. Reset the puzzle to start over.";
-    progressSounds?.sync();
-    saveProgress();
+    remote?.action('reveal');
   }
 
   function revealEntry(entry) {
-    const keys = cellsByEntry.get(entryId(entry)) || [];
-    const revealMode = settings.reveal_mode || "word";
-    const targetKeys = revealMode === "letter"
-      ? keys.filter((key) => {
-          const input = inputsByKey.get(key);
-          return input && !input.value.trim();
-        }).slice(0, 1)
-      : keys;
-    targetKeys.forEach((key) => {
-      const input = inputsByKey.get(key);
-      if (!input) return;
-      const index = keys.indexOf(key);
-      input.value = String(entry.answer || "")[index] || expectedFor(input);
-      input.closest(".crossword-cell").classList.remove("incorrect");
-      input.closest(".crossword-cell").classList.add("correct");
-    });
-    if (status) status.textContent = revealMode === "letter" ? `One letter revealed for ${entry.number} ${entry.direction}.` : `${entry.number} ${entry.direction} revealed.`;
-    progressSounds?.sync();
-    saveProgress();
+    remote?.action('reveal_entry',entryId(entry));
   }
 
   function entryContainsInput(entry, input) {
@@ -279,7 +178,6 @@
     if (input.disabled) return;
     input.value = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     input.closest(".crossword-cell").classList.remove("correct", "incorrect");
-    progressSounds?.invalidate();
     queueSave();
     window.setTimeout(autoHighlightEntries, 0);
   }
@@ -346,7 +244,6 @@
         input.closest(".crossword-cell").classList.remove("correct", "incorrect");
       });
       if (status) status.textContent = "Grid cleared.";
-      progressSounds?.sync();
       saveProgress();
     });
   }
@@ -377,6 +274,7 @@
 
   moreClueButtons.forEach((button) => {
     button.addEventListener("click", () => {
+      if (remote) { remote.action('clue',`${button.dataset.entryNumber}:${button.dataset.entryDirection}`); return; }
       const list = button.nextElementSibling;
       if (!list || !list.classList.contains("clue-steps")) return;
       const hiddenSteps = Array.from(list.querySelectorAll("li[hidden]"));

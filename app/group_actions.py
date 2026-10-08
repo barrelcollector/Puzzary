@@ -97,6 +97,11 @@ def cell_collaboration(normalizer):
             raise ValueError('Checking is disabled for this puzzle')
         state['answers'] = answers
         if kind == 'check': state['checked'] = True
-        state['incorrect'] = [k for k, v in answers.items() if expected.get(k) != v and (state.get('checked') or k in state.get('checked_keys', []))]
+        # Never return solution-comparison results for individual cells.  They
+        # turn the action endpoint into an answer oracle.  Rule conflicts are
+        # computed from public board rules by each browser; the server only
+        # confirms full completion or performs an explicit reveal/hint.
+        state['incorrect'] = []
+        state['completed'] = bool(editable) and all(answers.get(k) == v for k, v in editable.items())
         return state
     return apply

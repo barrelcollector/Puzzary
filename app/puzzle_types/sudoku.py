@@ -256,8 +256,10 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     if not isinstance(supplied, dict):
         supplied = {}
     combined = {**givens, **{str(key): str(value) for key, value in supplied.items()}}
-    matched = sum(1 for key, value in expected.items() if combined.get(key) == value)
-    return matched, len(expected)
+    total = len(expected)
+    complete = total > 0 and all(combined.get(key) == value for key, value in expected.items())
+    filled = sum(1 for key in expected if combined.get(key))
+    return (total if complete else min(filled, max(0, total - 1))), total
 
 
 def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> dict:

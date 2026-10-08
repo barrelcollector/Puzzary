@@ -11,6 +11,7 @@
   const found = new Set((grid.dataset.foundWords || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const progressUrl = grid.dataset.progressUrl;
   const autoConfirm = grid.dataset.autoConfirm !== "false";
+  const remote = window.PuzzaryGroup || window.PuzzarySolo;
   const cells = Array.from(grid.querySelectorAll("button[data-letter]"));
   const cellsByCoord = new Map(cells.map((cell) => [`${cell.dataset.x},${cell.dataset.y}`, cell]));
   cells.forEach(cell => { cell.dataset.key = `${cell.dataset.x},${cell.dataset.y}`; });
@@ -65,6 +66,7 @@
 
   function saveProgress() {
     if (window.PuzzaryGroup) { window.PuzzaryGroup.save(); return; }
+    if (window.PuzzarySolo) { window.PuzzarySolo.action('patch'); return; }
     if (!progressUrl) return;
     window.fetch(progressUrl, {
       method: "POST",
@@ -174,28 +176,28 @@
     clearSelected();
     cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
     syncFoundWords();
-    if (window.PuzzaryGroup) saveProgress();
+    if (remote) saveProgress();
   }
 
   function addGuess() {
     if (!selected.length) return;
     const key = selectionKey(selected);
-    const existing = guesses.find((guess) => guess.key === key || window.PuzzaryGroup && groupKey(guess) === groupKey({cells:selected}));
+    const existing = guesses.find((guess) => guess.key === key || remote && groupKey(guess) === groupKey({cells:selected}));
     if (existing) {
       existing.cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
       guesses = guesses.filter((guess) => guess.key !== key);
       clearSelected();
       if (status) status.textContent = "Selection removed.";
-      if (window.PuzzaryGroup) saveProgress();
+      if (remote) saveProgress();
       return;
     }
-    const rejected = rejectedGuesses.find((guess) => guess.key === key || window.PuzzaryGroup && groupKey(guess) === groupKey({cells:selected}));
+    const rejected = rejectedGuesses.find((guess) => guess.key === key || remote && groupKey(guess) === groupKey({cells:selected}));
     if (rejected) {
       rejected.cells.forEach((cell) => cell.classList.remove("selected", "miss"));
       rejectedGuesses = rejectedGuesses.filter((guess) => guess.key !== key);
       clearSelected();
       if (status) status.textContent = "Incorrect selection removed.";
-      if (window.PuzzaryGroup) saveProgress();
+      if (remote) saveProgress();
       return;
     }
     const forward = selectedWord();
@@ -213,10 +215,11 @@
     });
     selected = [];
     if (status) status.textContent = `${guesses.length} selection${guesses.length === 1 ? "" : "s"} ready to check.`;
-    if (window.PuzzaryGroup) saveProgress();
+    if (remote) saveProgress();
   }
 
   function checkGuesses() {
+    if (remote) { remote.action('check'); return; }
     if (!guesses.length) {
       if (status) status.textContent = "Make one or more selections first.";
       return;
@@ -292,7 +295,7 @@
 
   function finishSelection() {
     if (!selected.length) return;
-    if (!autoConfirm || window.PuzzaryGroup) {
+    if (!autoConfirm || remote) {
       addGuess();
       return;
     }
@@ -378,14 +381,14 @@
   if (clearGuessesButton) clearGuessesButton.addEventListener("click", clearGuesses);
 
   if (revealButton) {
-    revealButton.addEventListener("click", revealSolution);
+    revealButton.addEventListener("click", () => remote ? remote.action('reveal') : revealSolution());
   }
   function groupKey(guess) {
     const first = guess.cells[0], last = guess.cells.at(-1);
     const ends = [`${first.dataset.x},${first.dataset.y}`,`${last.dataset.x},${last.dataset.y}`].sort();
     return `guess:${ends[0]}:${ends[1]}`;
   }
-  window.PuzzaryGroup?.register({
+  remote?.register({
     read() { return Object.fromEntries([...guesses.map(guess => [groupKey(guess),'pending']),...rejectedGuesses.map(guess => [groupKey(guess),'wrong'])]); },
     apply(state) {
       found.clear(); (state.found_words || []).forEach(word => found.add(word));
@@ -400,6 +403,10 @@
         if (value === 'wrong') rejectedGuesses.push(guess); else guesses.push(guess);
         line.forEach(cell => cell.classList.add(value === 'wrong' ? 'miss' : 'candidate-cell'));
       }
+      (state.confirmed_selections || []).forEach(key => {
+        const [,first,last] = key.split(':');
+        lineCells(cellsByCoord.get(first),cellsByCoord.get(last)).forEach(cell => cell.classList.add('found-cell'));
+      });
       found.forEach(markStoredWord);
       syncFoundWords();
       if (status && (guesses.length || rejectedGuesses.length)) status.textContent = `${found.size} of ${words.size} words found. ${guesses.length} selections ready to check. ${rejectedGuesses.length} incorrect selections.`;

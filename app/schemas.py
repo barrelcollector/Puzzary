@@ -34,6 +34,12 @@ class PuzzleProgressUpdate(BaseModel):
     answers: dict[str, str] = {}
 
 
+class PuzzlePlayAction(BaseModel):
+    kind: str = Field(..., min_length=1, max_length=40)
+    target: str = Field("", max_length=120)
+    changes: dict[str, str] = Field(default_factory=dict)
+
+
 class PuzzleProgressResponse(BaseModel):
     puzzle_id: str
     user_id: int

@@ -234,8 +234,8 @@ def authorize_request(request, db, user, administrative=False):
         scoped = {'edit':'edit','manual':'edit','publish':'publish','archive':'archive','unarchive':'archive','delete':'delete','metadata':'metadata'}
         if path.startswith('/admin/') or (path.endswith('/manual') and method!='GET'):
             require_owned(user,'puzzles',scoped.get(action,'edit'),puzzle.created_by_id); return
-        require(user,'puzzles.export' if action=='export' else 'puzzles.print' if 'print' in path else 'puzzles.play' if action in ['progress','reset','attempts','photos'] else 'library.view')
-        if not can_view(user,puzzle,play=action in ['progress','reset','attempts','photos'] or name=='puzzle_page'):
+        require(user,'puzzles.export' if action=='export' else 'puzzles.print' if 'print' in path else 'puzzles.play' if action in ['progress','reset','attempts','photos','actions'] else 'library.view')
+        if not can_view(user,puzzle,play=action in ['progress','reset','attempts','photos','actions'] or name=='puzzle_page'):
             raise HTTPException(403,'Puzzle access denied')
         return
     if path in ['/','/library','/api/puzzles','/api/puzzles/latest']:

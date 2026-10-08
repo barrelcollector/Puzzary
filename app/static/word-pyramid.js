@@ -10,14 +10,8 @@
   const rowRevealButtons = Array.from(root.querySelectorAll(".reveal-pyramid-row"));
   const clueButtons = Array.from(root.querySelectorAll(".more-pyramid-clue"));
   const progressUrl = root.dataset.progressUrl;
-  let rows = [];
+  const remote = window.PuzzaryGroup || window.PuzzarySolo;
   let saveTimer = null;
-
-  try {
-    rows = JSON.parse(root.dataset.solution || "[]");
-  } catch (_error) {
-    rows = [];
-  }
 
   const inputsByRow = new Map();
   inputs.forEach((input) => {
@@ -29,26 +23,17 @@
   inputsByRow.forEach((list) => {
     list.sort((a, b) => Number(a.dataset.cell) - Number(b.dataset.cell));
   });
-  const progressSounds = window.PuzzarySounds?.createProgressTracker(
-    () => [...inputsByRow.keys()].filter(index => rowAnswer(index) === answerFor(index)),
-    () => [...inputsByRow.keys()].every(index => rowAnswer(index) === answerFor(index))
-  );
-
-  function answerFor(index) {
-    return String((rows[index] && rows[index].answer) || "").toUpperCase();
-  }
-
   function rowAnswer(index) {
     return (inputsByRow.get(index) || [])
-      .map((input) => input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || (window.PuzzaryGroup ? ' ' : ''))
+      .map((input) => input.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || (remote ? ' ' : ''))
       .join("");
   }
 
   function currentAnswers() {
     const answers = {};
     inputsByRow.forEach((_list, rowIndex) => {
-      if (window.PuzzaryGroup && _list.every(input => input.disabled)) return;
-      const value = window.PuzzaryGroup ? rowAnswer(rowIndex).trimEnd() : rowAnswer(rowIndex);
+      if (remote && _list.every(input => input.disabled)) return;
+      const value = remote ? rowAnswer(rowIndex).trimEnd() : rowAnswer(rowIndex);
       if (value) answers[String(rowIndex)] = value;
     });
     return answers;
@@ -91,7 +76,6 @@
     if (input.disabled) return;
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 1);
     setRowState(Number(input.dataset.row), "");
-    progressSounds?.invalidate();
     queueSave();
   }
 
@@ -106,41 +90,7 @@
   }
 
   function checkPyramid() {
-    progressSounds?.check();
-    let correct = 0;
-    inputsByRow.forEach((_list, rowIndex) => {
-      const expected = answerFor(rowIndex);
-      const value = rowAnswer(rowIndex);
-      setRowState(rowIndex, "");
-      if (!value) return;
-      if (value === expected) {
-        correct += 1;
-        setRowState(rowIndex, "correct");
-      } else {
-        setRowState(rowIndex, "incorrect");
-      }
-    });
-    setStatus(correct === inputsByRow.size ? "Word pyramid complete." : `${correct} of ${inputsByRow.size} rows correct.`);
-    if (correct === inputsByRow.size && window.PuzzaryCelebrate) {
-      window.PuzzaryCelebrate.complete();
-    }
-  }
-
-  function revealRow(index) {
-    const answer = answerFor(index);
-    (inputsByRow.get(index) || []).forEach((input, cellIndex) => {
-      input.value = answer[cellIndex] || "";
-    });
-    setRowState(index, "correct");
-    setStatus(`Row ${index + 1} revealed.`);
-    progressSounds?.sync();
-    saveProgress();
-  }
-
-  function revealAll() {
-    inputsByRow.forEach((_list, rowIndex) => revealRow(rowIndex));
-    setStatus("Solution revealed. Reset the puzzle to start over.");
-    saveProgress();
+    remote?.action('check');
   }
 
   inputs.forEach((input) => {
@@ -180,20 +130,19 @@
         setRowState(Number(input.dataset.row), "");
       });
       setStatus("Pyramid cleared.");
-      progressSounds?.sync();
       saveProgress();
     });
   }
 
-  if (revealButton) revealButton.addEventListener("click", revealAll);
+  if (revealButton) revealButton.addEventListener("click", () => remote?.action('reveal'));
 
   rowRevealButtons.forEach((button) => {
-    button.addEventListener("click", () => window.PuzzaryGroup ? window.PuzzaryGroup.action('reveal_entry',button.dataset.row) : revealRow(Number(button.dataset.row)));
+    button.addEventListener("click", () => remote?.action('reveal_entry',button.dataset.row));
   });
 
   clueButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      if (window.PuzzaryGroup) { window.PuzzaryGroup.action('clue',button.dataset.row); return; }
+      if (remote) { remote.action('clue',button.dataset.row); return; }
       const list = button.nextElementSibling;
       if (!list || !list.classList.contains("pyramid-clue-steps")) return;
       const hiddenSteps = Array.from(list.querySelectorAll("small[hidden]"));
@@ -205,7 +154,7 @@
       button.disabled = remaining === 0;
     });
   });
-  window.PuzzaryGroup?.register({read:currentAnswers,
+  remote?.register({read:currentAnswers,
     scope(answers) { return Object.fromEntries(Object.entries(answers).filter(([key]) => inputsByRow.get(Number(key))?.some(input => !input.disabled))); },
     apply(state) {
       inputsByRow.forEach((list,index) => {
@@ -223,7 +172,9 @@
         button.disabled = count >= steps.length;
         button.textContent = button.disabled ? 'No more clues' : `More clues (${steps.length-count})`;
       });
-      progressSounds?.sync();
+      if (state.revealed) setStatus('Solution revealed. Reset the puzzle to start over.');
+      else if (state.checked && !(state.incorrect || []).length) { setStatus('Word pyramid complete.'); window.PuzzaryCelebrate?.complete(); }
+      else if (state.checked) setStatus('One or more completed rows need another look.');
     }
   });
 })();
