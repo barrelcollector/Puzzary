@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Themes - Puzzary{% endblock %}
+{% block content %}
+<section class="admin-shell theme-admin">
+  {% include 'admin_nav.html' %}
+  <div class="admin-main">
+    <section class="puzzle-head"><div><h1>Appearance Themes</h1><p class="muted">Install safe token-only themes, preview them, and choose the server default.</p></div></section>
+    {% if request.query_params.get('error') %}<p class="notice danger">{{ request.query_params.get('error') }}</p>{% endif %}
+    {% if request.query_params.get('message') %}<p class="notice">{{ request.query_params.get('message') }}</p>{% endif %}
+
+    <section class="theme-grid" aria-label="Installed themes">
+      {% for theme in builtins %}
+        <article class="theme-card" data-preview-theme="{{ theme.slug }}">
+          <div class="theme-swatch"><strong>{{ theme.name }}</strong><span>Built in</span><button type="button">Button</button></div>
+          <p>{{ theme.description }}</p>
+          {% if default_theme == theme.slug %}<strong>Server default</strong>{% else %}<form method="post" action="/admin/themes/{{ theme.slug }}/default"><button class="ghost-button">Make default</button></form>{% endif %}
+        </article>
+      {% endfor %}
+      {% for theme in themes %}
+        <article class="theme-card{% if not theme.enabled %} is-disabled{% endif %}" style="{{ theme_styles[theme.slug] }}">
+          <div class="theme-swatch"><strong>{{ theme.name }}</strong><span>v{{ theme.version }}{% if theme.author %} by {{ theme.author }}{% endif %}</span><button type="button">Button</button></div>
+          <p>{{ theme.description or 'No description.' }}</p>
+          <div class="action-row">
+            <a class="ghost-button" href="/admin/themes?edit={{ theme.slug }}#theme-editor">Edit</a>
+            <a class="ghost-button" href="/admin/themes/{{ theme.slug }}/export">Export</a>
+            <form method="post" action="/admin/themes/{{ theme.slug }}/toggle"><button class="ghost-button">{{ 'Disable' if theme.enabled else 'Enable' }}</button></form>
+            {% if theme.enabled and default_theme != theme.slug %}<form method="post" action="/admin/themes/{{ theme.slug }}/default"><button class="ghost-button">Make default</button></form>{% endif %}
+            <form method="post" action="/admin/themes/{{ theme.slug }}/delete" onsubmit="return confirm('Remove this theme? Users will fall back to the server default.')"><button class="danger-button">Remove</button></form>
+          </div>
+          {% if default_theme == theme.slug %}<strong>Server default</strong>{% endif %}
+          {% if not theme.enabled %}<span class="muted">Disabled</span>{% endif %}
+        </article>
+      {% endfor %}
+    </section>
+
+    <section class="theme-tools">
+      <form class="panel narrow-panel" method="post" action="/admin/themes/import" enctype="multipart/form-data">
+        <h2>Install package</h2>
+        <p class="muted">Upload a <code>.puzzary-theme.json</code> package. Only documented tokens are accepted.</p>
+        <input type="file" name="package" accept="application/json,.json,.puzzary-theme.json" required>
+        <button type="submit">Validate and install</button>
+      </form>
+
+      <form class="panel" id="theme-editor" method="post" action="/admin/themes/create" data-theme-editor data-existing='{{ selected_manifest | e }}'>
+        <h2>{{ 'Edit theme' if selected_theme else 'Create theme' }}</h2>
+        <div class="theme-editor-grid">
+          <label>Name<input data-theme-field="name" maxlength="80" required></label>
+          <label>Slug<input data-theme-field="slug" pattern="[a-z][a-z0-9-]{1,63}" maxlength="64" {% if selected_theme %}readonly{% endif %} required></label>
+          <label>Version<input data-theme-field="version" value="1.0.0" maxlength="32" required></label>
+          <label>Author<input data-theme-field="author" maxlength="120"></label>
+          <label class="wide">Description<textarea data-theme-field="description" maxlength="500"></textarea></label>
+          <label>Typography<select data-theme-token="font"><option value="system">System sans</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+          <label>Corner radius<input data-theme-token="radius" type="number" min="0" max="24" value="6"></label>
+          <label>Density<input data-theme-token="density" type="number" min="0.8" max="1.25" step="0.05" value="1"></label>
+          <div class="wide theme-token-grid" data-theme-colors></div>
+        </div>
+        <input type="hidden" name="manifest_json">
+        <div class="theme-live-preview" data-theme-preview><strong>Live preview</strong><p>Readable text and semantic colors update as you edit.</p><button type="button">Primary action</button><span class="notice">Success notice</span><span class="notice danger">Error notice</span></div>
+        <p class="muted" data-theme-validation aria-live="polite"></p>
+        <button type="submit">Validate and save theme</button>
+      </form>
+    </section>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/theme-editor.js?v=1"></script>{% endblock %}

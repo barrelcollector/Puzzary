@@ -88,6 +88,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     permissions_initialized: Mapped[bool] = mapped_column(Boolean, default=False)
     permission_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    appearance_theme: Mapped[str] = mapped_column(String(80), default="")
     roles: Mapped[list[PermissionRole]] = relationship(secondary=user_role_links)
 
     def can(self, permission: str) -> bool:
@@ -401,6 +402,20 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AppearanceTheme(Base):
+    __tablename__ = "appearance_themes"
+
+    slug: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    version: Mapped[str] = mapped_column(String(32), default="1.0.0")
+    author: Mapped[str] = mapped_column(String(120), default="")
+    description: Mapped[str] = mapped_column(String(500), default="")
+    manifest: Mapped[dict] = mapped_column(JSON)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

@@ -28,6 +28,7 @@ for section, items in {
               'users.disable':'Enable or disable users', 'users.reset':'Reset passwords',
               'users.sessions':'Revoke sessions', 'users.tokens':'Manage API tokens'},
     'Server': {'roles.manage':'Manage roles and permission overrides', 'settings.manage':'Manage server settings',
+               'themes.manage':'Install and manage appearance themes',
                'plugins.manage':'Manage enabled puzzle modules', 'activity.view':'Review user activity',
                'audit.view':'View permission audit log', 'api.use':'Use API tokens'},
 }.items():
@@ -49,7 +50,7 @@ MANAGER = PUBLISHER | {'content.manage','library.archived_view','library.archive
 LEGACY = (PLAYER - {'content.view'}) | {'puzzles.generate','puzzles.publish.own','puzzles.schedule.own','groups.host','groups.moderate'}
 PRESETS = {'Player': PLAYER, 'Publisher': PUBLISHER, 'Manager': MANAGER, 'Admin': set(CATALOG), 'Existing Player': LEGACY}
 ADMIN_CORE = {'roles.manage','users.edit','settings.manage'}
-DANGEROUS = {'roles.manage','users.reset','users.tokens','users.disable','settings.manage','plugins.manage',
+DANGEROUS = {'roles.manage','users.reset','users.tokens','users.disable','settings.manage','themes.manage','plugins.manage',
              'puzzles.delete.any','puzzles.delete.own','puzzles.progress.any','groups.manage_any'}
 
 
@@ -175,6 +176,10 @@ def authorize_request(request, db, user, administrative=False):
     if path.startswith('/admin/settings'):
         if not (user.can('settings.manage') or user.can('plugins.manage')):
             raise HTTPException(403,'Server or plugin management permission required')
+        return
+    if path.startswith('/admin/themes'):
+        if not (user.can('themes.manage') or user.can('settings.manage')):
+            raise HTTPException(403,'Theme management permission required')
         return
     if path.startswith('/admin/activity'):
         require(user,'activity.view'); return

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="{{ appearance.slug }}" style="color-scheme:{{ appearance.scheme }};{{ appearance.style }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,7 +7,7 @@
   {% if print_pdf_css %}
     <style>{{ print_pdf_css | safe }}</style>
   {% else %}
-    <link rel="stylesheet" href="/static/styles.css?v=37">
+    <link rel="stylesheet" href="/static/styles.css?v=38">
   {% endif %}
 </head>
 <body>

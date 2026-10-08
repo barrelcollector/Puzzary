@@ -40,6 +40,7 @@ from app.dictionary_queries import dictionary_statement, tag_usage_counts, word_
 from app.print_pdf import render_pdf
 from app.models import (
     AppSetting,
+    AppearanceTheme,
     DictionaryDefinition,
     DictionaryImportSource,
     DictionaryWord,
@@ -55,6 +56,14 @@ from app.models import (
     User,
     WordBank,
     WordBankWord,
+)
+from app.appearance import (
+    BUILTIN_SLUGS,
+    available as appearance_options,
+    decode_package,
+    default_slug as appearance_default_slug,
+    package_style as appearance_package_style,
+    template_context as appearance_template_context,
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
 from app.user_activity import account_activity, progress_states
@@ -93,7 +102,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Puzzary", version="0.1.0")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[appearance_template_context])
 templates.env.globals['can_owned'] = can_owned
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 from app.publishing import router as publishing_router
@@ -2623,6 +2632,9 @@ def account_password_page(request: Request, db: Session = Depends(get_db)):
             "error": request.query_params.get("error", ""),
             "message": request.query_params.get("message", ""),
             "activity": account_activity(db, user),
+            "appearance_options": appearance_options(db),
+            "appearance_preference": user.appearance_theme or "server",
+            "appearance_default": appearance_default_slug(db),
         },
     )
 
@@ -2656,6 +2668,23 @@ def account_password_update(
     db.commit()
     request.session["session_version"] = user.session_version
     return RedirectResponse(url="/account/password?message=Password%20updated.", status_code=303)
+
+
+@app.post("/account/appearance")
+def account_appearance_update(
+    request: Request,
+    appearance_theme: str = Form("server"),
+    db: Session = Depends(get_db),
+):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    choices = {item["slug"] for item in appearance_options(db)} | {"server"}
+    if appearance_theme not in choices:
+        return RedirectResponse(url="/account?error=That%20appearance%20is%20not%20available.", status_code=303)
+    user.appearance_theme = "" if appearance_theme == "server" else appearance_theme
+    db.commit()
+    return RedirectResponse(url="/account?message=Appearance%20updated.", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -3029,6 +3058,133 @@ def admin_users_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/settings", response_class=HTMLResponse)
 def admin_settings_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "settings")
+
+
+@app.get("/admin/themes", response_class=HTMLResponse)
+def admin_themes_page(request: Request, edit: str = "", db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    themes = list(db.scalars(select(AppearanceTheme).order_by(AppearanceTheme.name, AppearanceTheme.slug)))
+    selected = db.get(AppearanceTheme, edit) if edit else None
+    return templates.TemplateResponse("admin_themes.html", {
+        "request":request, "current_user":user, "themes":themes, "builtins":appearance_options(db)[:3],
+        "default_theme":appearance_default_slug(db), "selected_theme":selected,
+        "selected_manifest":json.dumps(selected.manifest if selected else {}, indent=2),
+        "theme_styles":{theme.slug:appearance_package_style(theme.manifest) for theme in themes},
+    })
+
+
+def save_appearance_theme(db: Session, user: User, manifest: dict) -> AppearanceTheme:
+    theme = db.get(AppearanceTheme, manifest["slug"])
+    before = theme.manifest if theme else {}
+    if theme is None:
+        theme = AppearanceTheme(slug=manifest["slug"], name=manifest["name"], manifest=manifest)
+        db.add(theme)
+    theme.name = manifest["name"]
+    theme.version = manifest["version"]
+    theme.author = manifest["author"]
+    theme.description = manifest["description"]
+    theme.manifest = manifest
+    theme.enabled = True
+    audit(db, user, "appearance_theme", theme.slug, "theme.saved", before, manifest)
+    db.commit()
+    return theme
+
+
+@app.post("/admin/themes/create")
+def admin_create_theme(
+    request: Request,
+    manifest_json: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        manifest = decode_package(manifest_json.encode("utf-8"))
+        theme = save_appearance_theme(db, user, manifest)
+    except ValueError as error:
+        return RedirectResponse(url=f"/admin/themes?error={quote(str(error))}", status_code=303)
+    return RedirectResponse(url=f"/admin/themes?message={quote(f'{theme.name} saved.')}", status_code=303)
+
+
+@app.post("/admin/themes/import")
+def admin_import_theme(
+    request: Request,
+    package: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        manifest = decode_package(package.file.read(65537))
+        theme = save_appearance_theme(db, user, manifest)
+    except ValueError as error:
+        return RedirectResponse(url=f"/admin/themes?error={quote(str(error))}", status_code=303)
+    return RedirectResponse(url=f"/admin/themes?message={quote(f'{theme.name} installed.')}", status_code=303)
+
+
+@app.get("/admin/themes/{slug}/export")
+def admin_export_theme(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    theme = db.get(AppearanceTheme, slug)
+    if theme is None:
+        raise HTTPException(404, "Theme not found")
+    return Response(
+        json.dumps(theme.manifest, indent=2) + "\n",
+        media_type="application/json",
+        headers={"Content-Disposition":f'attachment; filename="{theme.slug}.puzzary-theme.json"'},
+    )
+
+
+@app.post("/admin/themes/{slug}/toggle")
+def admin_toggle_theme(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    theme = db.get(AppearanceTheme, slug)
+    if theme is None:
+        raise HTTPException(404, "Theme not found")
+    theme.enabled = not theme.enabled
+    if not theme.enabled and appearance_default_slug(db) == slug:
+        set_app_setting(db, "appearance_default", "system")
+    audit(db, user, "appearance_theme", slug, "theme.enabled" if theme.enabled else "theme.disabled", {}, {})
+    db.commit()
+    return RedirectResponse(url="/admin/themes?message=Theme%20status%20updated.", status_code=303)
+
+
+@app.post("/admin/themes/{slug}/default")
+def admin_default_theme(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    valid = slug in BUILTIN_SLUGS or db.scalar(select(AppearanceTheme).where(AppearanceTheme.slug == slug, AppearanceTheme.enabled == True)) is not None  # noqa: E712
+    if not valid:
+        raise HTTPException(409, "Enable the theme before making it the default")
+    set_app_setting(db, "appearance_default", slug)
+    audit(db, user, "appearance_theme", slug, "theme.default", {}, {"default":slug})
+    db.commit()
+    return RedirectResponse(url="/admin/themes?message=Default%20appearance%20updated.", status_code=303)
+
+
+@app.post("/admin/themes/{slug}/delete")
+def admin_delete_theme(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    theme = db.get(AppearanceTheme, slug)
+    if theme is None:
+        raise HTTPException(404, "Theme not found")
+    if appearance_default_slug(db) == slug:
+        set_app_setting(db, "appearance_default", "system")
+    audit(db, user, "appearance_theme", slug, "theme.deleted", theme.manifest, {})
+    db.delete(theme)
+    db.commit()
+    return RedirectResponse(url="/admin/themes?message=Theme%20removed.%20Affected%20users%20now%20use%20the%20server%20default.", status_code=303)
 
 
 @app.post("/admin/settings")

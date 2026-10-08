@@ -58,6 +58,8 @@ def ensure_schema() -> None:
             connection.execute(text('ALTER TABLE users ADD COLUMN permissions_initialized BOOLEAN NOT NULL DEFAULT FALSE'))
         if 'permission_overrides' not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN permission_overrides JSON NOT NULL DEFAULT '{}'"))
+        if 'appearance_theme' not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN appearance_theme VARCHAR(80) NOT NULL DEFAULT ''"))
         if "group_solves" in table_names:
             group_columns = {c["name"] for c in inspector.get_columns("group_solves")}
             if "puzzle_states" not in group_columns:

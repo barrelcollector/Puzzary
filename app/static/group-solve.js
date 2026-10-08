@@ -54,7 +54,9 @@
   overlay.className = 'group-presence-layer'; overlay.setAttribute('aria-hidden','true');
   document.body.append(overlay);
   const cursorNodes = new Map();
-  const colors = ['#197667','#b33d56','#256ca6','#7951a8','#986013','#167e8c'];
+  const rootStyle = getComputedStyle(document.documentElement);
+  const colors = Array.from({length:6},(_,index) => rootStyle.getPropertyValue(`--player-${index+1}`).trim())
+    .map((color,index) => color || ['#197667','#b33d56','#256ca6','#7951a8','#986013','#167e8c'][index]);
   let pointer = null, pointerAt = 0, presenceMembers = [], presenceReceived = 0;
   const liveMembers = new Map(), memberReceived = new Map();
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
