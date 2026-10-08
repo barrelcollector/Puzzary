@@ -112,6 +112,25 @@ try:
             last = page.locator(f'button[data-x="{x2}"][data-y="{y2}"]').bounding_box()
             page.mouse.move(first['x']+first['width']/2, first['y']+first['height']/2)
             page.mouse.down(); page.mouse.move(last['x']+last['width']/2, last['y']+last['height']/2, steps=8); page.mouse.up()
+        def select_with_keyboard(page, x1, y1, x2, y2):
+            page.locator(f'button[data-x="{x1}"][data-y="{y1}"]').press('Enter')
+            page.locator(f'button[data-x="{x2}"][data-y="{y2}"]').press('Enter')
+        def select_with_touch(page, x1, y1, x2, y2):
+            page.evaluate('''([x1,y1,x2,y2]) => {
+              const grid = document.querySelector('.word-grid.interactive');
+              const first = grid.querySelector(`button[data-x="${x1}"][data-y="${y1}"]`);
+              const last = grid.querySelector(`button[data-x="${x2}"][data-y="${y2}"]`);
+              last.scrollIntoView({block:'center'});
+              const start = first.getBoundingClientRect(), finish = last.getBoundingClientRect();
+              const options = (rect) => ({bubbles:true, pointerId:71, pointerType:'touch',
+                clientX:rect.left+rect.width/2, clientY:rect.top+rect.height/2});
+              grid.setPointerCapture = () => {};
+              grid.releasePointerCapture = () => {};
+              grid.hasPointerCapture = () => false;
+              first.dispatchEvent(new PointerEvent('pointerdown',options(start)));
+              grid.dispatchEvent(new PointerEvent('pointermove',options(finish)));
+              grid.dispatchEvent(new PointerEvent('pointerup',options(finish)));
+            }''', [x1,y1,x2,y2])
         select(a, 0, 0, 2, 0)
         b.wait_for_function('document.querySelectorAll(".candidate-cell").length === 3')
         assert 'CAT' not in host.request.get(endpoint).json()['state'].get('found_words', [])
@@ -121,10 +140,27 @@ try:
         b.wait_for_function('document.querySelectorAll(".candidate-cell").length === 3')
         b.locator('#group-check').click()
         a.wait_for_function('document.querySelectorAll(".miss").length === 3')
+        select_with_keyboard(b, 6, 2, 4, 2)
+        a.wait_for_function('document.querySelectorAll(".miss").length === 0')
+        assert host.request.get(endpoint).json()['state']['answers'] == {}
+        assert a.locator('[data-word=CAT]').evaluate('(node) => node.classList.contains("found")')
+        b.reload(); b.wait_for_function('!document.querySelector(".puzzle-layout > .panel").inert')
+        assert b.locator('.miss').count() == 0
+        assert b.locator('[data-word=CAT]').evaluate('(node) => node.classList.contains("found")')
+        touch_player = browser.new_context(viewport={'width':390, 'height':844}, has_touch=True, is_mobile=True)
+        touch_player.add_cookies([{'name':'session', 'value':cookie(ids[1]), 'url':base}])
+        touch_page = touch_player.new_page(); touch_page.goto(base+groups['word_search']['url'])
+        touch_page.wait_for_function('!document.querySelector(".puzzle-layout > .panel").inert')
         select(a, 4, 2, 6, 2)
-        b.wait_for_function('document.querySelectorAll(".miss").length === 0')
+        touch_page.wait_for_function('document.querySelectorAll(".candidate-cell").length === 3')
+        b.locator('#group-check').click()
+        touch_page.wait_for_function('document.querySelectorAll(".miss").length === 3')
+        select_with_touch(touch_page, 6, 2, 4, 2)
+        a.wait_for_function('document.querySelectorAll(".miss").length === 0')
+        assert host.request.get(endpoint).json()['state']['answers'] == {}
+        touch_player.close()
         act(endpoint, host, {'guess:99,0:100,0':'pending'}, status=422)
-        print('Word Search shares unchecked/wrong selections, checks and deselection.')
+        print('Word Search lets another player clear reverse-direction wrong selections with keyboard or touch without losing confirmed words.')
 
         endpoint = open_group('spell_it')
         a.locator('input[data-position="0"]').fill('X')

@@ -23,7 +23,7 @@
     </span>
   {% endfor %}
 </div>
-<p class="muted" id="word-search-status">Drag across a word to mark it found.</p>
+<p class="muted" id="word-search-status">Drag across a word, or choose its first and last letters with Enter or Space.</p>
 {% if play_payload.settings.auto_confirm | default(true) == false %}
   <div class="action-row">
     <button type="button" class="ghost-button" id="word-search-check">Check Answers</button>

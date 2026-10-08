@@ -20,6 +20,7 @@
   let activePointerId = null;
   let startCell = null;
   let lastCell = null;
+  let keyboardStartCell = null;
   let selected = [];
   let guesses = [];
   let rejectedGuesses = [];
@@ -170,6 +171,10 @@
     return cellsToKey.map((cell) => `${cell.dataset.x},${cell.dataset.y}`).join("|");
   }
 
+  function sameGuess(first, second) {
+    return first.key === second.key || (remote && groupKey(first) === groupKey(second));
+  }
+
   function clearGuesses() {
     guesses = [];
     rejectedGuesses = [];
@@ -182,19 +187,20 @@
   function addGuess() {
     if (!selected.length) return;
     const key = selectionKey(selected);
-    const existing = guesses.find((guess) => guess.key === key || remote && groupKey(guess) === groupKey({cells:selected}));
+    const candidate = {key, cells:selected};
+    const existing = guesses.find((guess) => sameGuess(guess, candidate));
     if (existing) {
       existing.cells.forEach((cell) => cell.classList.remove("candidate-cell", "miss"));
-      guesses = guesses.filter((guess) => guess.key !== key);
+      guesses = guesses.filter((guess) => guess !== existing);
       clearSelected();
       if (status) status.textContent = "Selection removed.";
       if (remote) saveProgress();
       return;
     }
-    const rejected = rejectedGuesses.find((guess) => guess.key === key || remote && groupKey(guess) === groupKey({cells:selected}));
+    const rejected = rejectedGuesses.find((guess) => sameGuess(guess, candidate));
     if (rejected) {
       rejected.cells.forEach((cell) => cell.classList.remove("selected", "miss"));
-      rejectedGuesses = rejectedGuesses.filter((guess) => guess.key !== key);
+      rejectedGuesses = rejectedGuesses.filter((guess) => guess !== rejected);
       clearSelected();
       if (status) status.textContent = "Incorrect selection removed.";
       if (remote) saveProgress();
@@ -328,6 +334,7 @@
     const cell = event.target.closest("button[data-letter]");
     if (!cell) return;
     event.preventDefault();
+    keyboardStartCell = null;
     dragging = true;
     activePointerId = event.pointerId;
     startCell = cell;
@@ -371,6 +378,35 @@
       grid.releasePointerCapture(event.pointerId);
     }
     clearSelected();
+  });
+
+  grid.addEventListener("keydown", (event) => {
+    const cell = event.target.closest("button[data-letter]");
+    if (!cell) return;
+    if (event.key === "Escape" && keyboardStartCell) {
+      event.preventDefault();
+      keyboardStartCell = null;
+      startCell = null;
+      clearSelected();
+      if (status) status.textContent = "Selection canceled.";
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (!keyboardStartCell) {
+      clearSelected();
+      keyboardStartCell = cell;
+      startCell = cell;
+      addCell(cell);
+      if (status) status.textContent = "Choose the other end of the selection.";
+      return;
+    }
+    startCell = keyboardStartCell;
+    previewSelection(cell);
+    keyboardStartCell = null;
+    startCell = null;
+    lastCell = null;
+    finishSelection();
   });
 
   found.forEach(markStoredWord);
