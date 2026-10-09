@@ -35,7 +35,7 @@ for plugin in list_puzzle_types():
         item = plugin.generator('', 'easy', None, 'all-groups-qa', options)
     generated[plugin.slug] = item
 with SessionLocal() as db:
-    users = [User(display_name=name, is_admin=index == 0, is_active=True, session_version=1, password_hash=hash_password('isolated-test-password')) for index, name in enumerate(['QA Host', 'QA Player'])]
+    users = [User(display_name=name, is_admin=index == 0, is_active=True, session_version=1, password_hash=hash_password('isolated-test-password')) for index, name in enumerate(['QA Host', 'QA Player', *[f'QA Contributor {i}' for i in range(3, 11)]])]
     db.add_all(users); db.flush(); ids = [u.id for u in users]
     for kind, item in generated.items():
         db.add(Puzzle(id='all-'+kind, puzzle_type=kind, title='QA '+kind, theme='', difficulty='easy', prompt=item.prompt,
@@ -57,7 +57,7 @@ try:
         browser = p.chromium.launch()
         contexts = [browser.new_context(viewport={'width':1280, 'height':900}) for _ in ids]
         for context, uid in zip(contexts, ids): context.add_cookies([{'name':'session', 'value':cookie(uid), 'url':base}])
-        host, player = contexts
+        host, player = contexts[:2]
         for _ in range(100):
             try:
                 if host.request.get(base+'/health').ok: break
@@ -69,6 +69,60 @@ try:
             assert response.ok, (kind, response.text())
             groups[kind] = response.json()
         print('All nine modules expose Group Solve and create sessions.')
+
+        def attribution_change(kind, item):
+            solution = item.solution_payload
+            if kind == 'word_search': return {}, 'hint', ''
+            if kind == 'maze': return {'path':json.dumps(solution['path'][:2],separators=(',',':'))}, 'patch', ''
+            if kind == 'word_pyramid': return {'0':solution['rows'][0]['answer'][0]}, 'patch', ''
+            if kind == 'spell_it':
+                entry = solution['entries'][0]; position = entry['hidden'][0]
+                return {f"{entry['index']}:{position}":entry['answer'][position]}, 'patch', ''
+            grid = solution.get('grid', solution.get('answers', {}))
+            expected = ({str(k):str(v).upper() for k,v in grid.items()} if isinstance(grid,dict) else
+                        {f'{x},{y}':str(value).upper() for y,row in enumerate(grid) for x,value in enumerate(row)
+                         if value is not None and str(value) not in ('','#')})
+            givens = solution.get('givens', solution.get('gimmes', {}).get('cells', {}))
+            key = next(key for key in expected if key not in givens)
+            return {key:expected[key]}, 'patch', ''
+
+        # The plugin contract must produce the same safe attribution envelope for every module.
+        for kind, item in generated.items():
+            info = host.request.post(base+f'/api/puzzles/all-{kind}/groups', data={}).json()
+            endpoint = base+'/api/groups/'+info['id']
+            assert player.request.post(base+'/api/groups/join', data={'code':info['code']}).ok
+            changes, action_kind, target = attribution_change(kind,item)
+            response = host.request.post(endpoint+'/actions',data={'action_id':str(uuid.uuid4()),'revision':0,
+                'puzzle_id':info['puzzle_id'],'kind':action_kind,'target':target,'changes':changes})
+            assert response.ok,(kind,response.text())
+            data = response.json()
+            assert data['contributors'][0]['name'] == 'QA Host' and data['contributors'][0]['actions'] == 1,kind
+            assert data['recent'][0]['at'] and data['recent'][0]['kind'] == action_kind,kind
+            owners = data['state'].get('_attribution',{}).get('owners',{})
+            assert owners,kind
+            assert all('value' not in owner and 'answer' not in owner for owner in owners.values()),kind
+        print('All nine modules report typed, timestamped attribution without embedding answer values.')
+
+        # Colors remain unique/stable for late joins, and departed contributors retain credit.
+        color_info = host.request.post(base+'/api/puzzles/all-takuzu/groups',data={}).json()
+        color_endpoint = base+'/api/groups/'+color_info['id']
+        for context in contexts[1:]:
+            assert context.request.post(base+'/api/groups/join',data={'code':color_info['code']}).ok
+        colored = host.request.get(color_endpoint).json()
+        original_colors = {member['user_id']:member['color'] for member in colored['members']}
+        assert len(original_colors) == 10 and len(set(original_colors.values())) == 10
+        assert {member['user_id']:member['color'] for member in host.request.get(color_endpoint).json()['members']} == original_colors
+        change, _, _ = attribution_change('takuzu',generated['takuzu'])
+        first_key = next(iter(change)); first_value = change[first_key]
+        data = host.request.post(color_endpoint+'/actions',data={'action_id':str(uuid.uuid4()),'revision':0,'puzzle_id':'all-takuzu','kind':'patch','target':'','changes':change}).json()
+        data = player.request.post(color_endpoint+'/actions',data={'action_id':str(uuid.uuid4()),'revision':data['revision'],'puzzle_id':'all-takuzu','kind':'patch','target':'','changes':{first_key:'0' if first_value == '1' else '1'}}).json()
+        assert data['state']['_attribution']['owners'][first_key]['user_id'] == ids[1]
+        data = player.request.post(color_endpoint+'/actions',data={'action_id':str(uuid.uuid4()),'revision':data['revision'],'puzzle_id':'all-takuzu','kind':'patch','target':'','changes':{first_key:''}}).json()
+        assert first_key not in data['state']['_attribution']['owners']
+        assert player.request.post(color_endpoint+'/leave',data={}).ok
+        after_leave = host.request.get(color_endpoint).json()
+        assert next(item for item in after_leave['contributors'] if item['user_id'] == ids[1])['name'] == 'QA Player'
+        print('Ten unique stable player colors, correction ownership, clears and departed-player history passed.')
         pages = [host.new_page(), player.new_page()]
         errors = []
         for page in pages: page.on('pageerror', lambda error: errors.append(str(error)))
@@ -94,6 +148,9 @@ try:
         a, b = pages
         a.locator('input[data-row="0"][data-cell="2"]').fill('P')
         b.wait_for_function('document.querySelector(`input[data-row="0"][data-cell="2"]`).value === "P"')
+        b.wait_for_function('document.querySelector(`input[data-row="0"][data-cell="2"]`).classList.contains("group-owned")')
+        assert 'QA Host' in b.locator('input[data-row="0"][data-cell="2"]').get_attribute('aria-description')
+        b.wait_for_function('document.querySelector("#group-contribution-list").textContent.includes("QA Host")')
         assert b.locator('input[data-row="0"][data-cell="0"]').input_value() == ''
         b.locator('input[data-row="0"][data-cell="0"]').fill('T')
         a.wait_for_function('document.querySelector(`input[data-row="0"][data-cell="0"]`).value === "T"')
@@ -136,6 +193,8 @@ try:
         assert 'CAT' not in host.request.get(endpoint).json()['state'].get('found_words', [])
         b.locator('#word-search-check').click()
         a.wait_for_function('document.querySelector("[data-word=CAT]").classList.contains("found")')
+        a.wait_for_function('document.querySelector("[data-word=CAT]").classList.contains("group-owned")')
+        assert 'QA Player' in a.locator('[data-word=CAT]').get_attribute('aria-description')
         select(a, 4, 2, 6, 2)
         b.wait_for_function('document.querySelectorAll(".candidate-cell").length === 3')
         b.locator('#group-check').click()

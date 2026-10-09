@@ -45,10 +45,12 @@ with SessionLocal() as db:
     assert group.puzzle_states == {} and group.puzzle_started_revision == 0
     assert db.get(GroupMember, 1).user_id == uid
     assert db.get(GroupAction, 1).changes == {'0,0': '1'}
+    assert db.get(GroupAction, 1).target == '' and db.get(GroupAction, 1).contributions == []
     member = GroupMember(group_id=group.id, guest_name='Migration guest', guest_token_hash='a' * 64)
     db.add(member); db.flush()
     db.add(GroupAction(group_id=group.id, user_id=None, guest_member_id=member.id,
                        action_id='guest-action', revision=4, kind='patch', changes={}))
     db.commit()
 assert next(c for c in inspect(engine).get_columns('group_members') if c['name'] == 'user_id')['nullable']
+assert {'target', 'contributions'} <= {c['name'] for c in inspect(engine).get_columns('group_actions')}
 print('Legacy SQLite group migration preserved members, action history and shared progress; repeat migration and guest writes passed.')

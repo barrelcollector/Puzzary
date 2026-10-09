@@ -76,6 +76,7 @@ class PuzzleType:
     preview_builder: Callable[[dict, dict, dict], dict] | None = None
     manual_editor_script: str = ""
     collaboration: Callable[[dict, dict, dict], dict] | None = None
+    collaboration_attribution: Callable[[dict, dict, dict], list[dict[str, Any]]] | None = None
     collaboration_fields: tuple[GenerationField, ...] = ()
     collaboration_setup: Callable[[dict, dict, dict], dict] | None = None
     collaboration_value_limit: int = 16

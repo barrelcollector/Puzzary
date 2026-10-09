@@ -57,6 +57,10 @@
   const rootStyle = getComputedStyle(document.documentElement);
   const colors = Array.from({length:6},(_,index) => rootStyle.getPropertyValue(`--player-${index+1}`).trim())
     .map((color,index) => color || ['#197667','#b33d56','#256ca6','#7951a8','#986013','#167e8c'][index]);
+  function player(userId) {
+    return snapshot?.members?.find(member => member.user_id === userId) || snapshot?.contributors?.find(member => member.user_id === userId);
+  }
+  function playerColor(userId) { return player(userId)?.color || colors[Math.abs(userId)%colors.length]; }
   let pointer = null, pointerAt = 0, presenceMembers = [], presenceReceived = 0;
   const liveMembers = new Map(), memberReceived = new Map();
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -87,7 +91,7 @@
         const entry = document.createElement('div'); entry.className = 'group-player-entry';
         overlay.append(cursor,ring,entry);
         nodes = {cursor,label,ring,name,caret,entry}; cursorNodes.set(member.user_id,nodes);
-        for (const node of [cursor,ring,entry]) node.style.setProperty('--player-color',colors[Math.abs(member.user_id) % colors.length]);
+        for (const node of [cursor,ring,entry]) node.style.setProperty('--player-color',member.color || playerColor(member.user_id));
       }
       setText(nodes.label,member.name); setText(nodes.name,member.name);
       const point = value.pointer;
@@ -320,6 +324,7 @@
         });
         controls.append(transfer);
       }
+      item.style.setProperty('--player-color',member.color);
       if (host && member.user_id !== data.host_id && !data.closed) {
         for (const action of member.status === 'pending' ? ['approve','remove'] : ['remove']) {
           const button = document.createElement('button'); button.type = 'button'; button.textContent = action === 'approve' ? 'Approve' : 'Remove';
@@ -331,20 +336,63 @@
         }
       }
     }
+    const contributionList = panel.querySelector('#group-contribution-list');
+    contributionList.replaceChildren();
+    for (const contributor of data.contributors || []) {
+      const item = document.createElement('div'); item.className = 'group-contributor'; item.setAttribute('role','listitem');
+      item.style.setProperty('--player-color',contributor.color);
+      const marker = document.createElement('span'); marker.className = 'group-contributor-marker'; marker.textContent = contributor.marker;
+      marker.setAttribute('aria-label',`Player marker ${contributor.marker}`);
+      const name = document.createElement('strong'); name.textContent = contributor.name;
+      const facts = [];
+      if (contributor.current) facts.push(`${contributor.current} current`);
+      if (contributor.edits) facts.push(`${contributor.edits} changes`);
+      if (contributor.found_words) facts.push(`${contributor.found_words} words found`);
+      if (contributor.completed_entries) facts.push(`${contributor.completed_entries} entries completed`);
+      if (contributor.hints) facts.push(`${contributor.hints} hints`);
+      if (contributor.reveals) facts.push(`${contributor.reveals} reveals`);
+      if (contributor.checks) facts.push(`${contributor.checks} checks`);
+      if (contributor.clues) facts.push(`${contributor.clues} clues`);
+      if (!facts.length && contributor.actions) facts.push(`${contributor.actions} actions`);
+      const details = document.createElement('small'); details.textContent = facts.join(', ');
+      item.setAttribute('aria-label',`${contributor.name}: ${details.textContent || 'contributed'}`);
+      item.append(marker,name,details); contributionList.append(item);
+    }
+    panel.querySelector('#group-contribution-empty').hidden = !!data.contributors?.length;
     const cells = board.querySelectorAll('[data-key]');
     cells.forEach(cell => {
       const key = cell.dataset.key;
       const contributor = data.recent.find(a => a.keys.includes(key));
+      const owner = data.state._attribution?.owners?.[key] || data.state._attribution?.owners?.[String(cell.dataset.row)];
+      const ownerPlayer = owner && player(owner.user_id);
       cell.classList.toggle('group-recent',!!contributor && contributor.user_id !== data.user_id && contributor.revision > data.revision-3);
+      cell.classList.toggle('group-owned',!!ownerPlayer);
+      if (ownerPlayer) cell.style.setProperty('--player-color',ownerPlayer.color);
+      else cell.style.removeProperty('--player-color');
       cell.classList.toggle('group-focus',data.members.some(m => m.user_id !== data.user_id && m.status === 'active' && m.online && m.focus === key));
-      const title = contributor ? `Last edit: ${contributor.name}` : '';
+      if (cell.dataset.groupBaseTitle === undefined) cell.dataset.groupBaseTitle = cell.title || '';
+      const title = ownerPlayer ? `${cell.dataset.groupBaseTitle}${cell.dataset.groupBaseTitle ? '. ' : ''}${owner.kind === 'reveal' || owner.kind === 'reveal_entry' ? 'Revealed' : 'Last changed'} by ${ownerPlayer.name}` : cell.dataset.groupBaseTitle;
       if (cell.title !== title) cell.title = title;
+      if (ownerPlayer) cell.setAttribute('aria-description',`${owner.kind === 'reveal' || owner.kind === 'reveal_entry' ? 'Revealed' : 'Last changed'} by ${ownerPlayer.name}, player marker ${ownerPlayer.marker}`);
+      else cell.removeAttribute('aria-description');
+    });
+    board.querySelectorAll('[data-word]').forEach(item => {
+      const owner = data.state._attribution?.owners?.[`word:${item.dataset.word}`];
+      const ownerPlayer = owner && player(owner.user_id);
+      item.classList.toggle('group-owned',!!ownerPlayer);
+      if (ownerPlayer) {
+        item.style.setProperty('--player-color',ownerPlayer.color);
+        item.title = `Found by ${ownerPlayer.name}`;
+        item.setAttribute('aria-description',`Found by ${ownerPlayer.name}, player marker ${ownerPlayer.marker}`);
+      } else {
+        item.style.removeProperty('--player-color'); item.removeAttribute('aria-description');
+      }
     });
   }
   window.PuzzaryGroup = {
     register(value) { adapter = value; renderedState = ''; if (snapshot) show(snapshot); flushState(); },
     action(kind,target='') { return send(kind,target); },
-    color(userId) { return colors[Math.abs(userId)%colors.length]; },
+    color(userId) { return playerColor(userId); },
     save() {
       if (groupSaveTimer !== null) return;
       groupSaveTimer = setTimeout(() => { groupSaveTimer = null; send('patch'); },40);

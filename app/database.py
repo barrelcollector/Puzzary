@@ -70,7 +70,7 @@ def ensure_schema() -> None:
             connection.execute(text("ALTER TABLE group_solves ADD COLUMN allow_guests BOOLEAN NOT NULL DEFAULT FALSE"))
         for table, additions in {
             "group_members": {"guest_name": "VARCHAR(80)", "guest_token_hash": "VARCHAR(64)"},
-            "group_actions": {"guest_member_id": "INTEGER"},
+            "group_actions": {"guest_member_id": "INTEGER", "target": "VARCHAR(80) NOT NULL DEFAULT ''", "contributions": "JSON NOT NULL DEFAULT '[]'"},
         }.items():
             if table not in table_names:
                 continue

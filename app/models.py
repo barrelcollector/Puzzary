@@ -184,7 +184,9 @@ class GroupAction(Base):
     guest_member_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     revision: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(16))
+    target: Mapped[str] = mapped_column(String(80), default="")
     changes: Mapped[dict] = mapped_column(JSON, default=dict)
+    contributions: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

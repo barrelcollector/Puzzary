@@ -1,6 +1,7 @@
 """Persistent Group Solve sessions with opt-in, group-scoped guests."""
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from copy import deepcopy
 import os
 import secrets
 import uuid
@@ -64,6 +65,12 @@ class MoveGroup(BaseModel):
 
 def participant_id(member):
     return member.user_id if member.user_id is not None else -member.id
+
+
+def participant_color(index):
+    """Stable, session-unique colors; text labels keep color from being the only cue."""
+    hue = (index * 137.508 + 188) % 360
+    return f'hsl({hue:.1f} 68% 34%)'
 
 
 def guests_allowed(db, group):
@@ -135,9 +142,9 @@ class Presence(BaseModel):
 
 def presence_members(db, group, user):
     rows = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
-                      .where(GroupMember.group_id == group.id)).all()
+                      .where(GroupMember.group_id == group.id).order_by(GroupMember.id)).all()
     result = []
-    for member, account in rows:
+    for color_index, (member, account) in enumerate(rows):
         if member.status != 'active' and not can_manage_group(user,group):
             continue
         online = bool(member.seen_at and (now()-utc(member.seen_at)).total_seconds() < MEMBER_ONLINE_SECONDS)
@@ -145,6 +152,7 @@ def presence_members(db, group, user):
         fresh = online and now().timestamp() - value.get('updated_at', 0) < 4
         result.append({'user_id': participant_id(member), 'name': account.display_name if account else member.guest_name,
                        'guest': account is None, 'status': member.status,
+                       'color': participant_color(color_index), 'marker': color_index + 1,
                        'online': online, 'focus': member.focus if online else '',
                        'presence': value if fresh and member.status == 'active' else {}})
     return result
@@ -238,6 +246,63 @@ def configure_collaboration(plugin, state, options, solution):
         raise HTTPException(422, str(error))
 
 
+def attribution_events(plugin, before, after, action, changed):
+    """Return public contribution facts without copying answer values or solution data."""
+    events = [{'key': key, 'type': 'answer', 'label': '', 'current': bool(value)}
+              for key, value in changed.items()]
+    before_words = {str(value) for value in before.get('found_words', [])}
+    for word in sorted({str(value) for value in after.get('found_words', [])} - before_words):
+        events.append({'key': f'word:{word}', 'type': 'found_word', 'label': word, 'current': True})
+    before_units = {str(value) for value in before.get('progressive_completed', [])}
+    for unit in sorted({str(value) for value in after.get('progressive_completed', [])} - before_units):
+        events.append({'key': f'unit:{unit}', 'type': 'completed_unit', 'label': unit.replace(':', ' '), 'current': True})
+    before_states = before.get('states', [])
+    for index, value in enumerate(after.get('states', [])):
+        if value == 'correct' and (index >= len(before_states) or before_states[index] != 'correct'):
+            events.append({'key': f'entry:{index}', 'type': 'completed_entry', 'label': f'Entry {index + 1}', 'current': True})
+    if plugin.collaboration_attribution:
+        events.extend(plugin.collaboration_attribution(before, after, action))
+    clean = []
+    seen = set()
+    for event in events:
+        key = str(event.get('key', ''))[:80]
+        event_type = str(event.get('type', 'action'))[:32]
+        if not key or (key, event_type) in seen:
+            continue
+        seen.add((key, event_type))
+        clean.append({'key': key, 'type': event_type, 'label': str(event.get('label', ''))[:80],
+                      'current': bool(event.get('current', True))})
+    return clean
+
+
+def apply_attribution(state, events, actor, kind, revision, created_at):
+    attribution = deepcopy(state.get('_attribution', {}))
+    owners = dict(attribution.get('owners', {}))
+    for event in events:
+        if event['current']:
+            owners[event['key']] = {'user_id': actor, 'kind': kind, 'revision': revision,
+                                    'at': created_at.isoformat(), 'type': event['type'], 'label': event['label']}
+        else:
+            owners.pop(event['key'], None)
+    attribution['owners'] = owners
+    contributors = dict(attribution.get('contributors', {}))
+    item = dict(contributors.get(str(actor), {'user_id': actor, 'actions': 0, 'edits': 0,
+        'found_words': 0, 'completed_entries': 0, 'hints': 0, 'reveals': 0, 'checks': 0, 'clues': 0}))
+    item['actions'] += 1
+    item['edits'] += len(events)
+    item['found_words'] += sum(event['type'] == 'found_word' for event in events)
+    item['completed_entries'] += sum(event['type'] in ('completed_entry', 'completed_unit') for event in events)
+    category = ('reveals' if kind in ('reveal', 'reveal_entry') else
+                'checks' if kind in ('check', 'check_entry') else f'{kind}s')
+    if category in item:
+        item[category] += 1
+    item['last_at'] = created_at.isoformat()
+    contributors[str(actor)] = item
+    attribution['contributors'] = contributors
+    state['_attribution'] = attribution
+    return state
+
+
 def snapshot(db, group, user):
     puzzle = db.get(Puzzle, group.puzzle_id)
     plugin = get_puzzle_type(puzzle.puzzle_type)
@@ -245,11 +310,26 @@ def snapshot(db, group, user):
     context = collaboration_context(db, group)
     found, total = plugin.progress_counter({**group.state, '_participants': context['participants']}, puzzle.solution_payload)
     members = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
-                         .where(GroupMember.group_id == group.id)).all()
+                         .where(GroupMember.group_id == group.id).order_by(GroupMember.id)).all()
     recent = db.scalars(select(GroupAction).where(GroupAction.group_id == group.id)
                         .where(GroupAction.revision > group.puzzle_started_revision)
                         .order_by(GroupAction.id.desc()).limit(20)).all()
     names = {participant_id(m): u.display_name if u else m.guest_name for m, u in members}
+    styles = {participant_id(m): {'color': participant_color(index), 'marker': index + 1}
+              for index, (m, _u) in enumerate(members)}
+    contributor_data = {}
+    for raw in group.state.get('_attribution', {}).get('contributors', {}).values():
+        actor = raw.get('user_id')
+        contributor_data[actor] = {**raw, 'name': names.get(actor, 'Player'),
+            **styles.get(actor, {'color': participant_color(len(styles)), 'marker': len(styles) + 1}), 'current': 0}
+    for owner in group.state.get('_attribution', {}).get('owners', {}).values():
+        actor = owner.get('user_id')
+        if actor not in contributor_data:
+            contributor_data[actor] = {'user_id': actor, 'name': names.get(actor, 'Player'),
+                **styles.get(actor, {'color': participant_color(len(styles)), 'marker': len(styles) + 1}),
+                'actions': 0, 'edits': 0, 'found_words': 0, 'completed_entries': 0,
+                'hints': 0, 'reveals': 0, 'checks': 0, 'clues': 0, 'current': 0, 'last_at': owner.get('at')}
+        contributor_data[actor]['current'] += 1
     transfer_candidates = [member.user_id for member, _account in host_candidates(db, group)] if can_manage_group(user, group) else []
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
             'host_id': group.host_id, 'user_id': user.id, 'revision': group.revision,
@@ -272,9 +352,13 @@ def snapshot(db, group, user):
             'url': f'/puzzles/{group.puzzle_id}?group={group.id}',
             'invite_url': f'/groups/{group.id}',
             'members': presence_members(db, group, user),
+            'contributors': sorted(contributor_data.values(), key=lambda item: (-item['current'], -item['actions'], item['name'].casefold())),
             'recent': [{'revision': a.revision, 'user_id': a.user_id if a.user_id is not None else -a.guest_member_id,
                         'name': names.get(a.user_id if a.user_id is not None else -a.guest_member_id, 'Player'),
-                        'kind': a.kind, 'keys': list(a.changes)} for a in recent]}
+                        'kind': a.kind, 'target': a.target, 'at': utc(a.created_at).isoformat(),
+                        'keys': ([event.get('key') for event in (a.contributions or []) if event.get('key')]
+                                 or list(a.changes or {}))}
+                       for a in recent]}
 
 
 @router.post('/api/puzzles/{puzzle_id}/groups')
@@ -420,17 +504,23 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
     if any(len(k) > 80 or len(v) > plugin.collaboration_value_limit for k, v in payload.changes.items()):
         raise HTTPException(422, 'Cell value too long')
     action = {**payload.model_dump(mode='json'), '_actor': user.id, **collaboration_context(db, group)}
+    before_state = deepcopy(group.state)
     try: state = plugin.collaboration(group.state, action, puzzle.solution_payload)
     except ValueError as error: raise HTTPException(422, str(error))
-    before = group.state.get('answers', {})
+    before = before_state.get('answers', {})
     after = state.get('answers', {})
     changed = {k: after.get(k, '') for k in set(before) | set(after) if before.get(k, '') != after.get(k, '')}
     group.revision += 1
+    actor = participant_id(member)
+    created_at = now()
+    contributions = attribution_events(plugin, before_state, state, action, changed)
+    state = apply_attribution(state, contributions, actor, payload.kind, group.revision, created_at)
     group.state = state
     group.cell_versions = {**group.cell_versions, **{k: group.revision for k in changed}}
     db.add(GroupAction(group_id=group.id, action_id=str(payload.action_id), user_id=member.user_id,
                        guest_member_id=member.id if member.user_id is None else None,
-                       revision=group.revision, kind=payload.kind, changes=changed))
+                       revision=group.revision, kind=payload.kind, target=payload.target,
+                       changes=changed, contributions=contributions, created_at=created_at))
     db.commit()
     publish_state_change(group.id)
     return snapshot(db, group, user)
@@ -546,6 +636,7 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
     previous = group.state
     group.state = configure_collaboration(plugin, previous, payload.puzzle_options, puzzle.solution_payload)
     if group.state != previous:
+        group.state.pop('_attribution', None)
         group.revision += 1
         group.puzzle_started_revision = group.revision
         group.cell_versions = {k: group.revision for k in set(previous.get('answers', {})) | set(group.state.get('answers', {}))}

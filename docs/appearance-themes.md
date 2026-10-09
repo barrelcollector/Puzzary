@@ -30,4 +30,4 @@ Packages cannot include CSS, JavaScript, HTML, URLs, fonts, or external assets. 
 
 Use the live editor at `/admin/themes` to create or update a theme. Export produces the complete validated manifest, which another Puzzary administrator can install from the same page. Disabling or removing a custom theme causes affected users to fall back to the active server default; if the removed theme was the default, Puzzary falls back to Follow System.
 
-Game plugins should style surfaces with the semantic CSS variables above. Puzzle cells use `--puzzle-cell` and `--puzzle-grid`. Group Solve uses `--player-1` through `--player-6` and continues to display participant names so attribution never relies on color alone.
+Game plugins should style surfaces with the semantic CSS variables above. Puzzle cells use `--puzzle-cell` and `--puzzle-grid`. The first six theme `--player-*` values remain fallback colors; Group Solve normally supplies each member's stable, session-unique `color`. Participant names and numbered markers ensure attribution never relies on color alone.
