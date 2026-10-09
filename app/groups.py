@@ -1,6 +1,7 @@
 """Persistent Group Solve sessions with opt-in, group-scoped guests."""
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+import os
 import secrets
 import uuid
 import hashlib
@@ -18,6 +19,8 @@ from app.group_presence import publish_state_change
 
 router = APIRouter()
 SERVER_LIMIT = 50
+HOST_RECONNECT_GRACE_SECONDS = max(1, min(300, int(os.getenv('GROUP_HOST_RECONNECT_GRACE_SECONDS', '30'))))
+MEMBER_ONLINE_SECONDS = 20
 
 
 @router.websocket('/api/groups/{group_id}/presence/ws')
@@ -112,6 +115,10 @@ class MemberControl(BaseModel):
     action: Literal['approve', 'remove']
 
 
+class HostTransfer(BaseModel):
+    user_id: int = Field(gt=0)
+
+
 class Pointer(BaseModel):
     key: str = Field(default='', max_length=80)
     x: float = Field(ge=0, le=1, allow_inf_nan=False)
@@ -133,7 +140,7 @@ def presence_members(db, group, user):
     for member, account in rows:
         if member.status != 'active' and not can_manage_group(user,group):
             continue
-        online = bool(member.seen_at and (now()-utc(member.seen_at)).total_seconds() < 20)
+        online = bool(member.seen_at and (now()-utc(member.seen_at)).total_seconds() < MEMBER_ONLINE_SECONDS)
         value = member.presence or {}
         fresh = online and now().timestamp() - value.get('updated_at', 0) < 4
         result.append({'user_id': participant_id(member), 'name': account.display_name if account else member.guest_name,
@@ -155,6 +162,58 @@ def member_for(db, group, user, active=True):
     if not member or (active and member.status != 'active'):
         raise HTTPException(403, 'Join this Group Solve first; approval may be required')
     return member
+
+
+def host_capable(user):
+    return bool(user and user.is_active and user.can('groups.host') and user.can('groups.moderate'))
+
+
+def host_candidates(db, group, *, connected_only=True, exclude_user_ids=()):
+    cutoff = now() - timedelta(seconds=MEMBER_ONLINE_SECONDS)
+    rows = db.execute(
+        select(GroupMember, User).join(User, GroupMember.user_id == User.id)
+        .where(GroupMember.group_id == group.id, GroupMember.status == 'active')
+        .order_by(GroupMember.id)
+    ).all()
+    excluded = set(exclude_user_ids)
+    return [
+        (member, account) for member, account in rows
+        if account.id not in excluded and host_capable(account)
+        and (not connected_only or (member.seen_at is not None and utc(member.seen_at) >= cutoff))
+    ]
+
+
+def change_host(group, target, *, reason):
+    previous = group.host_id
+    if target is None:
+        group.closed = True
+        group.revision += 1
+        return {'previous_host_id': previous, 'host_id': None, 'reason': reason, 'closed': True}
+    group.host_id = target.user_id
+    group.revision += 1
+    return {'previous_host_id': previous, 'host_id': target.user_id, 'reason': reason, 'closed': False}
+
+
+def transfer_after_departure(db, group, departing_user_id, *, reason, connected_only=True):
+    candidates = host_candidates(db, group, connected_only=connected_only, exclude_user_ids={departing_user_id})
+    return change_host(group, candidates[0][0] if candidates else None, reason=reason)
+
+
+def maybe_transfer_disconnected_host(db, group):
+    if group.closed:
+        return None
+    host_member = db.scalar(select(GroupMember).where(
+        GroupMember.group_id == group.id, GroupMember.user_id == group.host_id
+    ))
+    cutoff = now() - timedelta(seconds=HOST_RECONNECT_GRACE_SECONDS)
+    if host_member and host_member.status == 'active' and host_member.seen_at is not None and utc(host_member.seen_at) >= cutoff:
+        return None
+    departing_user_id = group.host_id
+    if host_member and host_member.status == 'active':
+        host_member.status = 'left'
+        host_member.focus = ''
+        host_member.presence = None
+    return transfer_after_departure(db, group, departing_user_id, reason='disconnected')
 
 
 def writable(group):
@@ -191,6 +250,7 @@ def snapshot(db, group, user):
                         .where(GroupAction.revision > group.puzzle_started_revision)
                         .order_by(GroupAction.id.desc()).limit(20)).all()
     names = {participant_id(m): u.display_name if u else m.guest_name for m, u in members}
+    transfer_candidates = [member.user_id for member, _account in host_candidates(db, group)] if can_manage_group(user, group) else []
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
             'host_id': group.host_id, 'user_id': user.id, 'revision': group.revision,
             'puzzle_epoch': group.puzzle_started_revision,
@@ -205,6 +265,9 @@ def snapshot(db, group, user):
             'allow_guests': guests_allowed(db, group),
             'can_allow_guests': can_manage_group(user, group) and user.can('groups.guests'),
             'can_moderate': can_manage_group(user,group),
+            'can_transfer_host': can_manage_group(user, group),
+            'host_transfer_candidates': transfer_candidates,
+            'host_reconnect_grace_seconds': HOST_RECONNECT_GRACE_SECONDS,
             'is_guest': getattr(user, 'is_guest', False),
             'url': f'/puzzles/{group.puzzle_id}?group={group.id}',
             'invite_url': f'/groups/{group.id}',
@@ -253,8 +316,9 @@ def join_group(payload: Join, request: Request, db: Session = Depends(get_db)):
         db.add(member)
     member.status = 'pending' if group.approval_required and user.id != group.host_id else 'active'
     member.seen_at = now()
+    host_change = maybe_transfer_disconnected_host(db, group)
     db.commit()
-    publish_state_change(group.id)
+    if host_change or member.status == 'active': publish_state_change(group.id)
     return {'pending': True, 'url': f'/puzzles/{group.puzzle_id}?group={group.id}', 'id': group.id} if member.status == 'pending' else snapshot(db, group, user)
 
 
@@ -303,11 +367,13 @@ def join_guest(group_id: str, payload: GuestJoin, request: Request, db: Session 
 
 @router.get('/api/groups/{group_id}')
 def read_group(group_id: str, request: Request, focus: str = '', db: Session = Depends(get_db)):
-    group = group_for(db, group_id)
+    group = group_for(db, group_id, True)
     user = require_group_user(request, db, group)
     member = member_for(db, group, user)
     member.seen_at = now(); member.focus = focus[:80]
+    host_change = maybe_transfer_disconnected_host(db, group)
     db.commit()
+    if host_change: publish_state_change(group.id)
     return snapshot(db, group, user)
 
 
@@ -324,6 +390,13 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
     group = group_for(db, group_id, True)
     user = require_group_user(request, db, group)
     member = member_for(db, group, user); writable(group)
+    member.seen_at = now()
+    host_change = maybe_transfer_disconnected_host(db, group)
+    if host_change and group.closed:
+        db.commit()
+        publish_state_change(group.id)
+        raise HTTPException(409, 'This Group Solve closed because no eligible host remained')
+    writable(group)
     if ((payload.puzzle_id is not None and payload.puzzle_id != group.puzzle_id)
             or (group.puzzle_started_revision > 0 and payload.puzzle_id is None)):
         raise HTTPException(409, 'The group moved; reload the current puzzle before editing')
@@ -365,7 +438,7 @@ def group_action(group_id: str, payload: Action, request: Request, db: Session =
 
 @router.post('/api/groups/{group_id}/presence')
 def update_presence(group_id: str, payload: Presence, request: Request, db: Session = Depends(get_db)):
-    group = group_for(db, group_id)
+    group = group_for(db, group_id, True)
     user = require_group_user(request, db, group)
     member = member_for(db, group, user)
     writable(group)
@@ -374,7 +447,9 @@ def update_presence(group_id: str, payload: Presence, request: Request, db: Sess
     member.focus = payload.focus
     member.seen_at = now()
     member.presence = {**payload.model_dump(mode='json'), 'updated_at': now().timestamp()}
+    host_change = maybe_transfer_disconnected_host(db, group)
     db.commit()
+    if host_change: publish_state_change(group.id)
     members = presence_members(db, group, user)
     from app.group_presence import publish_from_http
     publish_from_http(group_id, next(m for m in members if m['user_id'] == user.id))
@@ -403,16 +478,40 @@ def manage_member(group_id: str, payload: MemberControl, request: Request, db: S
     return snapshot(db, group, user)
 
 
+@router.post('/api/groups/{group_id}/host')
+def transfer_host(group_id: str, payload: HostTransfer, request: Request, db: Session = Depends(get_db)):
+    user = core().require_api_user(request, db)
+    group = group_for(db, group_id, True); writable(group)
+    if not can_manage_group(user, group):
+        raise HTTPException(403, 'Group moderation permission required')
+    if payload.user_id == group.host_id:
+        raise HTTPException(422, 'That player is already the host')
+    member = db.scalar(select(GroupMember).where(
+        GroupMember.group_id == group.id, GroupMember.user_id == payload.user_id
+    ))
+    target = db.get(User, payload.user_id)
+    if not member or member.status != 'active' or not host_capable(target):
+        raise HTTPException(422, 'Choose an eligible signed-in participant')
+    if member.seen_at is None or (now() - utc(member.seen_at)).total_seconds() >= MEMBER_ONLINE_SECONDS:
+        raise HTTPException(409, 'That participant is no longer connected')
+    change_host(group, member, reason='voluntary')
+    db.commit()
+    publish_state_change(group.id)
+    return snapshot(db, group, user)
+
+
 @router.post('/api/groups/{group_id}/leave')
 def leave_group(group_id: str, request: Request, db: Session = Depends(get_db)):
     group = group_for(db, group_id, True)
     user = require_group_user(request, db, group)
     member = member_for(db, group, user, active=False)
-    if member.status != 'removed' and user.id != group.host_id: member.status = 'left'
+    was_host = not getattr(user, 'is_guest', False) and user.id == group.host_id
+    if member.status != 'removed': member.status = 'left'
     member.focus = ''; member.seen_at = None; member.presence = None
+    host_change = transfer_after_departure(db, group, user.id, reason='left', connected_only=False) if was_host else None
     db.commit()
     publish_state_change(group.id)
-    return {'left': True}
+    return {'left': True, 'host_change': host_change}
 
 
 @router.post('/api/groups/{group_id}/close')

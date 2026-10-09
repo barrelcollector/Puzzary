@@ -50,9 +50,9 @@ def read_snapshot(socket, group_id):
 
 
 def authorize(socket, group_id, value=None):
-    from app.groups import require_group_user, group_for, member_for, writable, now, presence_members
+    from app.groups import require_group_user, group_for, member_for, writable, now, presence_members, maybe_transfer_disconnected_host
     with SessionLocal() as db:
-        group = group_for(db, group_id)
+        group = group_for(db, group_id, True)
         user = require_group_user(socket, db, group)
         member = member_for(db, group, user)
         writable(group)
@@ -60,7 +60,10 @@ def authorize(socket, group_id, value=None):
         if value is not None:
             member.focus = value.get('focus', '')
             member.presence = value
+        host_change = maybe_transfer_disconnected_host(db, group)
         db.commit()
+        if host_change:
+            publish_state_change(group.id)
         members = presence_members(db, group, user)
         return next(m for m in members if m['user_id'] == user.id), members
 

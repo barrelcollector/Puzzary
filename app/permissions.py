@@ -187,7 +187,7 @@ def authorize_request(request, db, user, administrative=False):
         require(user,'content.manage' if path.startswith('/admin/') or method!='GET' else 'content.view'); return
     if path.startswith('/api/groups') or path.endswith('/groups') or name=='presence_socket':
         permission = 'groups.host' if name=='create_group' else 'groups.invite' if name=='group_invitation' else 'groups.join'
-        if name in ['manage_member','close_group','group_settings','group_puzzles','move_group']:
+        if name in ['manage_member','transfer_host','close_group','group_settings','group_puzzles','move_group']:
             permission = 'groups.moderate'
             from app.groups import group_for
             group = group_for(db,request.path_params['group_id'])

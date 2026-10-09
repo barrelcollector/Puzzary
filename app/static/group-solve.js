@@ -246,6 +246,7 @@
   function show(data, preserve = {}) {
     if (followPuzzle(data)) return;
     if (snapshot && data.revision < snapshot.revision) return;
+    const previousHost = snapshot?.host_id;
     const reset = snapshot && data.puzzle_epoch !== snapshot.puzzle_epoch;
     if (reset) {
       preserve = {};
@@ -254,6 +255,10 @@
       window.PuzzaryCelebrate?.reset();
     }
     snapshot = data;
+    if (previousHost !== undefined && previousHost !== data.host_id) {
+      const nextHost = data.members.find(member => member.user_id === data.host_id);
+      message(nextHost ? `${nextHost.name} is now the Group Solve host.` : 'The Group Solve session ended because no eligible host remained.');
+    }
     panel.dataset.revision = data.revision;
     baseline = adapter?.scope ? adapter.scope(data.state.answers || {},data) : {...data.state.answers};
     const merged = {...data.state.answers};
@@ -296,10 +301,25 @@
       }
       setText(item.firstElementChild,`${member.name}${member.user_id === data.host_id ? ' (host)' : member.guest ? ' (guest)' : ''} - ${member.status === 'pending' ? 'awaiting approval' : member.online ? 'online' : 'away'}`);
       item.classList.toggle('current-turn',adapter?.activePlayer?.(data) === member.user_id);
-      const actions = `${host}:${data.closed}:${member.status}`;
+      const canTransfer = data.can_transfer_host && data.host_transfer_candidates.includes(member.user_id)
+        && member.user_id !== data.host_id && member.status === 'active' && member.online;
+      const actions = `${host}:${data.closed}:${member.status}:${member.online}:${canTransfer}`;
       if (item.dataset.actions === actions) continue;
       item.dataset.actions = actions;
       const controls = item.lastElementChild; controls.replaceChildren();
+      if (canTransfer && !data.closed) {
+        const transfer = document.createElement('button'); transfer.type = 'button'; transfer.textContent = 'Transfer host';
+        transfer.className = 'ghost-button'; transfer.setAttribute('aria-label',`Transfer host to ${member.name}`);
+        transfer.addEventListener('click',async () => {
+          if (!confirm(`Transfer host control to ${member.name}? You will remain in the session as a participant.`)) return;
+          mutation++;
+          try {
+            show(await api(`/api/groups/${id}/host`,{user_id:member.user_id}), adapter ? diff(adapter.read(),baseline) : {});
+            message(`Host control transferred to ${member.name}.`);
+          } catch(error) { message(error.message); }
+        });
+        controls.append(transfer);
+      }
       if (host && member.user_id !== data.host_id && !data.closed) {
         for (const action of member.status === 'pending' ? ['approve','remove'] : ['remove']) {
           const button = document.createElement('button'); button.type = 'button'; button.textContent = action === 'approve' ? 'Approve' : 'Remove';
