@@ -1,4 +1,5 @@
 <p>{{ puzzle.prompt }}</p>
+{% set progressive = play_payload.settings.progressive | default({}) %}
 <div
   class="sudoku-play"
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
@@ -7,7 +8,22 @@
   data-box-rows="{{ play_payload.settings.box_rows | default(3) }}"
   data-box-cols="{{ play_payload.settings.box_cols | default(3) }}"
   data-check-mode="{{ play_payload.settings.check_mode | default('check_puzzle') }}"
+  data-progressive='{{ progressive | tojson }}'
+  data-progressive-completed='{{ progress_payload.get("progressive_completed", []) | tojson }}'
+  data-progressive-authors='{{ progress_payload.get("progressive_authors", {}) | tojson }}'
 >
+  {% if progressive.get('enabled') %}
+    <section class="sudoku-progressive" aria-labelledby="sudoku-progressive-title">
+      <div>
+        <strong id="sudoku-progressive-title">Progressive solve</strong>
+        <span class="muted" id="sudoku-progressive-summary" role="status" aria-live="polite"></span>
+      </div>
+      <div class="sudoku-unit-list" id="sudoku-unit-list" role="list" aria-label="Sudoku unit progress"></div>
+      {% if progressive.get('validation') == 'manual' %}
+        <button type="button" class="ghost-button" id="sudoku-check-units">Check Units</button>
+      {% endif %}
+    </section>
+  {% endif %}
   <div
     class="sudoku-grid"
     style="--sudoku-size: {{ play_payload.settings.grid_size | default(9) }}; --box-rows: {{ play_payload.settings.box_rows | default(3) }}; --box-cols: {{ play_payload.settings.box_cols | default(3) }}"
@@ -33,6 +49,8 @@
             maxlength="1"
             autocomplete="off"
             data-key="{{ cell_key }}"
+            data-given="{{ 'true' if value else 'false' }}"
+            {% if progressive.get('enabled') %}aria-describedby="sudoku-progressive-summary"{% endif %}
             value="{{ value if value else progress_answers[cell_key] | default('') }}"
             {% if value %}disabled{% endif %}
           >

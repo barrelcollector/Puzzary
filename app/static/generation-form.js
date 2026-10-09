@@ -118,6 +118,7 @@
       target.appendChild(label);
     });
     applyFieldConditions(form);
+    renderSudokuProgressivePreview(form);
   }
 
   function selectedText(control) {
@@ -143,6 +144,41 @@
     const detail = document.createElement("dd");
     detail.textContent = value;
     summary.append(term, detail);
+  }
+
+  function renderSudokuProgressivePreview(form, manual = false) {
+    const type = form.querySelector(manual ? '[data-manual-puzzle-type]' : '[data-puzzle-type]')?.value;
+    const target = form.querySelector(manual ? '[data-manual-fields]' : '[data-generation-fields]');
+    if (!target || type !== 'sudoku') return;
+    const prefix = manual ? 'manual_' : 'gen_';
+    let preview = target.querySelector('[data-sudoku-progressive-preview]');
+    if (!preview) {
+      preview = document.createElement('div');
+      preview.className = 'notice'; preview.dataset.sudokuProgressivePreview = '';
+      target.append(preview);
+    }
+    const enabled = form.querySelector(`[name="${prefix}progressive_solve"]`)?.value === 'yes';
+    if (!enabled) {
+      preview.innerHTML = '<strong>Progressive solve preview:</strong> Off. Players complete the full grid normally.';
+      return;
+    }
+    const units = Array.from(form.querySelectorAll(`[name="${prefix}progressive_units"]:checked:not(:disabled)`))
+      .map(input => input.closest('label')?.textContent.trim() || input.value);
+    const validation = selectedText(form.querySelector(`[name="${prefix}progressive_validation"]`));
+    const order = selectedText(form.querySelector(`[name="${prefix}progressive_order"]`));
+    const marked = form.querySelector(`[name="${prefix}progressive_mark"]`)?.value === 'yes';
+    const locked = form.querySelector(`[name="${prefix}progressive_lock"]`)?.value === 'yes';
+    const sequence = selectedText(form.querySelector(`[name="${prefix}progressive_sequence"]`));
+    preview.replaceChildren();
+    const heading = document.createElement('strong'); heading.textContent = 'Progressive solve preview';
+    const description = document.createElement('p'); description.className = 'muted';
+    description.textContent = `${validation || 'Automatic validation'}; ${order || 'Any order'}${sequence ? ` (${sequence})` : ''}. Completed cells are ${marked ? 'marked' : 'not marked'} and ${locked ? 'locked' : 'still editable'}.`;
+    const chips = document.createElement('div'); chips.className = 'sudoku-unit-list';
+    (units.length ? units : ['Rows']).forEach((label,index) => {
+      const chip = document.createElement('span'); chip.className = `sudoku-unit${index === 0 ? ' active' : ''}`;
+      chip.textContent = `${label} — ${index === 0 ? 'active' : 'incomplete'}`; chips.append(chip);
+    });
+    preview.append(heading,description,chips);
   }
 
   function renderSummary(form) {
@@ -254,8 +290,8 @@
       backButton.addEventListener("click", () => showStep(form, Number(form.dataset.currentStep || 0) - 1));
     }
 
-    form.addEventListener("input", () => renderSummary(form));
-    form.addEventListener("change", () => { applyFieldConditions(form); renderSummary(form); });
+    form.addEventListener("input", () => { renderSummary(form); renderSudokuProgressivePreview(form); });
+    form.addEventListener("change", () => { applyFieldConditions(form); renderSummary(form); renderSudokuProgressivePreview(form); });
   });
 
   function manualEditorValues() {
@@ -331,10 +367,13 @@
       }
       target.appendChild(label);
     });
+    applyFieldConditions(form);
+    renderSudokuProgressivePreview(form, true);
   }
 
   manualForms.forEach((form) => {
-    form.addEventListener('change', () => applyFieldConditions(form));
+    form.addEventListener('input', () => renderSudokuProgressivePreview(form, true));
+    form.addEventListener('change', () => { applyFieldConditions(form); renderSudokuProgressivePreview(form, true); });
     renderManualFields(form);
     updateManualMode(form);
     const typeSelect = form.querySelector("[data-manual-puzzle-type]");

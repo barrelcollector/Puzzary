@@ -5411,13 +5411,13 @@ def play_action(
         if payload.changes:
             state = puzzle_type.collaboration(
                 state,
-                {"kind": "patch", "changes": payload.changes, "target": ""},
+                {"kind": "patch", "changes": payload.changes, "target": "", "_actor": user.id},
                 puzzle.solution_payload,
             )
         if payload.kind != "patch":
             state = puzzle_type.collaboration(
                 state,
-                {"kind": payload.kind, "changes": {}, "target": payload.target},
+                {"kind": payload.kind, "changes": {}, "target": payload.target, "_actor": user.id},
                 puzzle.solution_payload,
             )
     except ValueError as error:

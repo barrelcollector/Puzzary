@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from typing import Any
 
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
@@ -226,6 +227,148 @@ def given_cells(puzzle_grid: Grid) -> dict[str, str]:
     }
 
 
+PROGRESSIVE_TYPES = ("row", "column", "box")
+
+
+def option_values(options: dict[str, Any], key: str) -> list[str]:
+    value = options.get(key, [])
+    values = value if isinstance(value, list) else str(value or "").replace(";", ",").split(",")
+    return [str(item).strip().lower() for item in values if str(item).strip()]
+
+
+def sudoku_unit_map(size: int, box_rows: int, box_cols: int, unit_types: list[str]) -> dict[str, list[str]]:
+    units: dict[str, list[str]] = {}
+    if "row" in unit_types:
+        for row in range(size):
+            units[f"row:{row + 1}"] = [f"{col},{row}" for col in range(size)]
+    if "column" in unit_types:
+        for col in range(size):
+            units[f"column:{col + 1}"] = [f"{col},{row}" for row in range(size)]
+    if "box" in unit_types:
+        number = 0
+        for top in range(0, size, box_rows):
+            for left in range(0, size, box_cols):
+                number += 1
+                units[f"box:{number}"] = [
+                    f"{col},{row}"
+                    for row in range(top, top + box_rows)
+                    for col in range(left, left + box_cols)
+                ]
+    return units
+
+
+def normalize_unit_id(value: str) -> str:
+    compact = value.strip().lower().replace(" ", "").replace("-", ":")
+    aliases = {"r": "row", "row": "row", "c": "column", "col": "column", "column": "column", "b": "box", "box": "box"}
+    match = re.fullmatch(r"([a-z]+):?(\d+)", compact)
+    if not match or match.group(1) not in aliases:
+        raise ValueError(f"Unknown progressive Sudoku unit '{value.strip()}'. Use values such as row:1, column:2, or box:3.")
+    return f"{aliases[match.group(1)]}:{int(match.group(2))}"
+
+
+def progressive_settings(options: dict[str, Any], size: int, box_rows: int, box_cols: int) -> dict[str, Any]:
+    enabled = bool_option(options, "progressive_solve", False)
+    selected = option_values(options, "progressive_units")
+    unit_types = [kind for kind in PROGRESSIVE_TYPES if kind in selected]
+    if enabled and not unit_types:
+        unit_types = ["row"]
+    validation = str(options.get("progressive_validation", "automatic")).strip().lower()
+    if validation not in {"automatic", "manual"}:
+        validation = "automatic"
+    order = str(options.get("progressive_order", "any")).strip().lower()
+    if order not in {"any", "sequence"}:
+        order = "any"
+    units = sudoku_unit_map(size, box_rows, box_cols, unit_types)
+    sequence: list[str] = []
+    if enabled and order == "sequence":
+        raw_sequence = str(options.get("progressive_sequence", "")).replace("\n", ",").split(",")
+        sequence = [normalize_unit_id(value) for value in raw_sequence if value.strip()] or list(units)
+        if len(sequence) != len(set(sequence)):
+            raise ValueError("Progressive Sudoku sequence cannot contain duplicate units.")
+        if set(sequence) != set(units):
+            raise ValueError("Progressive Sudoku sequence must include every selected unit exactly once.")
+    return {
+        "enabled": enabled,
+        "units": unit_types,
+        "validation": validation,
+        "mark_completed": bool_option(options, "progressive_mark", True),
+        "lock_completed": bool_option(options, "progressive_lock", False),
+        "order": order,
+        "sequence": sequence,
+    }
+
+
+def progressive_unit_state(state: dict, solution_payload: dict) -> tuple[dict[str, list[str]], dict[str, str], dict[str, str], dict]:
+    settings = solution_payload.get("settings", {})
+    progressive = settings.get("progressive", {}) if isinstance(settings, dict) else {}
+    if not isinstance(progressive, dict) or not progressive.get("enabled"):
+        return {}, {}, {}, {}
+    size = int(settings.get("grid_size", len(solution_payload.get("grid", [])) or 9))
+    units = sudoku_unit_map(size, int(settings.get("box_rows", 3)), int(settings.get("box_cols", 3)), list(progressive.get("units", [])))
+    expected = {
+        f"{col},{row}": str(value)
+        for row, line in enumerate(solution_payload.get("grid", []))
+        for col, value in enumerate(line)
+    }
+    givens = {str(key): str(value) for key, value in solution_payload.get("givens", {}).items()}
+    answers = state.get("answers", {}) if isinstance(state.get("answers"), dict) else {}
+    return units, expected, {**givens, **{str(key): str(value) for key, value in answers.items()}}, progressive
+
+
+def update_progressive_state(state: dict, action: dict, solution_payload: dict) -> dict:
+    units, expected, combined, progressive = progressive_unit_state(state, solution_payload)
+    if not units:
+        for key in ("progressive_completed", "progressive_authors", "progressive_blocked", "progressive_active"):
+            state.pop(key, None)
+        return state
+    correct = {unit_id for unit_id, keys in units.items() if all(combined.get(key) == expected.get(key) for key in keys)}
+    full = {unit_id for unit_id, keys in units.items() if all(combined.get(key) for key in keys)}
+    completed = {unit_id for unit_id in state.get("progressive_completed", []) if unit_id in correct}
+    authors = {str(key): value for key, value in state.get("progressive_authors", {}).items() if key in completed}
+    blocked = {unit_id for unit_id in state.get("progressive_blocked", []) if unit_id in full and unit_id not in completed}
+    sequence = list(progressive.get("sequence") or units)
+    ordered = progressive.get("order") == "sequence"
+    actor = action.get("_actor")
+    validate = action.get("kind") in {"check", "progressive_check", "reveal"} or (
+        progressive.get("validation") == "automatic" and action.get("kind") in {"patch", "hint"}
+    )
+
+    def complete(unit_id: str) -> None:
+        completed.add(unit_id)
+        blocked.discard(unit_id)
+        if actor is not None:
+            authors[unit_id] = actor
+
+    if action.get("kind") == "reveal":
+        for unit_id in units:
+            complete(unit_id)
+    elif validate and ordered:
+        while True:
+            active = next((unit_id for unit_id in sequence if unit_id not in completed), None)
+            if active is None or active not in full or active in blocked:
+                break
+            if active in correct:
+                complete(active)
+            else:
+                blocked.add(active)
+                break
+    elif validate:
+        for unit_id in units:
+            if unit_id in completed or unit_id not in full or unit_id in blocked:
+                continue
+            if unit_id in correct:
+                complete(unit_id)
+            else:
+                blocked.add(unit_id)
+
+    ordered_completed = [unit_id for unit_id in units if unit_id in completed]
+    state["progressive_completed"] = ordered_completed
+    state["progressive_authors"] = {unit_id: authors[unit_id] for unit_id in ordered_completed if unit_id in authors}
+    state["progressive_blocked"] = [unit_id for unit_id in units if unit_id in blocked]
+    state["progressive_active"] = next((unit_id for unit_id in sequence if unit_id not in completed), "") if ordered else ""
+    return state
+
+
 def check_answer(answer: str, solution_payload: dict) -> tuple[bool, int, int]:
     supplied = flat_answer_from_payload(answer)
     expected = {
@@ -243,6 +386,21 @@ def normalize_progress(payload: Any, solution_payload: dict) -> dict:
     supplied = flat_answer_from_payload(getattr(payload, "answers", {}) if payload is not None else {})
     givens = {str(key): str(value) for key, value in solution_payload.get("givens", {}).items()}
     return {"answers": {key: value for key, value in supplied.items() if key not in givens}}
+
+
+_cell_collaboration = cell_collaboration(normalize_progress)
+
+
+def sudoku_collaboration(state: dict, action: dict, solution_payload: dict) -> dict:
+    units, _expected, _combined, progressive = progressive_unit_state(state, solution_payload)
+    if units and progressive.get("lock_completed") and action.get("kind") == "patch":
+        completed = set(state.get("progressive_completed", []))
+        locked = {key for unit_id in completed for key in units.get(unit_id, [])}
+        if locked.intersection(action.get("changes", {})):
+            raise ValueError("Completed Sudoku units are locked")
+    base_action = action if action.get("kind") != "progressive_check" else {**action, "kind": "patch", "changes": {}}
+    updated = _cell_collaboration(state, base_action, solution_payload)
+    return update_progressive_state(updated, action, solution_payload)
 
 
 def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int, int]:
@@ -318,6 +476,7 @@ def generate(
         "candidate_notes": show_candidate_notes,
         "check_mode": check_mode,
         "uniqueness_verified": uniqueness_verified,
+        "progressive": progressive_settings(generation_options, size, box_rows, box_cols),
     }
     payload = {
         "kind": "sudoku",
@@ -449,6 +608,7 @@ def build_manual_grid_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
         "candidate_notes": bool_option(options, "candidate_notes", False),
         "check_mode": str(options.get("check_mode") or "check_puzzle"),
         "uniqueness_verified": False,
+        "progressive": progressive_settings(options, size, box_rows, box_cols),
     }
     payload = {"kind": "sudoku", "grid": puzzle, "givens": givens, "settings": settings}
     return GeneratedPuzzle(
@@ -472,10 +632,90 @@ def build_manual_grid_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
     )
 
 
+PROGRESSIVE_FIELDS = (
+    GenerationField(
+        name="progressive_solve",
+        label="Progressive solve",
+        field_type="select",
+        default="no",
+        help_text="Acknowledge complete rows, columns, or boxes without revealing individual cell correctness.",
+        options=(
+            {"value": "no", "label": "Off"},
+            {"value": "yes", "label": "On"},
+        ),
+    ),
+    GenerationField(
+        name="progressive_units",
+        label="Progression units",
+        field_type="checkboxes",
+        default=("row",),
+        help_text="Choose one or more unit types.",
+        options=(
+            {"value": "row", "label": "Rows"},
+            {"value": "column", "label": "Columns"},
+            {"value": "box", "label": "Boxes"},
+        ),
+        enabled_when=(("progressive_solve", "yes"),),
+    ),
+    GenerationField(
+        name="progressive_validation",
+        label="Unit validation",
+        field_type="select",
+        default="automatic",
+        options=(
+            {"value": "automatic", "label": "Automatic when a unit becomes full"},
+            {"value": "manual", "label": "Only when Check Units is pressed"},
+        ),
+        enabled_when=(("progressive_solve", "yes"),),
+    ),
+    GenerationField(
+        name="progressive_mark",
+        label="Mark completed cells",
+        field_type="select",
+        default="yes",
+        options=(
+            {"value": "yes", "label": "Yes"},
+            {"value": "no", "label": "No, show progress list only"},
+        ),
+        enabled_when=(("progressive_solve", "yes"),),
+    ),
+    GenerationField(
+        name="progressive_lock",
+        label="Lock completed units",
+        field_type="select",
+        default="no",
+        options=(
+            {"value": "no", "label": "No"},
+            {"value": "yes", "label": "Yes"},
+        ),
+        enabled_when=(("progressive_solve", "yes"),),
+    ),
+    GenerationField(
+        name="progressive_order",
+        label="Progression order",
+        field_type="select",
+        default="any",
+        options=(
+            {"value": "any", "label": "Any order"},
+            {"value": "sequence", "label": "Required sequence"},
+        ),
+        enabled_when=(("progressive_solve", "yes"),),
+    ),
+    GenerationField(
+        name="progressive_sequence",
+        label="Required unit sequence",
+        field_type="text",
+        default="",
+        help_text="Optional. Comma-separated units such as row:1,row:2,column:1. Leave blank for rows, then columns, then boxes.",
+        enabled_when=(("progressive_solve", "yes"), ("progressive_order", "sequence")),
+    ),
+)
+
+
 register_puzzle_type(
     PuzzleType(
         slug="sudoku",
-        collaboration=cell_collaboration(normalize_progress),
+        collaboration=sudoku_collaboration,
         label="Sudoku",
         generator=generate,
         source_builder=build_source,
@@ -606,7 +846,7 @@ register_puzzle_type(
                 default="",
                 help_text="Optional. Reuse to recreate the same puzzle.",
             ),
-        ),
+        ) + PROGRESSIVE_FIELDS,
         generation_fields=(
             GenerationField(
                 name="grid_size",
@@ -698,6 +938,6 @@ register_puzzle_type(
                     {"value": "no", "label": "No"},
                 ),
             ),
-        ),
+        ) + PROGRESSIVE_FIELDS,
     )
 )
