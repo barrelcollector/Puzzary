@@ -196,6 +196,7 @@ def snapshot(db, group, user):
             'puzzle_epoch': group.puzzle_started_revision,
             'state': group.state, 'found_count': found, 'expected_count': total,
             'context': context,
+            'completion_message': puzzle.completion_message or '',
             'completed': total > 0 and found == total,
             'closed': group.closed or utc(group.expires_at) <= now(),
             'expires_at': group.expires_at.isoformat(),

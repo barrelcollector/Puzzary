@@ -261,6 +261,12 @@
                 <input type="datetime-local" name="auto_archive_at" value="{{ local_datetime_value(puzzle.auto_archive_at) }}">
                 <small class="muted">{{ puzzary_timezone }}. Leave blank for no automatic archive.</small>
               </label>{% endif %}
+              <label>
+                Completion message
+                <textarea name="completion_message" rows="2" maxlength="500" data-completion-message-input placeholder="Use the default completion message">{{ puzzle.completion_message }}</textarea>
+                <small class="muted">Plain text shown after the puzzle is solved. Leave blank for the default.</small>
+              </label>
+              <div class="notice" data-completion-message-preview><strong>Completion preview:</strong> <span data-completion-message-preview-text>{{ puzzle.completion_message or 'Nice solve.' }}</span></div>
               <button type="submit">Save</button>
             </form>{% endif %}
             <div class="action-row">
@@ -330,6 +336,12 @@
         <label>Title <input name="title" value="{{ selected_puzzle.title if is_edit else '' }}" placeholder="Optional when using a builder"></label>
         <label>Theme <input name="theme" value="{{ selected_puzzle.theme if is_edit else 'manual' }}"></label>
         <label>Difficulty <input name="difficulty" value="{{ selected_puzzle.difficulty if is_edit else 'manual' }}"></label>
+        <label>
+          Completion message
+          <textarea name="completion_message" rows="2" maxlength="500" data-completion-message-input placeholder="Use the default completion message">{{ selected_puzzle.completion_message if is_edit else '' }}</textarea>
+          <small class="muted">Plain text shown to solo players and Group Solve participants after completion.</small>
+        </label>
+        <div class="notice" data-completion-message-preview><strong>Completion preview:</strong> <span data-completion-message-preview-text>{{ selected_puzzle.completion_message if is_edit and selected_puzzle.completion_message else 'Nice solve.' }}</span></div>
         <label>
           Save mode
           <select name="draft">
@@ -461,6 +473,12 @@
 
         <section class="wizard-panel is-hidden" data-wizard-step>
           <h2>Organize & Publish</h2>
+          <label>
+            Completion message
+            <textarea name="completion_message" rows="2" maxlength="500" data-completion-message-input placeholder="Use the default completion message"></textarea>
+            <small class="muted">Optional plain-text message shown after completion.</small>
+          </label>
+          <div class="notice" data-completion-message-preview><strong>Completion preview:</strong> <span data-completion-message-preview-text>Nice solve.</span></div>
           <label>
             Category
             <select name="category_id">
@@ -1248,8 +1266,9 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=9"></script>
+  <script src="/static/generation-form.js?v=10"></script>
   {% for puzzle_type in puzzle_types %}{% if puzzle_type.manual_editor_script %}<script src="/static/{{ puzzle_type.manual_editor_script }}"></script>{% endif %}{% endfor %}
   <script src="/static/manual-builder.js?v=3"></script>
+  <script src="/static/completion-message.js?v=1"></script>
   {% if section == "publishing" %}<script src="/static/publishing.js?v=1"></script>{% endif %}
 {% endblock %}

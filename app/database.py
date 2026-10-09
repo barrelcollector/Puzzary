@@ -112,6 +112,8 @@ def ensure_schema() -> None:
         if "created_by_id" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN created_by_id INTEGER"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzles_created_by_id ON puzzles (created_by_id)"))
+        if "completion_message" not in puzzle_columns:
+            connection.execute(text("ALTER TABLE puzzles ADD COLUMN completion_message TEXT NOT NULL DEFAULT ''"))
         if "category_id" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN category_id INTEGER"))
         if "content_source_id" in puzzle_columns and "word_bank_id" not in puzzle_columns:

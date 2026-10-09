@@ -163,6 +163,7 @@
     }
     addSummary(summary, "Difficulty", selectedText(form.querySelector('select[name="difficulty"]')));
     addSummary(summary, "Seed", selectedText(form.querySelector('input[name="seed"]')) || "Fresh random layout");
+    addSummary(summary, "Completion message", selectedText(form.querySelector('[name="completion_message"]')) || "Default message");
     const summarizedCheckboxes = new Set();
     form.querySelectorAll('[name^="gen_"]:not(:disabled)').forEach((control) => {
       if (control.type === "checkbox") {

@@ -118,6 +118,7 @@ class Puzzle(Base):
     word_bank_id: Mapped[int | None] = mapped_column(ForeignKey("word_banks.id"), nullable=True, index=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     prompt: Mapped[str] = mapped_column(Text, default="")
+    completion_message: Mapped[str] = mapped_column(Text, default="")
     print_payload: Mapped[dict] = mapped_column(JSON)
     play_payload: Mapped[dict] = mapped_column(JSON)
     solution_payload: Mapped[dict] = mapped_column(JSON)

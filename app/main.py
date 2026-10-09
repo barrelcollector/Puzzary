@@ -416,6 +416,7 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         title=puzzle.title,
         theme=puzzle.theme,
         difficulty=puzzle.difficulty,
+        completion_message=puzzle.completion_message or "",
         url=puzzle_url(puzzle.id, db),
         print_payload=puzzle.print_payload,
         play_payload=public_play_payload(puzzle),
@@ -456,6 +457,7 @@ def portable_puzzle_item(puzzle: Puzzle, db: Session | None = None) -> dict:
         "theme": puzzle.theme,
         "difficulty": puzzle.difficulty,
         "prompt": puzzle.prompt,
+        "completion_message": puzzle.completion_message or "",
         "print_payload": puzzle.print_payload or {},
         "play_payload": puzzle.play_payload or {},
         "solution_payload": puzzle.solution_payload or {},
@@ -640,11 +642,21 @@ def parse_json_object_field(value: str, field_name: str) -> dict:
     return parsed
 
 
+def normalize_completion_message(value: str) -> str:
+    message = value.strip()
+    if len(message) > 500:
+        raise ValueError("Completion message must be 500 characters or fewer")
+    if any(ord(character) < 32 and character not in "\r\n\t" for character in message):
+        raise ValueError("Completion message contains unsupported control characters")
+    return message
+
+
 def manual_payload_from_form(
     puzzle_type: str,
     title: str,
     theme: str,
     difficulty: str,
+    completion_message: str,
     prompt: str,
     print_payload: str,
     play_payload: str,
@@ -661,6 +673,7 @@ def manual_payload_from_form(
         title=title.strip(),
         theme=(theme.strip() or "manual")[:80],
         difficulty=(difficulty.strip() or "manual")[:40],
+        completion_message=normalize_completion_message(completion_message),
         prompt=prompt.strip(),
         print_payload=parse_json_object_field(print_payload, "Print payload"),
         play_payload=parse_json_object_field(play_payload, "Play payload"),
@@ -697,6 +710,7 @@ def write_manual_puzzle(
             theme=payload.theme[:80],
             difficulty=payload.difficulty[:40],
             prompt=payload.prompt,
+            completion_message=normalize_completion_message(payload.completion_message),
             print_payload=payload.print_payload,
             play_payload=payload.play_payload,
             solution_payload=payload.solution_payload,
@@ -714,6 +728,7 @@ def write_manual_puzzle(
         puzzle.theme = payload.theme[:80]
         puzzle.difficulty = payload.difficulty[:40]
         puzzle.prompt = payload.prompt
+        puzzle.completion_message = normalize_completion_message(payload.completion_message)
         puzzle.print_payload = payload.print_payload
         puzzle.play_payload = payload.play_payload
         puzzle.solution_payload = payload.solution_payload
@@ -746,6 +761,7 @@ def manual_puzzle_publish_error(db: Session, puzzle: Puzzle) -> str:
         theme=puzzle.theme,
         difficulty=puzzle.difficulty,
         prompt=puzzle.prompt,
+        completion_message=puzzle.completion_message or "",
         print_payload=puzzle.print_payload or {},
         play_payload=puzzle.play_payload or {},
         solution_payload=puzzle.solution_payload or {},
@@ -904,6 +920,7 @@ def import_portable_puzzles(
             theme=str(item.get("theme") or "imported")[:80],
             difficulty=str(item.get("difficulty") or "imported")[:40],
             prompt=str(item.get("prompt") or ""),
+            completion_message=normalize_completion_message(str(item.get("completion_message") or "")),
             print_payload=item.get("print_payload") or {},
             play_payload=item.get("play_payload") or {},
             solution_payload=item.get("solution_payload") or {},
@@ -1428,6 +1445,7 @@ def build_manual_payload_from_helper(
     title: str,
     theme: str,
     difficulty: str,
+    completion_message: str,
     draft: str,
     form,
 ) -> PuzzleManualWrite:
@@ -1455,6 +1473,7 @@ def build_manual_payload_from_helper(
         title=(title.strip() or generated.title)[:160],
         theme=(theme.strip() or "manual")[:80],
         difficulty=(difficulty.strip() or "manual")[:40],
+        completion_message=normalize_completion_message(completion_message),
         prompt=generated.prompt,
         print_payload=generated.print_payload,
         play_payload=generated.play_payload,
@@ -3326,6 +3345,7 @@ async def admin_create_manual_puzzle(
     title: str = Form(""),
     theme: str = Form("manual"),
     difficulty: str = Form("manual"),
+    completion_message: str = Form(""),
     editor_mode: str = Form("raw"),
     prompt: str = Form(""),
     print_payload: str = Form("{}"),
@@ -3342,13 +3362,14 @@ async def admin_create_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, draft, form)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
                 title,
                 theme,
                 difficulty,
+                completion_message,
                 prompt,
                 print_payload,
                 play_payload,
@@ -3371,6 +3392,7 @@ async def admin_update_manual_puzzle(
     title: str = Form(""),
     theme: str = Form("manual"),
     difficulty: str = Form("manual"),
+    completion_message: str = Form(""),
     editor_mode: str = Form("raw"),
     prompt: str = Form(""),
     print_payload: str = Form("{}"),
@@ -3390,13 +3412,14 @@ async def admin_update_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, draft, form)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
                 title,
                 theme,
                 difficulty,
+                completion_message,
                 prompt,
                 print_payload,
                 play_payload,
@@ -3543,6 +3566,7 @@ async def admin_update_puzzle_metadata(
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     auto_archive_at: str | None = Form(None),
+    completion_message: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3551,8 +3575,13 @@ async def admin_update_puzzle_metadata(
     puzzle = db.get(Puzzle, puzzle_id)
     form = await request.form()
     if puzzle is not None:
+        require_owned(user, 'puzzles', 'metadata', puzzle.created_by_id)
         puzzle.category_id = category_id or None
         puzzle.tags = db.scalars(select(PuzzleTag).where(PuzzleTag.id.in_(tag_ids))).all() if tag_ids else []
+        try:
+            puzzle.completion_message = normalize_completion_message(completion_message)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         if 'auto_archive_at' in form:
             require_owned(user,'puzzles','schedule',puzzle.created_by_id)
             puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
@@ -3569,6 +3598,7 @@ async def admin_generate_puzzle(
     theme: str = Form(""),
     difficulty: str = Form("easy"),
     seed: str = Form(""),
+    completion_message: str = Form(""),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
@@ -3602,6 +3632,7 @@ async def admin_generate_puzzle(
             excluded_tag_ids=excluded_tag_ids,
             seed=seed or None,
             generation_options=generation_options_from_form(form),
+            completion_message=normalize_completion_message(completion_message),
         ),
         db,
         creator=user,
@@ -5136,6 +5167,7 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         difficulty=payload.difficulty,
         word_bank_id=word_bank.id if word_bank is not None else None,
         prompt=generated.prompt,
+        completion_message=normalize_completion_message(payload.completion_message),
         print_payload=generated.print_payload,
         play_payload=generated.play_payload,
         solution_payload=generated.solution_payload,

@@ -29,8 +29,8 @@
 >
   <div>
     <p class="celebration-kicker">Puzzle complete</p>
-    <h2>Nice solve.</h2>
-    <p class="muted">Your progress is saved. You can reset and replay whenever you want.</p>
+    <h2>{{ 'Great solve, team.' if group_id else 'Nice solve.' }}</h2>
+    <p class="muted" id="completion-message">{{ puzzle.completion_message if puzzle.completion_message else ('Shared progress is saved for this Group Solve.' if group_id else 'Your progress is saved. You can reset and replay whenever you want.') }}</p>
   </div>
   <div class="celebration-actions">
     <button type="button" class="ghost-button" id="celebration-sound-toggle">Sound on</button>

@@ -15,6 +15,7 @@ class PuzzleGenerateRequest(BaseModel):
     excluded_tag_ids: list[int] = Field(default_factory=list)
     seed: str | None = None
     generation_options: dict = Field(default_factory=dict)
+    completion_message: str = Field("", max_length=500)
 
 
 class PuzzleAttemptCreate(BaseModel):
@@ -55,6 +56,7 @@ class PuzzleSummary(BaseModel):
     title: str
     theme: str
     difficulty: str
+    completion_message: str = ""
     url: str
     print_payload: dict
     play_payload: dict
@@ -89,6 +91,7 @@ class PuzzleManualWrite(BaseModel):
     theme: str = Field("manual", max_length=80)
     difficulty: str = Field("manual", max_length=40)
     prompt: str = ""
+    completion_message: str = Field("", max_length=500)
     print_payload: dict = Field(default_factory=dict)
     play_payload: dict = Field(default_factory=dict)
     solution_payload: dict = Field(default_factory=dict)
