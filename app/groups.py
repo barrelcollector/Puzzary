@@ -2,8 +2,11 @@
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from copy import deepcopy
+from collections import deque
 import os
 import secrets
+import threading
+import time
 import uuid
 import hashlib
 from types import SimpleNamespace
@@ -22,6 +25,10 @@ router = APIRouter()
 SERVER_LIMIT = 50
 HOST_RECONNECT_GRACE_SECONDS = max(1, min(300, int(os.getenv('GROUP_HOST_RECONNECT_GRACE_SECONDS', '30'))))
 MEMBER_ONLINE_SECONDS = 20
+PASSWORD_ATTEMPT_LIMIT = 5
+PASSWORD_ATTEMPT_WINDOW_SECONDS = 60
+password_attempts: dict[tuple[str, str], deque[float]] = {}
+password_attempt_lock = threading.Lock()
 
 
 @router.websocket('/api/groups/{group_id}/presence/ws')
@@ -47,6 +54,8 @@ class GroupOptions(BaseModel):
     participant_limit: int = Field(default=0, ge=0, le=SERVER_LIMIT)
     approval_required: bool = False
     allow_guests: bool = False
+    password: str = Field(default='', max_length=128)
+    remove_password: bool = False
     puzzle_options: dict[str, str] = Field(default_factory=dict, max_length=20)
 
 
@@ -56,6 +65,7 @@ class Join(BaseModel):
 
 class GuestJoin(BaseModel):
     name: str = Field(min_length=1, max_length=80)
+    password: str = Field(default='', max_length=128)
 
 
 class MoveGroup(BaseModel):
@@ -76,6 +86,46 @@ def participant_color(index):
 def guests_allowed(db, group):
     host = db.get(User, group.host_id)
     return bool(group.allow_guests and host and host.can('groups.guests'))
+
+
+def password_attempt_key(request, group):
+    return group.id, request.client.host if request.client else 'unknown'
+
+
+def require_group_password(request, group, password):
+    if not group.password_hash:
+        return
+    key = password_attempt_key(request, group)
+    timestamp = time.monotonic()
+    with password_attempt_lock:
+        attempts = password_attempts.setdefault(key, deque())
+        while attempts and timestamp - attempts[0] >= PASSWORD_ATTEMPT_WINDOW_SECONDS:
+            attempts.popleft()
+        if len(attempts) >= PASSWORD_ATTEMPT_LIMIT:
+            retry = max(1, int(PASSWORD_ATTEMPT_WINDOW_SECONDS - (timestamp - attempts[0])))
+            raise HTTPException(429, 'Too many incorrect password attempts. Try again shortly.', headers={'Retry-After': str(retry)})
+    if not core().verify_password(password, group.password_hash):
+        with password_attempt_lock:
+            password_attempts.setdefault(key, deque()).append(timestamp)
+        raise HTTPException(401, 'The session password is incorrect.')
+    with password_attempt_lock:
+        password_attempts.pop(key, None)
+
+
+def update_group_password(group, password, remove=False):
+    if password and remove:
+        raise HTTPException(422, 'Enter a new password or remove the existing password, not both')
+    if password:
+        error = core().password_error(password)
+        if error:
+            raise HTTPException(422, error)
+        group.password_hash = core().hash_password(password)
+    elif remove:
+        group.password_hash = None
+    if password or remove:
+        with password_attempt_lock:
+            for key in [key for key in password_attempts if key[0] == group.id]:
+                password_attempts.pop(key, None)
 
 
 def can_manage_group(user, group):
@@ -343,6 +393,7 @@ def snapshot(db, group, user):
             'participant_limit': group.participant_limit, 'server_limit': SERVER_LIMIT,
             'approval_required': group.approval_required,
             'allow_guests': guests_allowed(db, group),
+            'password_protected': bool(group.password_hash),
             'can_allow_guests': can_manage_group(user, group) and user.can('groups.guests'),
             'can_moderate': can_manage_group(user,group),
             'can_transfer_host': can_manage_group(user, group),
@@ -375,7 +426,11 @@ def create_group(puzzle_id: str, payload: GroupOptions, request: Request, db: Se
     if count >= 20: raise HTTPException(429, 'Close an existing Group Solve before creating another')
     group = GroupSolve(id=uuid.uuid4().hex[:24], code=secrets.token_hex(5).upper(),
                        puzzle_id=puzzle.id, host_id=user.id, state={'answers': {}}, cell_versions={},
-                       expires_at=now()+timedelta(days=7), **payload.model_dump(exclude={'puzzle_options'}))
+                       expires_at=now()+timedelta(days=7),
+                       **payload.model_dump(exclude={'puzzle_options', 'password', 'remove_password'}))
+    if payload.remove_password:
+        raise HTTPException(422, 'A new session cannot remove a password')
+    update_group_password(group, payload.password)
     group.state = configure_collaboration(plugin, group.state, payload.puzzle_options, puzzle.solution_payload)
     db.add(group); db.flush()
     db.add(GroupMember(group_id=group.id, user_id=user.id, status='active', seen_at=now()))
@@ -422,6 +477,7 @@ def join_guest(group_id: str, payload: GuestJoin, request: Request, db: Session 
     else:
         member_for(db, group, user, active=False)
         return join_group(Join(code=group.id), request, db)
+    require_group_password(request, group, payload.password)
     name = payload.name.strip()
     if not name or any(ord(c) < 32 for c in name):
         raise HTTPException(422, 'Enter a display name')
@@ -625,6 +681,7 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
     if payload.participant_limit and payload.participant_limit < active: raise HTTPException(409, 'Limit is below current participant count')
     group.participant_limit = payload.participant_limit; group.approval_required = payload.approval_required
     group.allow_guests = payload.allow_guests
+    update_group_password(group, payload.password, payload.remove_password)
     if not group.allow_guests:
         for member in db.scalars(select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.user_id.is_(None))):
             member.presence = None

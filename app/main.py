@@ -4339,7 +4339,8 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
                     raise
                 writable(group)
                 return templates.TemplateResponse('group_guest_join.html', {
-                    'request': request, 'group': group, 'current_user': None,
+                    'request': request, 'group': group, 'password_protected': bool(group.password_hash),
+                    'current_user': None,
                 })
             member = member_for(db, group, user, active=False)
             if member.status == 'removed':

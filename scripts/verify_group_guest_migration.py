@@ -24,6 +24,7 @@ with engine.begin() as conn:
     conn.execute(text('ALTER TABLE group_solves DROP COLUMN allow_guests'))
     conn.execute(text('ALTER TABLE group_solves DROP COLUMN puzzle_states'))
     conn.execute(text('ALTER TABLE group_solves DROP COLUMN puzzle_started_revision'))
+    conn.execute(text('ALTER TABLE group_solves DROP COLUMN password_hash'))
     conn.execute(text('''CREATE TABLE group_members (
         id INTEGER PRIMARY KEY, group_id VARCHAR(26) NOT NULL REFERENCES group_solves(id),
         user_id INTEGER NOT NULL REFERENCES users(id), status VARCHAR(16) NOT NULL,
@@ -43,6 +44,7 @@ with SessionLocal() as db:
     group = db.get(GroupSolve, 'migration-group')
     assert not group.allow_guests and group.revision == 3 and group.state['answers']['0,0'] == '1'
     assert group.puzzle_states == {} and group.puzzle_started_revision == 0
+    assert group.password_hash is None
     assert db.get(GroupMember, 1).user_id == uid
     assert db.get(GroupAction, 1).changes == {'0,0': '1'}
     assert db.get(GroupAction, 1).target == '' and db.get(GroupAction, 1).contributions == []

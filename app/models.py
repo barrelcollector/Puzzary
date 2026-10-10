@@ -148,6 +148,7 @@ class GroupSolve(Base):
     participant_limit: Mapped[int] = mapped_column(Integer, default=0)
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
     allow_guests: Mapped[bool] = mapped_column(Boolean, default=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     closed: Mapped[bool] = mapped_column(Boolean, default=False)
     revision: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[dict] = mapped_column(JSON, default=dict)

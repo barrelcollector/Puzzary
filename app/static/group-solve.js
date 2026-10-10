@@ -40,6 +40,7 @@
     return data;
   }
   function options(form) { return {participant_limit:Number(form.elements.participant_limit.value), approval_required:form.elements.approval_required.checked, allow_guests:!!form.elements.allow_guests?.checked,
+    password:form.elements.password?.value || '', remove_password:!!form.elements.remove_password?.checked,
     puzzle_options:Object.fromEntries([...form.querySelectorAll('[data-group-option]')].map(input => [input.dataset.groupOption,input.value]))}; }
   for (const [selector, url, body] of [
     ['#group-create', `/api/puzzles/${panel.dataset.puzzle}/groups`, options],
@@ -290,6 +291,7 @@
     panel.querySelector('#group-host').hidden = !host;
     const guestOption = panel.querySelector('#group-guests-option');
     if (guestOption) guestOption.hidden = !data.can_allow_guests;
+    setText(panel.querySelector('#group-password-status'),data.password_protected ? 'Session password protection is enabled.' : 'Session password protection is disabled.');
     const list = panel.querySelector('#group-members');
     const visible = data.members.filter(m => ['active','pending'].includes(m.status));
     for (const [userId,item] of memberNodes) {
@@ -470,7 +472,12 @@
     if (maze && (next.puzzle_options.maze_mode !== maze.mode || Number(next.puzzle_options.rally_legs) !== maze.rally_legs)
         && !confirm('Changing maze mode or Rally legs clears the current paths. Continue?')) return;
     mutation++;
-    try { show(await api(`/api/groups/${id}/settings`,next)); message('Session settings saved.'); }
+    try {
+      show(await api(`/api/groups/${id}/settings`,next));
+      event.target.elements.password.value = '';
+      event.target.elements.remove_password.checked = false;
+      message('Session settings saved.');
+    }
     catch(error) { message(error.message); }
   });
   let puzzleOffset = 0, puzzleQuery = '', pickerGeneration = 0;
