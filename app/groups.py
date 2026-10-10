@@ -20,6 +20,7 @@ from app.database import get_db
 from app.models import GroupSolve, GroupMember, GroupAction, Puzzle, User
 from app.puzzles import get_puzzle_type, list_puzzle_types
 from app.group_presence import publish_state_change
+from app.permissions import puzzle_is_unlisted
 
 router = APIRouter()
 SERVER_LIMIT = 50
@@ -90,7 +91,8 @@ def participant_color(index):
 
 def guests_allowed(db, group):
     host = db.get(User, group.host_id)
-    return bool(group.allow_guests and host and host.can('groups.guests'))
+    puzzle = db.get(Puzzle, group.puzzle_id)
+    return bool(group.allow_guests and host and host.can('groups.guests') and puzzle and not puzzle_is_unlisted(puzzle))
 
 
 def password_attempt_key(request, group):
@@ -148,8 +150,7 @@ def require_lobby_rate(request):
 
 def puzzle_is_public(puzzle):
     metadata = puzzle.puzzle_metadata or {}
-    visibility = str(metadata.get('visibility', '')).lower()
-    return not (metadata.get('draft') or metadata.get('hidden') or visibility in {'hidden', 'unlisted', 'private'}
+    return not (metadata.get('draft') or puzzle_is_unlisted(puzzle)
                 or puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()))
 
 

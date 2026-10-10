@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +17,7 @@ class PuzzleGenerateRequest(BaseModel):
     seed: str | None = None
     generation_options: dict = Field(default_factory=dict)
     completion_message: str = Field("", max_length=500)
+    visibility: Literal["public", "unlisted"] = "public"
 
 
 class PuzzleAttemptCreate(BaseModel):
@@ -62,6 +64,7 @@ class PuzzleSummary(BaseModel):
     play_payload: dict
     metadata: dict = Field(default_factory=dict)
     hints: list[str] = []
+    visibility: Literal["public", "unlisted"] = "public"
 
 
 class PuzzlePrintPreview(BaseModel):
@@ -98,6 +101,7 @@ class PuzzleManualWrite(BaseModel):
     metadata: dict = Field(default_factory=dict)
     hints: list[str] = Field(default_factory=list)
     draft: bool = True
+    visibility: Literal["public", "unlisted"] = "public"
 
 
 class DictionaryDefinitionWrite(BaseModel):

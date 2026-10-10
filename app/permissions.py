@@ -101,6 +101,15 @@ def can_view(user, puzzle, play=False):
     return not play or user.can('puzzles.play')
 
 
+def puzzle_is_unlisted(puzzle):
+    metadata = puzzle.puzzle_metadata or {}
+    return bool(metadata.get('hidden') or str(metadata.get('visibility', '')).lower() in {'hidden', 'unlisted', 'private'})
+
+
+def can_discover(user, puzzle, play=False):
+    return can_view(user, puzzle, play=play) and not puzzle_is_unlisted(puzzle)
+
+
 def initialize_permissions(db):
     roles = {r.name:r for r in db.scalars(select(PermissionRole))}
     for name, permissions in PRESETS.items():

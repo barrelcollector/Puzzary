@@ -67,7 +67,7 @@ from app.appearance import (
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
 from app.user_activity import account_activity, progress_states
-from app.permissions import authorize_request, initialize_permissions, require as require_permission, can_view, require_owned, can_owned, audit, lock_permissions, protect_last_admin
+from app.permissions import authorize_request, initialize_permissions, require as require_permission, can_view, can_discover, puzzle_is_unlisted, require_owned, can_owned, audit, lock_permissions, protect_last_admin
 from app.schemas import (
     DictionaryDefinitionPatch,
     DictionaryDefinitionWrite,
@@ -422,6 +422,7 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         play_payload=public_play_payload(puzzle),
         metadata={key: value for key, value in (puzzle.puzzle_metadata or {}).items() if key not in private_keys},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
+        visibility="unlisted" if puzzle_is_unlisted(puzzle) else "public",
     )
 
 
@@ -664,6 +665,7 @@ def manual_payload_from_form(
     metadata: str,
     hints: str,
     draft: str,
+    visibility: str = "public",
 ) -> PuzzleManualWrite:
     hint_lines = [line.strip() for line in hints.splitlines() if line.strip()]
     if not title.strip():
@@ -681,6 +683,7 @@ def manual_payload_from_form(
         metadata=parse_json_object_field(metadata, "Metadata"),
         hints=hint_lines,
         draft=draft == "true",
+        visibility="unlisted" if visibility == "unlisted" else "public",
     )
 
 
@@ -700,6 +703,7 @@ def write_manual_puzzle(
     metadata = dict(payload.metadata or {})
     metadata["manual"] = True
     metadata["draft"] = bool(payload.draft)
+    metadata["visibility"] = payload.visibility
     metadata["manual_updated_at"] = utcnow().isoformat()
     now = datetime.now(timezone.utc)
     if puzzle is None:
@@ -768,6 +772,7 @@ def manual_puzzle_publish_error(db: Session, puzzle: Puzzle) -> str:
         metadata=metadata,
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
         draft=False,
+        visibility="unlisted" if puzzle_is_unlisted(puzzle) else "public",
     )
     valid, error = validate_manual_puzzle_payload(db, payload, allow_draft=False)
     return "" if valid else error
@@ -1179,7 +1184,7 @@ def filtered_library(
         selectinload(Puzzle.tags), selectinload(Puzzle.category), selectinload(Puzzle.word_bank),
         selectinload(Puzzle.creator),
     ).order_by(desc(Puzzle.created_at))).all()
-    all_puzzles = [puzzle for puzzle in all_puzzles if can_view(current_user, puzzle)]
+    all_puzzles = [puzzle for puzzle in all_puzzles if can_discover(current_user, puzzle)]
     filters = library_filter_state(request, current_user)
     options = library_options(db, all_puzzles, current_user)
     progress_by_puzzle = progress_map_for_user(db, current_user, all_puzzles)
@@ -1192,7 +1197,7 @@ def filtered_library(
     selected_tags = {int(tag_id) for tag_id in filters["tags"] if str(tag_id).isdigit()}
 
     def matches(puzzle: Puzzle) -> bool:
-        if not can_view(current_user, puzzle):
+        if not can_discover(current_user, puzzle):
             return False
         if filters["availability"] == "active" and puzzle.archived_at is not None:
             return False
@@ -1448,6 +1453,7 @@ def build_manual_payload_from_helper(
     completion_message: str,
     draft: str,
     form,
+    visibility: str = "public",
 ) -> PuzzleManualWrite:
     puzzle_type = get_puzzle_type(puzzle_type_slug)
     if puzzle_type is None or not is_puzzle_type_enabled(db, puzzle_type_slug):
@@ -1481,6 +1487,7 @@ def build_manual_payload_from_helper(
         metadata=metadata,
         hints=generated.hints,
         draft=draft == "true",
+        visibility="unlisted" if visibility == "unlisted" else "public",
     )
 
 
@@ -2514,22 +2521,30 @@ def qr_svg_bytes(value: str) -> bytes:
 
 
 @app.get("/puzzles/{puzzle_id}/qr.svg")
-def puzzle_qr_svg(puzzle_id: str, db: Session = Depends(get_db)) -> Response:
+def puzzle_qr_svg(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> Response:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    if puzzle_is_unlisted(puzzle):
+        user = current_user(request, db)
+        if user is None or not can_view(user, puzzle):
+            raise HTTPException(status_code=404, detail="Puzzle not found")
     return Response(
         content=qr_svg_bytes(puzzle_qr_short_url(puzzle.id, db)),
         media_type="image/svg+xml",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "private, max-age=3600" if puzzle_is_unlisted(puzzle) else "public, max-age=3600"},
     )
 
 
 @app.get("/q/{puzzle_id}")
-def puzzle_qr_redirect(puzzle_id: str, db: Session = Depends(get_db)) -> RedirectResponse:
+def puzzle_qr_redirect(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    if puzzle_is_unlisted(puzzle):
+        user = current_user(request, db)
+        if user is None or not can_view(user, puzzle):
+            raise HTTPException(status_code=404, detail="Puzzle not found")
     metadata = dict(puzzle.puzzle_metadata or {})
     qr_stats = metadata.get("qr")
     if not isinstance(qr_stats, dict):
@@ -2895,6 +2910,7 @@ def admin_context(
              "archived": puzzle.archived_at is not None}
             for puzzle in puzzles
             if not (puzzle.puzzle_metadata or {}).get("draft")
+            and not puzzle_is_unlisted(puzzle)
             and (plugin := get_puzzle_type(puzzle.puzzle_type)) is not None
             and plugin.supports_print and not plugin.digital_only
         ] if section == "publishing" else [],
@@ -3354,6 +3370,7 @@ async def admin_create_manual_puzzle(
     metadata: str = Form("{}"),
     hints: str = Form(""),
     draft: str = Form("true"),
+    visibility: str = Form("public"),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3362,7 +3379,7 @@ async def admin_create_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -3377,6 +3394,7 @@ async def admin_create_manual_puzzle(
                 metadata,
                 hints,
                 draft,
+                visibility,
             )
         puzzle = write_manual_puzzle(db, payload, user)
     except ValueError as error:
@@ -3401,6 +3419,7 @@ async def admin_update_manual_puzzle(
     metadata: str = Form("{}"),
     hints: str = Form(""),
     draft: str = Form("true"),
+    visibility: str = Form("public"),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3412,7 +3431,7 @@ async def admin_update_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -3427,6 +3446,7 @@ async def admin_update_manual_puzzle(
                 metadata,
                 hints,
                 draft,
+                visibility,
             )
         puzzle = write_manual_puzzle(db, payload, user, puzzle)
     except ValueError as error:
@@ -3567,6 +3587,7 @@ async def admin_update_puzzle_metadata(
     tag_ids: list[int] = Form(default=[]),
     auto_archive_at: str | None = Form(None),
     completion_message: str = Form(""),
+    visibility: str = Form("public"),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3582,6 +3603,9 @@ async def admin_update_puzzle_metadata(
             puzzle.completion_message = normalize_completion_message(completion_message)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+        metadata = dict(puzzle.puzzle_metadata or {})
+        metadata['visibility'] = 'unlisted' if visibility == 'unlisted' else 'public'
+        puzzle.puzzle_metadata = metadata
         if 'auto_archive_at' in form:
             require_owned(user,'puzzles','schedule',puzzle.created_by_id)
             puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
@@ -3599,6 +3623,7 @@ async def admin_generate_puzzle(
     difficulty: str = Form("easy"),
     seed: str = Form(""),
     completion_message: str = Form(""),
+    visibility: str = Form("public"),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
@@ -3633,6 +3658,7 @@ async def admin_generate_puzzle(
             seed=seed or None,
             generation_options=generation_options_from_form(form),
             completion_message=normalize_completion_message(completion_message),
+            visibility="unlisted" if visibility == "unlisted" else "public",
         ),
         db,
         creator=user,
@@ -5176,6 +5202,7 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         generated.metadata["word_bank_names"] = [bank.name for bank in selected_banks]
     draft = bool(creator and not can_owned(creator,'puzzles','publish',creator.id))
     generated.metadata['draft'] = draft
+    generated.metadata['visibility'] = payload.visibility
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
@@ -5246,7 +5273,7 @@ def get_latest_puzzle(request: Request, printable: bool = False, db: Session = D
     user = require_api_user(request, db)
     puzzles = db.scalars(select(Puzzle).where(Puzzle.archived_at.is_(None)).order_by(desc(Puzzle.created_at))).all()
     for puzzle in puzzles:
-        if not can_view(user,puzzle): continue
+        if not can_discover(user,puzzle): continue
         puzzle_type = get_puzzle_type(puzzle.puzzle_type)
         if printable and (puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only):
             continue

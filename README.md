@@ -442,6 +442,14 @@ Click or tap to cycle blank -> 0 -> 1 -> blank, or choose a 0/1 brush and drag. 
 
 Regression checks: `PYTHONPATH=. python scripts/verify_takuzu.py` validates all sizes/difficulties using an independent second-solution model, seeds, manual grids, and progress. `scripts/verify_takuzu_tools.py` checks interactive controls and the canvas. `scripts/verify_takuzu_live.py` is opt-in live QA that creates one sample and clears its test progress; `QA_PUZZLE_ID` reuses a sample.
 
+## Puzzle visibility
+
+Published puzzles may be **Public** or **Unlisted**. Public puzzles appear in the library, filters, search, latest-puzzle API, publishing choices and eligible public Group Solve sessions. Unlisted puzzles are omitted from every discovery surface but remain available to signed-in users who have the direct puzzle URL and normal puzzle-view permission. Their QR image and short QR redirect also require an authorized signed-in session and use private caching.
+
+Unlisted is independent of draft, archive and access permissions: drafts are unpublished previews for authorized editors, archived puzzles use the archive permissions, and unlisted published puzzles are playable through a direct link. Administrators and authorized publishers can still find, edit, export and change unlisted puzzles on the puzzle-management page. Anonymous Group Solve guests cannot enter an unlisted puzzle merely through a group invitation, and unlisted puzzles cannot be added to a published issue. Portable exports retain the visibility metadata, as do imports.
+
+Regression check: `PYTHONPATH=. python scripts/verify_unlisted_puzzles.py`.
+
 ## Group Solve
 
 Hosts can use **Session settings > Move group to another puzzle** to search active, collaboration-compatible puzzles. Moving keeps the same group, participants, guest permissions and invite link (`/groups/{id}`), and connected players follow automatically. Each puzzle's shared progress is saved when leaving and restored when returning. Delayed edits from an earlier puzzle are rejected rather than applied to the new board. Groups support up to 100 visited puzzles.
