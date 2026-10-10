@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Unlock puzzle - Puzzary{% endblock %}
+{% block content %}
+<section class="panel narrow-panel" style="margin: 24px auto;">
+  <span class="status-pill">Password protected</span>
+  <h1>Unlock {{ puzzle.title }}</h1>
+  <p class="muted">Enter this puzzle's access password. This is separate from your Puzzary account password.</p>
+  {% if error %}<p class="notice danger" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/puzzles/{{ puzzle.id }}/unlock">
+    <input type="hidden" name="return_to" value="{{ return_to }}">
+    <label>Puzzle password <input name="password" type="password" maxlength="128" autocomplete="current-password" required autofocus></label>
+    <button type="submit">Unlock puzzle</button>
+  </form>
+  <a class="ghost-link" href="/library">Back to Library</a>
+</section>
+{% endblock %}

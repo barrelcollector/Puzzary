@@ -22,6 +22,7 @@
       facts.append(element('span','',`${group.players} / ${group.capacity} players`),
         element('span','',group.password_protected ? 'Guest password required' : 'No guest password'),
         element('span','',group.guest_allowed ? 'Guests allowed' : 'Account required'));
+      if (group.puzzle_password_protected) facts.append(element('span','','Puzzle password required'));
       let action;
       if (group.joinable) {
         action = element('a','button-link',document.body.dataset.signedIn === 'true' ? 'Join session' : group.guest_allowed ? 'Join as guest' : 'Sign in to join');

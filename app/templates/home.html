@@ -233,7 +233,7 @@
           </div>
           <div class="puzzle-card-body">
             <span class="puzzle-type-pill">{{ labels_by_type.get(puzzle.puzzle_type, puzzle.puzzle_type.replace("_", " ").title()) }}</span>
-            <div class="library-status-row"><span class="library-progress-status status-{{ progress.status }}">{{ 'Completed' if progress.status == 'completed' else 'In progress' if progress.status == 'in_progress' else 'Not started' }}</span>{% if puzzle.puzzle_metadata.get('draft') %}<span class="library-progress-status">Draft</span>{% elif puzzle.archived_at %}<span class="library-progress-status">Archived</span>{% endif %}</div>
+            <div class="library-status-row"><span class="library-progress-status status-{{ progress.status }}">{{ 'Completed' if progress.status == 'completed' else 'In progress' if progress.status == 'in_progress' else 'Not started' }}</span>{% if puzzle.access_password_hash %}<span class="library-progress-status">Locked</span>{% endif %}{% if puzzle.puzzle_metadata.get('draft') %}<span class="library-progress-status">Draft</span>{% elif puzzle.archived_at %}<span class="library-progress-status">Archived</span>{% endif %}</div>
             <h2>{{ puzzle.title }}</h2>
             <p class="muted">{{ puzzle.theme if puzzle.theme else "No theme" }} / {{ puzzle.difficulty }}</p>
             <div class="puzzle-card-meta">

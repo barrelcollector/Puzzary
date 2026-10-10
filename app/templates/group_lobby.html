@@ -49,6 +49,7 @@
       <div class="group-lobby-facts">
         <span>{{ group.players }} / {{ group.capacity }} players</span>
         <span>{{ 'Guest password required' if group.password_protected else 'No guest password' }}</span>
+        {% if group.puzzle_password_protected %}<span>Puzzle password required</span>{% endif %}
         <span>{{ 'Guests allowed' if group.guest_allowed else 'Account required' }}</span>
       </div>
       {% if group.joinable %}<a class="button-link" href="{{ group.url }}">{% if current_user %}Join session{% elif group.guest_allowed %}Join as guest{% else %}Sign in to join{% endif %}</a>{% else %}<button type="button" disabled>Session full</button>{% endif %}
@@ -58,4 +59,4 @@
   <p id="group-lobby-empty" class="panel" {% if groups %}hidden{% endif %}>No public Group Solve sessions match these filters.</p>
 </section>
 {% endblock %}
-{% block scripts %}<script src="/static/group-lobby.js?v=1"></script>{% endblock %}
+{% block scripts %}<script src="/static/group-lobby.js?v=2"></script>{% endblock %}

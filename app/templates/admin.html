@@ -232,6 +232,7 @@
               {% if puzzle.word_bank %}<small>Word bank: {{ puzzle.word_bank.name }}</small>{% endif %}
               {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") %}<span class="status-pill">Draft</span>{% endif %}
               {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("visibility") == "unlisted" %}<span class="status-pill">Unlisted</span>{% endif %}
+              {% if puzzle.access_password_hash %}<span class="status-pill">Password protected</span>{% endif %}
               {% if puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
               {% if puzzle.auto_archive_at %}
                 <small>Auto-archives at {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
@@ -275,6 +276,12 @@
                 <textarea name="completion_message" rows="2" maxlength="500" data-completion-message-input placeholder="Use the default completion message">{{ puzzle.completion_message }}</textarea>
                 <small class="muted">Plain text shown after the puzzle is solved. Leave blank for the default.</small>
               </label>
+              <label>
+                Puzzle access password
+                <input name="access_password" type="password" maxlength="128" autocomplete="new-password" placeholder="{{ 'Leave blank to keep current password' if puzzle.access_password_hash else 'Leave blank for no puzzle password' }}">
+                <small class="muted">Separate from account and Group Solve session passwords. Use 10+ characters with upper/lowercase and a number.</small>
+              </label>
+              {% if puzzle.access_password_hash %}<label><input type="checkbox" name="remove_access_password" value="true"> Remove puzzle access password</label>{% endif %}
               <div class="notice" data-completion-message-preview><strong>Completion preview:</strong> <span data-completion-message-preview-text>{{ puzzle.completion_message or 'Nice solve.' }}</span></div>
               <button type="submit">Save</button>
             </form>{% endif %}
@@ -311,6 +318,7 @@
           {% if is_edit %}
             {% if is_draft %}<span class="status-pill">Draft</span>{% endif %}
             {% if manual_meta.get("visibility") == "unlisted" %}<span class="status-pill">Unlisted</span>{% endif %}
+            {% if selected_puzzle.access_password_hash %}<span class="status-pill">Password protected</span>{% endif %}
             {% if selected_puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
           {% endif %}
         </div>
@@ -367,6 +375,12 @@
           </select>
           <small class="muted">This is separate from draft status. Unlisted published puzzles can be played by signed-in users with the direct link.</small>
         </label>
+        <label>
+          Puzzle access password
+          <input name="access_password" type="password" maxlength="128" autocomplete="new-password" placeholder="{{ 'Leave blank to keep current password' if is_edit and selected_puzzle.access_password_hash else 'Optional puzzle password' }}">
+          <small class="muted">Players must unlock this puzzle before any clue, preview, print, API, or Group Solve content is returned.</small>
+        </label>
+        {% if is_edit and selected_puzzle.access_password_hash %}<label><input type="checkbox" name="remove_access_password" value="true"> Remove puzzle access password</label>{% endif %}
 
         <fieldset>
           <legend>Editor</legend>
@@ -504,6 +518,11 @@
               <option value="unlisted">Unlisted: signed-in direct link only</option>
             </select>
             <small class="muted">Unlisted puzzles are excluded from search, latest, publishing, and the public Group Solve lobby.</small>
+          </label>
+          <label>
+            Puzzle access password
+            <input name="access_password" type="password" maxlength="128" autocomplete="new-password" placeholder="Optional puzzle password">
+            <small class="muted">Use 10+ characters with upper/lowercase and a number. This is separate from account passwords.</small>
           </label>
           <label>
             Category

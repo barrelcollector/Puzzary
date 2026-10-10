@@ -7,10 +7,11 @@
   <form id="guest-join" data-group="{{ group.id }}">
     <label>Guest display name <input name="name" maxlength="80" autocomplete="nickname" required></label>
     {% if password_protected %}<label>Session password <input name="password" type="password" maxlength="128" autocomplete="current-password" required></label>{% endif %}
+    {% if puzzle_password_protected %}<label>Puzzle access password <input name="puzzle_password" type="password" maxlength="128" autocomplete="current-password" required><small class="muted">This is separate from the Group Solve session password.</small></label>{% endif %}
     <button type="submit">Join as guest</button>
     <p id="guest-message" role="status" aria-live="polite"></p>
   </form>
   <a href="/login?return_to={{ request.url.path | urlencode }}%3Fgroup%3D{{ group.id }}">Sign in instead</a>
 </section>
-<script src="/static/group-guest-join.js?v=2"></script>
+<script src="/static/group-guest-join.js?v=3"></script>
 {% endblock %}

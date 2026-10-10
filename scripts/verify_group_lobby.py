@@ -93,7 +93,8 @@ try:
         assert item['password_protected'] and item['guest_allowed']
         assert set(item) == {'id', 'url', 'puzzle_title', 'puzzle_type', 'puzzle_type_label', 'host_name',
                              'players', 'capacity', 'password_protected', 'guest_allowed', 'joinable',
-                             'status', 'status_label', 'created_at', 'activity_at'}
+                             'puzzle_password_protected', 'status', 'status_label', 'created_at', 'activity_at'}
+        assert item['puzzle_password_protected'] is False
         serialized = json.dumps(item)
         assert private['code'] not in serialized and 'Lobby-Guest-123' not in serialized
         assert 'state' not in item and 'progress' not in item and 'solution' not in item

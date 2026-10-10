@@ -119,6 +119,7 @@ class Puzzle(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     prompt: Mapped[str] = mapped_column(Text, default="")
     completion_message: Mapped[str] = mapped_column(Text, default="")
+    access_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     print_payload: Mapped[dict] = mapped_column(JSON)
     play_payload: Mapped[dict] = mapped_column(JSON)
     solution_payload: Mapped[dict] = mapped_column(JSON)

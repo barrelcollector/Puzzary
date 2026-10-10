@@ -8,7 +8,11 @@
     try {
       const response = await fetch(`/api/groups/${form.dataset.group}/guests`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name: form.elements.name.value.trim(),password:form.elements.password?.value || ''})
+        body: JSON.stringify({
+          name: form.elements.name.value.trim(),
+          password: form.elements.password?.value || '',
+          puzzle_password: form.elements.puzzle_password?.value || ''
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not join this group.');

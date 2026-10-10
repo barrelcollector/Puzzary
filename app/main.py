@@ -12,6 +12,8 @@ import hmac
 import math
 import secrets
 import time
+import threading
+from collections import deque
 from copy import deepcopy
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
@@ -125,6 +127,10 @@ RESET_TOKEN_TTL_HOURS = 24
 LOGIN_RATE_LIMIT_WINDOW = 300
 LOGIN_RATE_LIMIT_MAX = 8
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+PUZZLE_PASSWORD_ATTEMPT_LIMIT = 5
+PUZZLE_PASSWORD_ATTEMPT_WINDOW = 60
+PUZZLE_PASSWORD_ATTEMPTS: dict[tuple[str, str], deque[float]] = {}
+PUZZLE_PASSWORD_ATTEMPT_LOCK = threading.Lock()
 
 
 def tag_value(tags: list[PuzzleTag], tag_type: str) -> str:
@@ -294,6 +300,7 @@ def authorized_render_url(puzzle, user, request, db):
     token = URLSafeTimedSerializer(SESSION_SECRET, salt='puzzary-print-render').dumps({
         'puzzle_id':puzzle.id, 'user_id':user.id, 'session_version':user.session_version,
         'api':bool(request.headers.get('authorization')),
+        'puzzle_access': puzzle_unlock_fingerprint(puzzle) if puzzle.access_password_hash else '',
     })
     return puzzle_print_render_url(puzzle.id,db) + '?' + urlencode({'render_token':token})
 
@@ -423,6 +430,7 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         metadata={key: value for key, value in (puzzle.puzzle_metadata or {}).items() if key not in private_keys},
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
         visibility="unlisted" if puzzle_is_unlisted(puzzle) else "public",
+        password_protected=bool(puzzle.access_password_hash),
     )
 
 
@@ -666,6 +674,8 @@ def manual_payload_from_form(
     hints: str,
     draft: str,
     visibility: str = "public",
+    access_password: str = "",
+    remove_access_password: bool = False,
 ) -> PuzzleManualWrite:
     hint_lines = [line.strip() for line in hints.splitlines() if line.strip()]
     if not title.strip():
@@ -684,6 +694,8 @@ def manual_payload_from_form(
         hints=hint_lines,
         draft=draft == "true",
         visibility="unlisted" if visibility == "unlisted" else "public",
+        access_password=access_password,
+        remove_access_password=remove_access_password,
     )
 
 
@@ -706,7 +718,8 @@ def write_manual_puzzle(
     metadata["visibility"] = payload.visibility
     metadata["manual_updated_at"] = utcnow().isoformat()
     now = datetime.now(timezone.utc)
-    if puzzle is None:
+    creating = puzzle is None
+    if creating:
         puzzle = Puzzle(
             id=uuid.uuid4().hex[:12],
             puzzle_type=payload.puzzle_type,
@@ -741,6 +754,11 @@ def write_manual_puzzle(
         puzzle.archived_at = now if payload.draft else None
         if not payload.draft and puzzle.auto_archive_at is None:
             puzzle.auto_archive_at = default_auto_archive_at()
+    update_puzzle_access_password(
+        puzzle,
+        payload.access_password,
+        payload.remove_access_password if not creating else False,
+    )
     puzzle.hints.clear()
     db.flush()
     for index, hint_text in enumerate(payload.hints, start=1):
@@ -1284,7 +1302,14 @@ def filtered_library(
         "filters": filters,
         "options": options,
         "progress_by_puzzle": {puzzle.id: progress_by_puzzle[puzzle.id] for puzzle in visible if puzzle.id in progress_by_puzzle},
-        "previews_by_puzzle": {puzzle.id: puzzle_preview(puzzle) for puzzle in visible},
+        "previews_by_puzzle": {
+            puzzle.id: (
+                puzzle_preview(puzzle)
+                if puzzle_access_granted(request, puzzle)
+                else {"kind": "locked", "label": "Password protected", "icon": "Lock", "meta": "Unlock to view"}
+            )
+            for puzzle in visible
+        },
         "labels_by_type": {puzzle_type.slug: puzzle_type.label for puzzle_type in list_puzzle_types()},
     }
 
@@ -1311,6 +1336,7 @@ def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, pr
         "progress": progress,
         "preview": preview,
         "url": puzzle_url(puzzle.id, db),
+        "password_protected": bool(puzzle.access_password_hash),
     }
 
 
@@ -1454,6 +1480,8 @@ def build_manual_payload_from_helper(
     draft: str,
     form,
     visibility: str = "public",
+    access_password: str = "",
+    remove_access_password: bool = False,
 ) -> PuzzleManualWrite:
     puzzle_type = get_puzzle_type(puzzle_type_slug)
     if puzzle_type is None or not is_puzzle_type_enabled(db, puzzle_type_slug):
@@ -1488,6 +1516,8 @@ def build_manual_payload_from_helper(
         hints=generated.hints,
         draft=draft == "true",
         visibility="unlisted" if visibility == "unlisted" else "public",
+        access_password=access_password,
+        remove_access_password=remove_access_password,
     )
 
 
@@ -2044,6 +2074,86 @@ def password_error(password: str) -> str:
     return ""
 
 
+def puzzle_password_key(request: Request, puzzle: Puzzle) -> tuple[str, str]:
+    client = request.client.host if request.client else "unknown"
+    user_id = getattr(request.state, "puzzary_user_id", None) or request.session.get("user_id", "guest")
+    return puzzle.id, f"{client}:{user_id}"
+
+
+def puzzle_unlock_fingerprint(puzzle: Puzzle) -> str:
+    return hash_secret(puzzle.access_password_hash or "")
+
+
+def remember_puzzle_unlock(request: Request, puzzle: Puzzle) -> None:
+    unlocks = dict(request.session.get("puzzle_unlocks", {}))
+    if len(unlocks) >= 100 and puzzle.id not in unlocks:
+        unlocks.pop(next(iter(unlocks)))
+    unlocks[puzzle.id] = puzzle_unlock_fingerprint(puzzle)
+    request.session["puzzle_unlocks"] = unlocks
+
+
+def puzzle_access_granted(request: Request, puzzle: Puzzle, password: str = "") -> bool:
+    if not puzzle.access_password_hash:
+        return True
+    unlocks = request.session.get("puzzle_unlocks", {})
+    if isinstance(unlocks, dict) and hmac.compare_digest(
+        str(unlocks.get(puzzle.id, "")), puzzle_unlock_fingerprint(puzzle)
+    ):
+        return True
+    supplied = password or request.headers.get("x-puzzle-password", "")
+    if supplied and verify_password(supplied, puzzle.access_password_hash):
+        remember_puzzle_unlock(request, puzzle)
+        with PUZZLE_PASSWORD_ATTEMPT_LOCK:
+            PUZZLE_PASSWORD_ATTEMPTS.pop(puzzle_password_key(request, puzzle), None)
+        return True
+    return False
+
+
+def require_puzzle_access(request: Request, puzzle: Puzzle, password: str = "") -> None:
+    if puzzle_access_granted(request, puzzle, password):
+        return
+    key = puzzle_password_key(request, puzzle)
+    now = time.monotonic()
+    with PUZZLE_PASSWORD_ATTEMPT_LOCK:
+        attempts = PUZZLE_PASSWORD_ATTEMPTS.setdefault(key, deque())
+        while attempts and now - attempts[0] >= PUZZLE_PASSWORD_ATTEMPT_WINDOW:
+            attempts.popleft()
+        if len(attempts) >= PUZZLE_PASSWORD_ATTEMPT_LIMIT:
+            retry = max(1, int(PUZZLE_PASSWORD_ATTEMPT_WINDOW - (now - attempts[0])))
+            raise HTTPException(429, "Too many incorrect puzzle password attempts. Try again shortly.", headers={"Retry-After": str(retry)})
+        if password or request.headers.get("x-puzzle-password", ""):
+            attempts.append(now)
+    raise HTTPException(423, "Puzzle access password required or incorrect")
+
+
+def update_puzzle_access_password(puzzle: Puzzle, password: str = "", remove: bool = False) -> None:
+    if password and remove:
+        raise ValueError("Enter a new puzzle password or remove the existing password, not both")
+    if password:
+        error = password_error(password)
+        if error:
+            raise ValueError(error)
+        puzzle.access_password_hash = hash_password(password)
+    elif remove:
+        puzzle.access_password_hash = None
+    if password or remove:
+        with PUZZLE_PASSWORD_ATTEMPT_LOCK:
+            for key in [key for key in PUZZLE_PASSWORD_ATTEMPTS if key[0] == puzzle.id]:
+                PUZZLE_PASSWORD_ATTEMPTS.pop(key, None)
+
+
+def request_puzzle(request: Request, db: Session) -> Puzzle | None:
+    puzzle_id = request.path_params.get("puzzle_id")
+    if puzzle_id:
+        return db.get(Puzzle, puzzle_id)
+    group_id = request.path_params.get("group_id")
+    if group_id:
+        from app.models import GroupSolve
+        group = db.get(GroupSolve, group_id)
+        return db.get(Puzzle, group.puzzle_id) if group else None
+    return None
+
+
 def issue_password_setup_token(db: Session, user: User) -> str:
     token = secrets.token_urlsafe(32)
     user.reset_token_hash = hash_secret(token)
@@ -2135,7 +2245,15 @@ def require_api_user(request: Request, db: Session) -> User:
     user = api_user_from_token(request, db) or current_user(request, db)
     if user is None:
         raise HTTPException(status_code=401, detail="API token required")
+    request.state.puzzary_user_id = user.id
     authorize_request(request, db, user)
+    route_name = getattr(request.scope.get("route"), "name", "")
+    puzzle = request_puzzle(request, db)
+    management_bypass = puzzle is not None and route_name in {"api_update_manual_puzzle", "api_export_puzzle"} and can_owned(
+        user, "puzzles", "metadata", puzzle.created_by_id
+    )
+    if puzzle is not None and not management_bypass:
+        require_puzzle_access(request, puzzle)
     return user
 
 
@@ -2469,7 +2587,12 @@ def require_web_user(request: Request, db: Session) -> User | RedirectResponse:
     if user is None:
         target = safe_return_to(str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""))
         return RedirectResponse(url=f"/login?return_to={quote(target)}", status_code=303)
+    request.state.puzzary_user_id = user.id
     authorize_request(request, db, user)
+    route_name = getattr(request.scope.get("route"), "name", "")
+    puzzle = request_puzzle(request, db)
+    if puzzle is not None and route_name not in {"puzzle_page", "unlock_puzzle"} and not request.url.path.startswith("/admin/"):
+        require_puzzle_access(request, puzzle)
     return user
 
 
@@ -2911,6 +3034,7 @@ def admin_context(
             for puzzle in puzzles
             if not (puzzle.puzzle_metadata or {}).get("draft")
             and not puzzle_is_unlisted(puzzle)
+            and not puzzle.access_password_hash
             and (plugin := get_puzzle_type(puzzle.puzzle_type)) is not None
             and plugin.supports_print and not plugin.digital_only
         ] if section == "publishing" else [],
@@ -3371,6 +3495,7 @@ async def admin_create_manual_puzzle(
     hints: str = Form(""),
     draft: str = Form("true"),
     visibility: str = Form("public"),
+    access_password: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3379,7 +3504,7 @@ async def admin_create_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -3395,6 +3520,7 @@ async def admin_create_manual_puzzle(
                 hints,
                 draft,
                 visibility,
+                access_password,
             )
         puzzle = write_manual_puzzle(db, payload, user)
     except ValueError as error:
@@ -3420,6 +3546,8 @@ async def admin_update_manual_puzzle(
     hints: str = Form(""),
     draft: str = Form("true"),
     visibility: str = Form("public"),
+    access_password: str = Form(""),
+    remove_access_password: bool = Form(False),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3431,7 +3559,7 @@ async def admin_update_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, remove_access_password)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -3447,6 +3575,8 @@ async def admin_update_manual_puzzle(
                 hints,
                 draft,
                 visibility,
+                access_password,
+                remove_access_password,
             )
         puzzle = write_manual_puzzle(db, payload, user, puzzle)
     except ValueError as error:
@@ -3588,6 +3718,8 @@ async def admin_update_puzzle_metadata(
     auto_archive_at: str | None = Form(None),
     completion_message: str = Form(""),
     visibility: str = Form("public"),
+    access_password: str = Form(""),
+    remove_access_password: bool = Form(False),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3606,6 +3738,10 @@ async def admin_update_puzzle_metadata(
         metadata = dict(puzzle.puzzle_metadata or {})
         metadata['visibility'] = 'unlisted' if visibility == 'unlisted' else 'public'
         puzzle.puzzle_metadata = metadata
+        try:
+            update_puzzle_access_password(puzzle, access_password, remove_access_password)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         if 'auto_archive_at' in form:
             require_owned(user,'puzzles','schedule',puzzle.created_by_id)
             puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
@@ -3624,6 +3760,7 @@ async def admin_generate_puzzle(
     seed: str = Form(""),
     completion_message: str = Form(""),
     visibility: str = Form("public"),
+    access_password: str = Form(""),
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
@@ -3659,6 +3796,7 @@ async def admin_generate_puzzle(
             generation_options=generation_options_from_form(form),
             completion_message=normalize_completion_message(completion_message),
             visibility="unlisted" if visibility == "unlisted" else "public",
+            access_password=access_password,
         ),
         db,
         creator=user,
@@ -4377,11 +4515,13 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             try:
                 user = require_group_user(request, db, group)
             except HTTPException as error:
-                if error.status_code != 401:
+                if error.status_code not in {401, 423}:
                     raise
                 writable(group)
+                guest_puzzle = db.get(Puzzle, group.puzzle_id)
                 return templates.TemplateResponse('group_guest_join.html', {
                     'request': request, 'group': group, 'password_protected': bool(group.password_hash),
+                    'puzzle_password_protected': bool(guest_puzzle and guest_puzzle.access_password_hash),
                     'current_user': None,
                 })
             member = member_for(db, group, user, active=False)
@@ -4394,6 +4534,14 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    if not puzzle_access_granted(request, puzzle):
+        return templates.TemplateResponse("puzzle_unlock.html", {
+            "request": request,
+            "puzzle": puzzle,
+            "current_user": user,
+            "return_to": str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""),
+            "error": "",
+        }, status_code=423)
     is_guest = getattr(user, 'is_guest', False)
     if not is_guest:
         authorize_request(request, db, user)
@@ -4450,6 +4598,36 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     )
 
 
+@app.post("/puzzles/{puzzle_id}/unlock", response_class=HTMLResponse)
+def unlock_puzzle(
+    puzzle_id: str,
+    request: Request,
+    password: str = Form(""),
+    return_to: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = current_user(request, db)
+    if user is None:
+        return RedirectResponse(url=f"/login?return_to={quote('/puzzles/' + puzzle_id)}", status_code=303)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None or not can_view(user, puzzle, play=True):
+        raise HTTPException(404, "Puzzle not found")
+    try:
+        require_puzzle_access(request, puzzle, password)
+    except HTTPException as error:
+        if error.status_code == 429:
+            raise
+        return templates.TemplateResponse("puzzle_unlock.html", {
+            "request": request,
+            "puzzle": puzzle,
+            "current_user": user,
+            "return_to": return_to,
+            "error": "That puzzle password was not accepted.",
+        }, status_code=423)
+    target = return_to if return_to.startswith(f"/puzzles/{puzzle.id}") else f"/puzzles/{puzzle.id}"
+    return RedirectResponse(target, status_code=303)
+
+
 @app.get("/puzzles/{puzzle_id}/print", response_class=HTMLResponse)
 def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
     user = require_web_user(request, db)
@@ -4468,6 +4646,11 @@ def puzzle_print_render_page(puzzle_id: str, request: Request, db: Session = Dep
         user = db.get(User,payload.get('user_id'))
         if payload.get('puzzle_id') != puzzle_id or not user or payload.get('session_version') != user.session_version:
             raise HTTPException(401,'Print link expired or invalid')
+        puzzle = db.get(Puzzle, puzzle_id)
+        if puzzle and puzzle.access_password_hash and not hmac.compare_digest(
+            str(payload.get('puzzle_access', '')), puzzle_unlock_fingerprint(puzzle)
+        ):
+            raise HTTPException(401, 'Print link expired or invalid')
         if payload.get('api'): require_permission(user,'api.use')
         authorize_request(request,db,user)
     else:
@@ -5220,6 +5403,10 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         archived_at=utcnow() if draft else None,
         created_by_id=creator.id if creator is not None else None,
     )
+    try:
+        update_puzzle_access_password(puzzle, payload.access_password)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     db.add(puzzle)
     db.flush()
     for index, hint_text in enumerate(generated.hints, start=1):
@@ -5274,6 +5461,7 @@ def get_latest_puzzle(request: Request, printable: bool = False, db: Session = D
     puzzles = db.scalars(select(Puzzle).where(Puzzle.archived_at.is_(None)).order_by(desc(Puzzle.created_at))).all()
     for puzzle in puzzles:
         if not can_discover(user,puzzle): continue
+        if not puzzle_access_granted(request, puzzle): continue
         puzzle_type = get_puzzle_type(puzzle.puzzle_type)
         if printable and (puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only):
             continue
@@ -5291,6 +5479,12 @@ def api_export_puzzles(
     user = require_admin_api(request, db)
     puzzles = db.scalars(select(Puzzle).order_by(desc(Puzzle.created_at))).all()
     puzzles = [p for p in puzzles if can_view(user,p)]
+    puzzles = [
+        p for p in puzzles
+        if not p.access_password_hash
+        or puzzle_access_granted(request, p)
+        or can_owned(user, 'puzzles', 'metadata', p.created_by_id)
+    ]
     if ids.strip():
         selected = {item.strip() for item in ids.split(",") if item.strip()}
         puzzles = [puzzle for puzzle in puzzles if puzzle.id in selected]

@@ -496,7 +496,7 @@
       const select = moveForm.elements.puzzle_id; select.replaceChildren();
       for (const puzzle of data.puzzles) {
         const option = document.createElement('option'); option.value = puzzle.id;
-        option.textContent = `${puzzle.title} - ${puzzle.puzzle_type} / ${puzzle.difficulty}${puzzle.visited ? ' (saved progress)' : ''}`;
+        option.textContent = `${puzzle.title} - ${puzzle.puzzle_type} / ${puzzle.difficulty}${puzzle.password_protected ? ' / locked' : ''}${puzzle.visited ? ' (saved progress)' : ''}`;
         option.disabled = puzzle.id === panel.dataset.puzzle; select.append(option);
       }
       const first = [...select.options].find(o => !o.disabled);

@@ -110,6 +110,8 @@ def validate_puzzle(db, puzzle_id, publishing=False):
         raise HTTPException(422, f"Publish the puzzle '{puzzle.title}' before publishing this issue")
     if publishing and puzzle_is_unlisted(puzzle):
         raise HTTPException(422, f"Make the puzzle '{puzzle.title}' public before publishing this issue")
+    if publishing and puzzle.access_password_hash:
+        raise HTTPException(422, f"Remove the puzzle password from '{puzzle.title}' before publishing this issue")
     return puzzle
 
 

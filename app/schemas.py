@@ -18,6 +18,7 @@ class PuzzleGenerateRequest(BaseModel):
     generation_options: dict = Field(default_factory=dict)
     completion_message: str = Field("", max_length=500)
     visibility: Literal["public", "unlisted"] = "public"
+    access_password: str = Field("", max_length=128)
 
 
 class PuzzleAttemptCreate(BaseModel):
@@ -65,6 +66,7 @@ class PuzzleSummary(BaseModel):
     metadata: dict = Field(default_factory=dict)
     hints: list[str] = []
     visibility: Literal["public", "unlisted"] = "public"
+    password_protected: bool = False
 
 
 class PuzzlePrintPreview(BaseModel):
@@ -102,6 +104,8 @@ class PuzzleManualWrite(BaseModel):
     hints: list[str] = Field(default_factory=list)
     draft: bool = True
     visibility: Literal["public", "unlisted"] = "public"
+    access_password: str = Field("", max_length=128)
+    remove_access_password: bool = False
 
 
 class DictionaryDefinitionWrite(BaseModel):

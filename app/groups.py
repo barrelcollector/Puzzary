@@ -72,6 +72,7 @@ class Join(BaseModel):
 class GuestJoin(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     password: str = Field(default='', max_length=128)
+    puzzle_password: str = Field(default='', max_length=128)
 
 
 class MoveGroup(BaseModel):
@@ -211,6 +212,7 @@ def public_lobby_items(db, q='', puzzle_type='', available='any', password='any'
             'players': int(active_count),
             'capacity': limit,
             'password_protected': protected,
+            'puzzle_password_protected': bool(puzzle.access_password_hash),
             'guest_allowed': bool(group.allow_guests and host.can('groups.guests')),
             'joinable': not full,
             'status': 'full' if full else 'in_progress' if in_progress else 'open',
@@ -245,6 +247,7 @@ def require_group_user(request, db, group):
         GroupMember.guest_token_hash == hashlib.sha256(token.encode()).hexdigest()))
     if not member:
         raise HTTPException(401, 'Guest session not found')
+    core().require_puzzle_access(request, db.get(Puzzle, group.puzzle_id))
     return SimpleNamespace(id=-member.id, display_name=member.guest_name, is_admin=False, is_guest=True)
 
 
@@ -540,6 +543,7 @@ def join_group(payload: Join, request: Request, db: Session = Depends(get_db)):
     group = db.scalar(select(GroupSolve).where((GroupSolve.code == code.upper()) | (GroupSolve.id == code)).with_for_update())
     if not group: raise HTTPException(404, 'Group Solve not found')
     user = require_group_user(request, db, group)
+    core().require_puzzle_access(request, db.get(Puzzle, group.puzzle_id))
     member = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, member_identity(user)))
     if member and member.status == 'removed': raise HTTPException(403, 'You were removed from this session')
     if member and member.status == 'active': return snapshot(db, group, user)
@@ -565,6 +569,7 @@ def join_guest(group_id: str, payload: GuestJoin, request: Request, db: Session 
         raise HTTPException(403, 'Guest access is disabled for this group')
     if core().current_user(request, db):
         raise HTTPException(400, 'Signed-in players should join with their account')
+    core().require_puzzle_access(request, db.get(Puzzle, group.puzzle_id), payload.puzzle_password)
     try:
         user = require_group_user(request, db, group)
     except HTTPException as error:
@@ -822,7 +827,8 @@ def group_puzzles(group_id: str, request: Request, q: str = '', offset: int = 0,
     puzzles = [p for p in db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id)) if can_view(user,p,play=True)]
     puzzles = puzzles[max(0,offset):max(0,offset)+51]
     return {'puzzles': [{'id': p.id, 'title': p.title, 'puzzle_type': p.puzzle_type,
-                         'difficulty': p.difficulty, 'visited': p.id in (group.puzzle_states or {}) or p.id == group.puzzle_id}
+                         'difficulty': p.difficulty, 'password_protected': bool(p.access_password_hash),
+                         'visited': p.id in (group.puzzle_states or {}) or p.id == group.puzzle_id}
                         for p in puzzles[:50]], 'has_more': len(puzzles) > 50}
 
 
@@ -838,6 +844,7 @@ def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session 
     puzzle = db.get(Puzzle, payload.puzzle_id)
     if not puzzle:
         raise HTTPException(404, 'Puzzle not found')
+    core().require_puzzle_access(request, puzzle)
     from app.permissions import can_view
     if not can_view(user, puzzle, play=True): raise HTTPException(403, 'Puzzle access denied')
     if puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()):
