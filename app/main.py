@@ -1126,7 +1126,7 @@ def safe_library_return_to(value: str) -> str:
 def safe_return_to(value: str, default: str = "/library") -> str:
     if not value or "://" in value or value.startswith("//"):
         return default
-    allowed_prefixes = ("/library", "/puzzles/", "/generate", "/admin", "/account")
+    allowed_prefixes = ("/library", "/puzzles/", "/groups", "/generate", "/admin", "/account")
     if not value.startswith(allowed_prefixes):
         return default
     return value
@@ -4313,6 +4313,22 @@ def admin_delete_tag(tag_id: int, request: Request, db: Session = Depends(get_db
         db.delete(tag)
         db.commit()
     return RedirectResponse(url="/admin/tags", status_code=303)
+
+
+@app.get('/groups', response_class=HTMLResponse)
+def group_lobby_page(request: Request, q: str = '', puzzle_type: str = '', available: str = 'any',
+                     password: str = 'any', sort: str = 'recent', db: Session = Depends(get_db)):
+    from app.groups import public_lobby_items
+    lobby = public_lobby_items(db, q, puzzle_type, available, password, sort)
+    response = templates.TemplateResponse('group_lobby.html', {
+        'request': request,
+        'current_user': current_user(request, db),
+        'groups': lobby['groups'],
+        'filters': lobby['filters'],
+        'puzzle_types': [{'slug': item.slug, 'label': item.label} for item in list_puzzle_types() if item.collaboration],
+    })
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @app.get('/groups/{group_id}')

@@ -40,7 +40,7 @@
     return data;
   }
   function options(form) { return {participant_limit:Number(form.elements.participant_limit.value), approval_required:form.elements.approval_required.checked, allow_guests:!!form.elements.allow_guests?.checked,
-    password:form.elements.password?.value || '', remove_password:!!form.elements.remove_password?.checked,
+    password:form.elements.password?.value || '', remove_password:!!form.elements.remove_password?.checked, public_lobby:!!form.elements.public_lobby?.checked,
     puzzle_options:Object.fromEntries([...form.querySelectorAll('[data-group-option]')].map(input => [input.dataset.groupOption,input.value]))}; }
   for (const [selector, url, body] of [
     ['#group-create', `/api/puzzles/${panel.dataset.puzzle}/groups`, options],
@@ -291,6 +291,8 @@
     panel.querySelector('#group-host').hidden = !host;
     const guestOption = panel.querySelector('#group-guests-option');
     if (guestOption) guestOption.hidden = !data.can_allow_guests;
+    const publicLobby = panel.querySelector('#group-settings [name=public_lobby]');
+    if (publicLobby) publicLobby.checked = data.public_lobby;
     setText(panel.querySelector('#group-password-status'),data.password_protected ? 'Session password protection is enabled.' : 'Session password protection is disabled.');
     const list = panel.querySelector('#group-members');
     const visible = data.members.filter(m => ['active','pending'].includes(m.status));

@@ -7,15 +7,16 @@
   {% if print_pdf_css %}
     <style>{{ print_pdf_css | safe }}</style>
   {% else %}
-    <link rel="stylesheet" href="/static/styles.css?v=40">
+    <link rel="stylesheet" href="/static/styles.css?v=41">
   {% endif %}
 </head>
-<body>
+<body data-signed-in="{{ 'true' if current_user and not current_user.is_guest else 'false' }}">
   {% if not hide_app_chrome %}
     <header class="topbar">
       <a class="brand" href="/library">Puzzary</a>
       <span class="tagline">A puzzle library for Daily Stripe</span>
       <span class="topbar-spacer"></span>
+      {% if not current_user or not current_user.is_guest %}<a class="nav-link" href="/groups">Group Solve</a>{% endif %}
       {% if current_user and current_user.is_guest %}
         <span class="user-pill">{{ current_user.display_name }} (guest)</span>
       {% elif current_user %}

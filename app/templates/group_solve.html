@@ -26,6 +26,8 @@
         {% include 'group_options.html' %}
         <label>Participant limit <input name="participant_limit" type="number" min="0" max="50" value="0"></label>
         <label><input name="approval_required" type="checkbox"> Require host approval</label>
+        <label><input name="public_lobby" type="checkbox"> List in Public Group Solve Lobby</label>
+        <small class="group-public-note">Public listings show the puzzle, host display name, player count, capacity and access status to anyone. They never show the session code, progress or password.</small>
         {% if not current_user.is_guest and current_user.can('groups.guests') %}
         <label id="group-guests-option" hidden><input name="allow_guests" type="checkbox"> Allow guests</label>
         {% endif %}
@@ -59,6 +61,8 @@
         {% include 'group_options.html' %}
         <label>Participant limit <input name="participant_limit" type="number" min="0" max="50" value="0"></label>
         <label><input name="approval_required" type="checkbox"> Require host approval</label>
+        <label><input name="public_lobby" type="checkbox"> List in Public Group Solve Lobby</label>
+        <small class="group-public-note">Public listings show the puzzle, host display name, player count, capacity and access status to anyone. They never show the session code, progress or password.</small>
         {% if current_user.can('groups.guests') %}
         <label><input name="allow_guests" type="checkbox"> Allow guests</label>
         {% endif %}
@@ -80,6 +84,7 @@
   #group-solve h2 { font-size: 18px; }
   #group-solve form, .group-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin: 12px 0; }
   #group-solve label { max-width: 250px; }
+  .group-public-note { flex-basis: 100%; max-width: 640px; color: var(--muted); }
   .group-members { display: flex; gap: 8px; flex-wrap: wrap; }
   .group-member { padding: 6px 8px; border: 1px solid #cbd5d0; border-left: 5px solid var(--player-color,#cbd5d0); border-radius: 4px; }
   .group-member button { margin-left: 6px; padding: 3px 6px; }

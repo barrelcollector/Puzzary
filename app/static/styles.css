@@ -217,6 +217,37 @@ body {
   font-family: var(--font);
 }
 
+.group-lobby-page { max-width: 1100px; margin: 0 auto; }
+.group-lobby-heading { display: flex; justify-content: space-between; align-items: start; gap: 20px; }
+.group-lobby-heading h1 { margin-bottom: 6px; }
+.group-lobby-filters { display: grid; grid-template-columns: minmax(220px,2fr) repeat(4,minmax(130px,1fr)); gap: 12px; align-items: end; margin: 24px 0 12px; }
+.group-lobby-filters label { margin: 0; }
+.group-lobby-filter-actions { display: flex; align-items: center; gap: 12px; }
+.group-lobby-filter-actions button { width: auto; }
+.group-lobby-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(290px,1fr)); gap: 16px; margin-top: 18px; }
+.group-lobby-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.group-lobby-card-heading { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.group-lobby-card h2, .group-lobby-card p { margin: 0; overflow-wrap: anywhere; }
+.group-lobby-card h2 { font-size: 19px; }
+.group-lobby-state { flex-shrink: 0; padding: 4px 7px; border-radius: 4px; color: var(--success); background: var(--success-bg); font-size: 12px; font-weight: 650; }
+.group-lobby-card[data-status="full"] .group-lobby-state { color: var(--danger); background: var(--danger-bg); }
+.group-lobby-facts { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 13px; }
+.group-lobby-facts span { padding: 4px 7px; border: 1px solid var(--line); border-radius: 4px; }
+.group-lobby-card .button-link, .group-lobby-card button { align-self: start; margin-top: auto; }
+@media (max-width: 800px) {
+  .group-lobby-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .group-lobby-filters label:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .group-lobby-heading { display: block; }
+  .group-lobby-heading .button-link { display: inline-block; margin-top: 8px; }
+  .group-lobby-filters { grid-template-columns: 1fr; }
+  .group-lobby-filters label:first-child { grid-column: auto; }
+  .group-lobby-list { grid-template-columns: 1fr; }
+  .group-lobby-card-heading { display: block; }
+  .group-lobby-state { display: inline-block; margin-top: 8px; }
+}
+
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;

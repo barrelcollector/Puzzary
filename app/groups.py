@@ -11,7 +11,7 @@ import uuid
 import hashlib
 from types import SimpleNamespace
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
@@ -29,6 +29,10 @@ PASSWORD_ATTEMPT_LIMIT = 5
 PASSWORD_ATTEMPT_WINDOW_SECONDS = 60
 password_attempts: dict[tuple[str, str], deque[float]] = {}
 password_attempt_lock = threading.Lock()
+LOBBY_RATE_LIMIT = 60
+LOBBY_RATE_WINDOW_SECONDS = 60
+lobby_requests: dict[str, deque[float]] = {}
+lobby_request_lock = threading.Lock()
 
 
 @router.websocket('/api/groups/{group_id}/presence/ws')
@@ -56,6 +60,7 @@ class GroupOptions(BaseModel):
     allow_guests: bool = False
     password: str = Field(default='', max_length=128)
     remove_password: bool = False
+    public_lobby: bool = False
     puzzle_options: dict[str, str] = Field(default_factory=dict, max_length=20)
 
 
@@ -126,6 +131,94 @@ def update_group_password(group, password, remove=False):
         with password_attempt_lock:
             for key in [key for key in password_attempts if key[0] == group.id]:
                 password_attempts.pop(key, None)
+
+
+def require_lobby_rate(request):
+    key = request.client.host if request.client else 'unknown'
+    timestamp = time.monotonic()
+    with lobby_request_lock:
+        requests = lobby_requests.setdefault(key, deque())
+        while requests and timestamp - requests[0] >= LOBBY_RATE_WINDOW_SECONDS:
+            requests.popleft()
+        if len(requests) >= LOBBY_RATE_LIMIT:
+            retry = max(1, int(LOBBY_RATE_WINDOW_SECONDS - (timestamp - requests[0])))
+            raise HTTPException(429, 'Too many lobby refreshes. Try again shortly.', headers={'Retry-After': str(retry)})
+        requests.append(timestamp)
+
+
+def puzzle_is_public(puzzle):
+    metadata = puzzle.puzzle_metadata or {}
+    visibility = str(metadata.get('visibility', '')).lower()
+    return not (metadata.get('draft') or metadata.get('hidden') or visibility in {'hidden', 'unlisted', 'private'}
+                or puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()))
+
+
+def public_lobby_items(db, q='', puzzle_type='', available='any', password='any', sort='recent'):
+    query = q.strip().casefold()[:160]
+    valid_types = {item.slug for item in list_puzzle_types()}
+    selected_type = puzzle_type if puzzle_type in valid_types else ''
+    available = available if available in {'any', 'open', 'full'} else 'any'
+    password = password if password in {'any', 'required', 'not_required'} else 'any'
+    sort = sort if sort in {'recent', 'newest', 'players'} else 'recent'
+    active = (select(GroupMember.group_id, func.count().label('count'))
+              .where(GroupMember.status == 'active').group_by(GroupMember.group_id).subquery())
+    activity = (select(GroupAction.group_id, func.max(GroupAction.created_at).label('last_at'))
+                .group_by(GroupAction.group_id).subquery())
+    statement = (select(GroupSolve, Puzzle, User, func.coalesce(active.c.count, 0), activity.c.last_at)
+        .join(Puzzle, Puzzle.id == GroupSolve.puzzle_id)
+        .join(User, User.id == GroupSolve.host_id)
+        .outerjoin(active, active.c.group_id == GroupSolve.id)
+        .outerjoin(activity, activity.c.group_id == GroupSolve.id)
+        .where(GroupSolve.public_lobby == True, GroupSolve.closed == False,
+               GroupSolve.expires_at > now(), User.is_active == True))
+    if query:
+        statement = statement.where(Puzzle.title.icontains(query, autoescape=True))
+    if selected_type:
+        statement = statement.where(Puzzle.puzzle_type == selected_type)
+    if password == 'required':
+        statement = statement.where(GroupSolve.password_hash.is_not(None))
+    elif password == 'not_required':
+        statement = statement.where(GroupSolve.password_hash.is_(None))
+    if sort == 'players':
+        statement = statement.order_by(func.coalesce(active.c.count, 0).desc(), GroupSolve.created_at.desc())
+    elif sort == 'newest':
+        statement = statement.order_by(GroupSolve.created_at.desc())
+    else:
+        statement = statement.order_by(func.coalesce(activity.c.last_at, GroupSolve.created_at).desc())
+    rows = db.execute(statement.limit(250)).all()
+    items = []
+    for group, puzzle, host, active_count, last_at in rows:
+        if not puzzle_is_public(puzzle):
+            continue
+        limit = group.participant_limit or SERVER_LIMIT
+        full = int(active_count) >= limit
+        if (available == 'open' and full) or (available == 'full' and not full):
+            continue
+        protected = bool(group.password_hash)
+        if (password == 'required' and not protected) or (password == 'not_required' and protected):
+            continue
+        in_progress = group.revision > group.puzzle_started_revision
+        plugin = get_puzzle_type(puzzle.puzzle_type)
+        activity_at = utc(last_at or group.created_at)
+        items.append({
+            'id': group.id,
+            'url': f'/groups/{group.id}',
+            'puzzle_title': puzzle.title,
+            'puzzle_type': puzzle.puzzle_type,
+            'puzzle_type_label': plugin.label if plugin else puzzle.puzzle_type.replace('_', ' ').title(),
+            'host_name': host.display_name,
+            'players': int(active_count),
+            'capacity': limit,
+            'password_protected': protected,
+            'guest_allowed': bool(group.allow_guests and host.can('groups.guests')),
+            'joinable': not full,
+            'status': 'full' if full else 'in_progress' if in_progress else 'open',
+            'status_label': 'Full' if full else 'In progress - late joining allowed' if in_progress else 'Open for joining',
+            'created_at': utc(group.created_at).isoformat(),
+            'activity_at': activity_at.isoformat(),
+        })
+    return {'groups': items[:100], 'filters': {'q': q.strip()[:160], 'puzzle_type': selected_type,
+                                                'available': available, 'password': password, 'sort': sort}}
 
 
 def can_manage_group(user, group):
@@ -243,6 +336,7 @@ def host_candidates(db, group, *, connected_only=True, exclude_user_ids=()):
 
 def change_host(group, target, *, reason):
     previous = group.host_id
+    group.public_lobby = False
     if target is None:
         group.closed = True
         group.revision += 1
@@ -394,6 +488,7 @@ def snapshot(db, group, user):
             'approval_required': group.approval_required,
             'allow_guests': guests_allowed(db, group),
             'password_protected': bool(group.password_hash),
+            'public_lobby': bool(group.public_lobby),
             'can_allow_guests': can_manage_group(user, group) and user.can('groups.guests'),
             'can_moderate': can_manage_group(user,group),
             'can_transfer_host': can_manage_group(user, group),
@@ -503,6 +598,14 @@ def join_guest(group_id: str, payload: GuestJoin, request: Request, db: Session 
     request.session['group_guests'] = sessions
     publish_state_change(group.id)
     return {'url': f'/puzzles/{group.puzzle_id}?group={group.id}', 'pending': member.status == 'pending'}
+
+
+@router.get('/api/groups/lobby')
+def public_group_lobby(request: Request, response: Response, q: str = '', puzzle_type: str = '', available: str = 'any',
+                       password: str = 'any', sort: str = 'recent', db: Session = Depends(get_db)):
+    require_lobby_rate(request)
+    response.headers['Cache-Control'] = 'no-store'
+    return public_lobby_items(db, q, puzzle_type, available, password, sort)
 
 
 @router.get('/api/groups/{group_id}')
@@ -680,6 +783,7 @@ def group_settings(group_id: str, payload: GroupOptions, request: Request, db: S
     active = db.scalar(select(func.count()).select_from(GroupMember).where(GroupMember.group_id == group.id, GroupMember.status == 'active'))
     if payload.participant_limit and payload.participant_limit < active: raise HTTPException(409, 'Limit is below current participant count')
     group.participant_limit = payload.participant_limit; group.approval_required = payload.approval_required
+    group.public_lobby = payload.public_lobby
     group.allow_guests = payload.allow_guests
     update_group_password(group, payload.password, payload.remove_password)
     if not group.allow_guests:

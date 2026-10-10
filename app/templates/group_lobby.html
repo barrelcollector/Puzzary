@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Public Group Solve Lobby - Puzzary{% endblock %}
+{% block content %}
+<section class="group-lobby-page">
+  <div class="group-lobby-heading">
+    <div>
+      <h1>Public Group Solve Lobby</h1>
+      <p class="muted">Find host-listed sessions. In-progress groups allow late joining while space remains.</p>
+    </div>
+    <a href="/library" class="button-link ghost-button">Puzzle Library</a>
+  </div>
+  <form id="group-lobby-filters" class="group-lobby-filters" action="/groups" method="get">
+    <label>Search puzzle title <input name="q" type="search" maxlength="160" value="{{ filters.q }}"></label>
+    <label>Puzzle type
+      <select name="puzzle_type">
+        <option value="">All types</option>
+        {% for item in puzzle_types %}<option value="{{ item.slug }}" {% if filters.puzzle_type == item.slug %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Space
+      <select name="available">
+        <option value="any" {% if filters.available == 'any' %}selected{% endif %}>Any</option>
+        <option value="open" {% if filters.available == 'open' %}selected{% endif %}>Available slots</option>
+        <option value="full" {% if filters.available == 'full' %}selected{% endif %}>Full</option>
+      </select>
+    </label>
+    <label>Guest password
+      <select name="password">
+        <option value="any" {% if filters.password == 'any' %}selected{% endif %}>Any</option>
+        <option value="required" {% if filters.password == 'required' %}selected{% endif %}>Required</option>
+        <option value="not_required" {% if filters.password == 'not_required' %}selected{% endif %}>Not required</option>
+      </select>
+    </label>
+    <label>Sort
+      <select name="sort">
+        <option value="recent" {% if filters.sort == 'recent' %}selected{% endif %}>Recent activity</option>
+        <option value="newest" {% if filters.sort == 'newest' %}selected{% endif %}>Newest</option>
+        <option value="players" {% if filters.sort == 'players' %}selected{% endif %}>Most players</option>
+      </select>
+    </label>
+    <div class="group-lobby-filter-actions"><button type="submit">Apply filters</button><a href="/groups">Clear</a></div>
+  </form>
+  <p id="group-lobby-status" class="muted" role="status" aria-live="polite">{{ groups | length }} public session{% if groups | length != 1 %}s{% endif %}</p>
+  <div id="group-lobby-list" class="group-lobby-list">
+    {% for group in groups %}
+    <article class="group-lobby-card" data-status="{{ group.status }}">
+      <div class="group-lobby-card-heading"><h2>{{ group.puzzle_title }}</h2><span class="group-lobby-state">{{ group.status_label }}</span></div>
+      <p>{{ group.puzzle_type_label }} hosted by <strong>{{ group.host_name }}</strong></p>
+      <div class="group-lobby-facts">
+        <span>{{ group.players }} / {{ group.capacity }} players</span>
+        <span>{{ 'Guest password required' if group.password_protected else 'No guest password' }}</span>
+        <span>{{ 'Guests allowed' if group.guest_allowed else 'Account required' }}</span>
+      </div>
+      {% if group.joinable %}<a class="button-link" href="{{ group.url }}">{% if current_user %}Join session{% elif group.guest_allowed %}Join as guest{% else %}Sign in to join{% endif %}</a>{% else %}<button type="button" disabled>Session full</button>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  <p id="group-lobby-empty" class="panel" {% if groups %}hidden{% endif %}>No public Group Solve sessions match these filters.</p>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/group-lobby.js?v=1"></script>{% endblock %}

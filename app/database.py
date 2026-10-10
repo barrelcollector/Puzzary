@@ -70,6 +70,8 @@ def ensure_schema() -> None:
             connection.execute(text("ALTER TABLE group_solves ADD COLUMN allow_guests BOOLEAN NOT NULL DEFAULT FALSE"))
         if "group_solves" in table_names and "password_hash" not in {c["name"] for c in inspector.get_columns("group_solves")}:
             connection.execute(text("ALTER TABLE group_solves ADD COLUMN password_hash VARCHAR(255)"))
+        if "group_solves" in table_names and "public_lobby" not in {c["name"] for c in inspector.get_columns("group_solves")}:
+            connection.execute(text("ALTER TABLE group_solves ADD COLUMN public_lobby BOOLEAN NOT NULL DEFAULT FALSE"))
         for table, additions in {
             "group_members": {"guest_name": "VARCHAR(80)", "guest_token_hash": "VARCHAR(64)"},
             "group_actions": {"guest_member_id": "INTEGER", "target": "VARCHAR(80) NOT NULL DEFAULT ''", "contributions": "JSON NOT NULL DEFAULT '[]'"},
