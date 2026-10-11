@@ -464,6 +464,12 @@ Authorized puzzle managers can create revocable, unguessable guest links from th
 
 Each activation creates a browser-scoped guest identity with persisted puzzle progress. Guest links grant play only: they do not grant library discovery, printing, exports, account access, photo uploads, admin access or solution access. A manager may opt a link into Group Solve; that opt-in permits its guest to join an allow-guests, passwordless session for the same puzzle, including an unlisted puzzle, while expiry and revocation continue to be checked on every request. Regression check: `PYTHONPATH=. python scripts/verify_guest_links.py`.
 
+## Puzzle series
+
+Publishers with puzzle-metadata permission can assemble active published puzzles into an ordered series under **Admin > Series**. Prerequisite enforcement is off by default; when enabled, every earlier active stage must be complete before a later stage opens. The puzzle page shows the full order, current step, per-stage progress, unavailable entries and locks, and an optional after-stage message. The same lock is enforced for direct web links, progress/actions, print endpoints and puzzle APIs. Series owners and users with metadata permission for all puzzles can bypass locks for administration.
+
+Archived, auto-archived and draft puzzles remain visible as unavailable series entries but are skipped when prerequisites are evaluated, so an editorial change cannot deadlock every later stage. Removing or reordering entries immediately recomputes access; archiving the series disables its navigation and locks without changing its puzzles. Group Solve can use shared progression, where the group’s saved state unlocks its next stage for everyone, or individual progression, where each signed-in participant needs their own prior completion. Puzzle-specific guest links never inherit progress or access to another stage. Regression check: `PYTHONPATH=. python scripts/verify_puzzle_series.py`.
+
 ## Group Solve
 
 Hosts can use **Session settings > Move group to another puzzle** to search active, collaboration-compatible puzzles. Moving keeps the same group, participants, guest permissions and invite link (`/groups/{id}`), and connected players follow automatically. Each puzzle's shared progress is saved when leaving and restored when returning. Delayed edits from an earlier puzzle are rejected rather than applied to the new board. Groups support up to 100 visited puzzles.

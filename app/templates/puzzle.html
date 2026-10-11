@@ -18,6 +18,7 @@
 </section>
 
 {% include 'group_solve.html' %}
+{% include 'series_progress.html' %}
 <div id="puzzle-play-context" data-puzzle="{{ puzzle.id }}" data-group="{{ 'true' if group_id else 'false' }}" hidden></div>
 
 <section
@@ -30,7 +31,7 @@
   <div>
     <p class="celebration-kicker">Puzzle complete</p>
     <h2>{{ 'Great solve, team.' if group_id else 'Nice solve.' }}</h2>
-    <p class="muted" id="completion-message">{{ puzzle.completion_message if puzzle.completion_message else ('Shared progress is saved for this Group Solve.' if group_id else 'Your progress is saved. You can reset and replay whenever you want.') }}</p>
+    <p class="muted" id="completion-message">{{ series_completion_message if series_completion_message else puzzle.completion_message if puzzle.completion_message else ('Shared progress is saved for this Group Solve.' if group_id else 'Your progress is saved. You can reset and replay whenever you want.') }}</p>
   </div>
   <div class="celebration-actions">
     <button type="button" class="ghost-button" id="celebration-sound-toggle">Sound on</button>
@@ -151,7 +152,7 @@
 </section>
 {% endif %}
 <script src="/static/celebration.js?v=4"></script>
-<script src="/static/group-solve.js?v=16"></script>
+<script src="/static/group-solve.js?v=17"></script>
 <script src="/static/puzzle-actions.js?v=1"></script>
 <script src="/static/word-search.js?v=14"></script>
 <script src="/static/crossword.js?v=15"></script>

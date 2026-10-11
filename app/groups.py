@@ -860,10 +860,20 @@ def group_puzzles(group_id: str, request: Request, q: str = '', offset: int = 0,
     from app.permissions import can_view
     puzzles = [p for p in db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id)) if can_view(user,p,play=True)]
     puzzles = puzzles[max(0,offset):max(0,offset)+51]
-    return {'puzzles': [{'id': p.id, 'title': p.title, 'puzzle_type': p.puzzle_type,
-                         'difficulty': p.difficulty, 'password_protected': bool(p.access_password_hash),
-                         'visited': p.id in (group.puzzle_states or {}) or p.id == group.puzzle_id}
-                        for p in puzzles[:50]], 'has_more': len(puzzles) > 50}
+    items = []
+    for puzzle in puzzles[:50]:
+        locked = False
+        try:
+            core().require_series_access(db, puzzle, user, group)
+        except HTTPException as error:
+            if error.status_code != 423:
+                raise
+            locked = True
+        items.append({'id': puzzle.id, 'title': puzzle.title, 'puzzle_type': puzzle.puzzle_type,
+                      'difficulty': puzzle.difficulty, 'password_protected': bool(puzzle.access_password_hash),
+                      'series_locked': locked,
+                      'visited': puzzle.id in (group.puzzle_states or {}) or puzzle.id == group.puzzle_id})
+    return {'puzzles': items, 'has_more': len(puzzles) > 50}
 
 
 @router.post('/api/groups/{group_id}/puzzle')
@@ -881,6 +891,7 @@ def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session 
     core().require_puzzle_access(request, puzzle)
     from app.permissions import can_view
     if not can_view(user, puzzle, play=True): raise HTTPException(403, 'Puzzle access denied')
+    core().require_series_access(db, puzzle, user, group)
     if puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()):
         raise HTTPException(409, 'Choose an active puzzle')
     plugin = get_puzzle_type(puzzle.puzzle_type)

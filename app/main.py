@@ -54,6 +54,8 @@ from app.models import (
     PuzzleHint,
     PuzzleGuestLink,
     PuzzleGuestSession,
+    PuzzleSeries,
+    PuzzleSeriesEntry,
     PuzzlePhoto,
     PuzzleProgress,
     PublishedIssue,
@@ -2236,6 +2238,118 @@ def progress_record_for_user(db: Session, puzzle: Puzzle, user, create: bool = F
     return progress
 
 
+def series_entry_available(entry: PuzzleSeriesEntry) -> bool:
+    puzzle = entry.puzzle
+    if puzzle is None or puzzle.archived_at is not None or (puzzle.puzzle_metadata or {}).get("draft"):
+        return False
+    archive_at = puzzle.auto_archive_at
+    if archive_at is not None and archive_at.tzinfo is None:
+        archive_at = archive_at.replace(tzinfo=timezone.utc)
+    return archive_at is None or utcnow() < archive_at
+
+
+def puzzle_progress_complete(db: Session, puzzle: Puzzle, user) -> bool:
+    if getattr(user, "is_guest_link", False) and user.guest_link.puzzle_id != puzzle.id:
+        return False
+    progress = progress_record_for_user(db, puzzle, user)
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    if plugin is not None and progress is not None:
+        found, total = plugin.progress_counter(progress.progress_payload or {}, puzzle.solution_payload)
+        if total > 0 and found >= total:
+            return True
+    if getattr(user, "is_guest", False):
+        return False
+    return db.scalar(select(PuzzleAttempt.id).where(
+        PuzzleAttempt.puzzle_id == puzzle.id,
+        PuzzleAttempt.user_id == user.id,
+        PuzzleAttempt.is_correct == True,  # noqa: E712
+    ).limit(1)) is not None
+
+
+def group_puzzle_complete(group, puzzle: Puzzle) -> bool:
+    state = group.state if group.puzzle_id == puzzle.id else (group.puzzle_states or {}).get(puzzle.id)
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    if state is None or plugin is None:
+        return False
+    found, total = plugin.progress_counter(state, puzzle.solution_payload)
+    return total > 0 and found >= total
+
+
+def series_admin_bypass(user, series: PuzzleSeries) -> bool:
+    return not getattr(user, "is_guest", False) and (
+        user.can("puzzles.metadata.any")
+        or (series.created_by_id == user.id and user.can("puzzles.metadata.own"))
+    )
+
+
+def puzzle_series_contexts(db: Session, puzzle: Puzzle, user, group=None) -> list[dict]:
+    memberships = db.scalars(select(PuzzleSeriesEntry).where(PuzzleSeriesEntry.puzzle_id == puzzle.id)).all()
+    contexts = []
+    for membership in memberships:
+        series = membership.series
+        if series.archived_at is not None:
+            continue
+        ordered = sorted(series.entries, key=lambda item: (item.position, item.id))
+        active = [entry for entry in ordered if series_entry_available(entry)]
+        completed_by_id = {}
+        for entry in active:
+            shared = group is not None and series.group_progression == "shared"
+            completed_by_id[entry.id] = group_puzzle_complete(group, entry.puzzle) if shared else puzzle_progress_complete(db, entry.puzzle, user)
+        previous_complete = True
+        stages = []
+        for entry in ordered:
+            available = entry in active
+            unlocked = series_admin_bypass(user, series) or (available and (not series.require_previous or previous_complete))
+            completed = bool(completed_by_id.get(entry.id))
+            stages.append({
+                "entry": entry,
+                "puzzle": entry.puzzle,
+                "available": available,
+                "unlocked": unlocked,
+                "completed": completed,
+                "current": entry.puzzle_id == puzzle.id,
+            })
+            if available and series.require_previous:
+                previous_complete = previous_complete and completed
+        current = next((stage for stage in stages if stage["current"]), None)
+        contexts.append({
+            "series": series,
+            "stages": stages,
+            "current": current,
+            "current_number": next((index + 1 for index, stage in enumerate(stages) if stage["current"]), 0),
+            "total": len(stages),
+        })
+    return contexts
+
+
+def require_series_access(db: Session, puzzle: Puzzle, user, group=None) -> list[dict]:
+    contexts = puzzle_series_contexts(db, puzzle, user, group)
+    locked = next((context for context in contexts if context["current"] and not context["current"]["unlocked"]), None)
+    if locked is not None:
+        prior = next((stage for stage in reversed(locked["stages"][:locked["current_number"] - 1]) if stage["available"]), None)
+        title = prior["puzzle"].title if prior is not None else "the previous puzzle"
+        raise HTTPException(423, f'Complete "{title}" to unlock this series stage')
+    return contexts
+
+
+def series_group_for_request(request: Request, db: Session, puzzle: Puzzle | None):
+    group_id = request.path_params.get("group_id") or request.query_params.get("group", "")
+    if not group_id or puzzle is None:
+        return None
+    from app.models import GroupSolve
+    group = db.get(GroupSolve, group_id)
+    return group if group is not None and group.puzzle_id == puzzle.id else None
+
+
+def require_web_series_puzzle(request: Request, db: Session, user, puzzle_id: str) -> Puzzle:
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(404, "Puzzle not found")
+    require_puzzle_access(request, puzzle)
+    require_series_access(db, puzzle, user, series_group_for_request(request, db, puzzle))
+    return puzzle
+
+
 def issue_password_setup_token(db: Session, user: User) -> str:
     token = secrets.token_urlsafe(32)
     user.reset_token_hash = hash_secret(token)
@@ -2332,6 +2446,7 @@ def require_api_user(request: Request, db: Session) -> User:
             raise HTTPException(status_code=401, detail="API token required")
         require_puzzle_access(request, puzzle)
         authorize_request(request, db, user)
+        require_series_access(db, puzzle, user, series_group_for_request(request, db, puzzle))
         return user
     request.state.puzzary_user_id = user.id
     authorize_request(request, db, user)
@@ -2342,6 +2457,7 @@ def require_api_user(request: Request, db: Session) -> User:
     )
     if puzzle is not None and not management_bypass:
         require_puzzle_access(request, puzzle)
+        require_series_access(db, puzzle, user, series_group_for_request(request, db, puzzle))
     return user
 
 
@@ -3194,12 +3310,16 @@ def admin_context(
     bank_counts = word_bank_entry_counts(db, all_word_banks) if section in {"dashboard", "word_banks"} else {}
     bank_entries = {selected_word_bank.id: word_bank_entries(db, selected_word_bank, dictionary_words=dictionary_words)} if selected_word_bank is not None else {}
     dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags, bank_counts, tag_usage) if section == "dashboard" else {}
+    series = db.scalars(select(PuzzleSeries).order_by(desc(PuzzleSeries.updated_at), PuzzleSeries.title)).all()
+    series = [item for item in series if series_admin_bypass(user, item)]
     return {
         "request": request,
         "current_user": user,
         "section": section,
         "now_utc": utcnow(),
         "issues": [i for i in db.scalars(select(PublishedIssue).order_by(desc(PublishedIssue.created_at))) if can_owned(user,'issues','edit',i.created_by_id)] if section == "publishing" else [],
+        "series": series,
+        "selected_series": None,
         "selected_issue": None,
         "publishing_puzzles": [
             {"id": puzzle.id, "title": puzzle.title, "puzzle_type": puzzle.puzzle_type,
@@ -3296,6 +3416,176 @@ def admin_page(request: Request, db: Session = Depends(get_db)):
 @app.get("/admin/puzzles", response_class=HTMLResponse)
 def admin_puzzles_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "puzzles")
+
+
+def managed_series(db: Session, user, series_id: str) -> PuzzleSeries:
+    series = db.get(PuzzleSeries, series_id)
+    if series is None:
+        raise HTTPException(404, "Puzzle series not found")
+    if not series_admin_bypass(user, series):
+        raise HTTPException(403, "Puzzle metadata permission required")
+    return series
+
+
+def write_series_positions(db: Session, entries: list[PuzzleSeriesEntry]) -> None:
+    for position, entry in enumerate(entries, start=1):
+        entry.position = -position
+    db.flush()
+    for position, entry in enumerate(entries, start=1):
+        entry.position = position
+
+
+@app.get("/admin/series", response_class=HTMLResponse)
+def admin_series_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "series")
+
+
+@app.get("/admin/series/{series_id}", response_class=HTMLResponse)
+def admin_series_detail(series_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    series = managed_series(db, user, series_id)
+    context = admin_context(request, db, user, "series")
+    context["selected_series"] = series
+    return templates.TemplateResponse("admin.html", context)
+
+
+@app.post("/admin/series")
+def admin_create_series(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    require_previous: bool = Form(False),
+    group_progression: str = Form("shared"),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    if not (user.can("puzzles.metadata.own") or user.can("puzzles.metadata.any")):
+        raise HTTPException(403, "Puzzle metadata permission required")
+    clean_title = title.strip()
+    if not clean_title or len(clean_title) > 160:
+        raise HTTPException(422, "Enter a series title of at most 160 characters")
+    if group_progression not in {"shared", "individual"}:
+        raise HTTPException(422, "Choose shared or individual Group Solve progression")
+    series = PuzzleSeries(
+        id=uuid.uuid4().hex[:24], title=clean_title, description=description.strip()[:2000],
+        require_previous=require_previous, group_progression=group_progression, created_by_id=user.id,
+    )
+    db.add(series)
+    audit(db, user, "puzzle_series", series.id, "series.created", {}, {
+        "title": series.title, "require_previous": require_previous, "group_progression": group_progression,
+    })
+    db.commit()
+    return RedirectResponse(f"/admin/series/{series.id}", status_code=303)
+
+
+@app.post("/admin/series/{series_id}")
+def admin_update_series(
+    series_id: str,
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    require_previous: bool = Form(False),
+    group_progression: str = Form("shared"),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    series = managed_series(db, user, series_id)
+    clean_title = title.strip()
+    if not clean_title or len(clean_title) > 160 or group_progression not in {"shared", "individual"}:
+        raise HTTPException(422, "Enter a valid title and Group Solve progression")
+    before = {"title": series.title, "require_previous": series.require_previous, "group_progression": series.group_progression}
+    series.title = clean_title
+    series.description = description.strip()[:2000]
+    series.require_previous = require_previous
+    series.group_progression = group_progression
+    audit(db, user, "puzzle_series", series.id, "series.updated", before, {
+        "title": series.title, "require_previous": require_previous, "group_progression": group_progression,
+    })
+    db.commit()
+    return RedirectResponse(f"/admin/series/{series.id}", status_code=303)
+
+
+@app.post("/admin/series/{series_id}/entries")
+def admin_add_series_entry(
+    series_id: str,
+    request: Request,
+    puzzle_id: str = Form(...),
+    completion_message: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    series = managed_series(db, user, series_id)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if not puzzle_guest_link_eligible(puzzle):
+        raise HTTPException(409, "Only published active puzzles can be added to a series")
+    require_owned(user, "puzzles", "metadata", puzzle.created_by_id)
+    if any(entry.puzzle_id == puzzle.id for entry in series.entries):
+        raise HTTPException(409, "That puzzle is already in this series")
+    entry = PuzzleSeriesEntry(
+        series_id=series.id, puzzle_id=puzzle.id,
+        position=max((item.position for item in series.entries), default=0) + 1,
+        completion_message=completion_message.strip()[:500],
+    )
+    db.add(entry)
+    audit(db, user, "puzzle_series", series.id, "series.entry_added", {}, {"puzzle_id": puzzle.id})
+    db.commit()
+    return RedirectResponse(f"/admin/series/{series.id}", status_code=303)
+
+
+@app.post("/admin/series/{series_id}/entries/{entry_id}")
+def admin_update_series_entry(
+    series_id: str,
+    entry_id: int,
+    request: Request,
+    action: str = Form("save"),
+    completion_message: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    series = managed_series(db, user, series_id)
+    entry = next((item for item in series.entries if item.id == entry_id), None)
+    if entry is None:
+        raise HTTPException(404, "Series entry not found")
+    ordered = sorted(series.entries, key=lambda item: (item.position, item.id))
+    index = ordered.index(entry)
+    if action == "remove":
+        db.delete(entry)
+        ordered.remove(entry)
+        db.flush()
+    elif action in {"up", "down"}:
+        target = index - 1 if action == "up" else index + 1
+        if 0 <= target < len(ordered):
+            ordered[index], ordered[target] = ordered[target], ordered[index]
+    elif action == "save":
+        entry.completion_message = completion_message.strip()[:500]
+    else:
+        raise HTTPException(422, "Unknown series entry action")
+    write_series_positions(db, ordered)
+    audit(db, user, "puzzle_series", series.id, f"series.entry_{action}", {}, {"puzzle_id": entry.puzzle_id})
+    db.commit()
+    return RedirectResponse(f"/admin/series/{series.id}", status_code=303)
+
+
+@app.post("/admin/series/{series_id}/archive")
+def admin_archive_series(series_id: str, request: Request, restore: bool = Form(False), db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    series = managed_series(db, user, series_id)
+    series.archived_at = None if restore else utcnow()
+    audit(db, user, "puzzle_series", series.id, "series.restored" if restore else "series.archived", {}, {})
+    db.commit()
+    return RedirectResponse("/admin/series", status_code=303)
 
 
 @app.get("/admin/puzzles/manual", response_class=HTMLResponse)
@@ -4780,6 +5070,19 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "return_to": str(request.url.path) + (f"?{request.url.query}" if request.url.query else ""),
             "error": "",
         }, status_code=423)
+    series_group = series_group_for_request(request, db, puzzle)
+    try:
+        series_contexts = require_series_access(db, puzzle, user, series_group)
+    except HTTPException as error:
+        if error.status_code != 423:
+            raise
+        return templates.TemplateResponse("series_locked.html", {
+            "request": request,
+            "current_user": user,
+            "puzzle": puzzle,
+            "series_contexts": puzzle_series_contexts(db, puzzle, user, series_group),
+            "error": error.detail,
+        }, status_code=423)
     is_guest = getattr(user, 'is_guest', False)
     if not is_guest:
         authorize_request(request, db, user)
@@ -4832,6 +5135,11 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "has_solution_template": has_solution_template,
             "playable_puzzle_type": puzzle_type is not None and puzzle_type.supports_web_play and has_puzzle_template,
             "return_to": return_to,
+            "series_contexts": series_contexts,
+            "series_completion_message": next((
+                context["current"]["entry"].completion_message for context in series_contexts
+                if context["current"] and context["current"]["entry"].completion_message
+            ), ""),
         },
     )
 
@@ -4871,6 +5179,7 @@ def puzzle_print_page(puzzle_id: str, request: Request, db: Session = Depends(ge
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    require_web_series_puzzle(request, db, user, puzzle_id)
     return render_puzzle_print_page(puzzle_id, request, db, user, show_toolbar=True)
 
 
@@ -4904,6 +5213,7 @@ def puzzle_pdf_download(puzzle_id: str, request: Request, db: Session = Depends(
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    require_web_series_puzzle(request, db, user, puzzle_id)
     return puzzle_pdf_response(puzzle_id, request, db, user)
 
 
@@ -4941,6 +5251,8 @@ def render_puzzle_print_page(
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    if user is not None:
+        require_series_access(db, puzzle, user, series_group_for_request(request, db, puzzle))
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
         raise HTTPException(status_code=404, detail="This puzzle does not support printing")
@@ -4974,6 +5286,7 @@ def web_attempt_puzzle(
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    require_web_series_puzzle(request, db, user, puzzle_id)
     result = submit_puzzle_attempt(puzzle_id, answer, user.id, db)
     celebration = "?celebrate=1" if result.is_correct else ""
     return RedirectResponse(url=f"/puzzles/{puzzle_id}{celebration}", status_code=303)
@@ -4990,6 +5303,7 @@ def web_upload_photo(
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    require_web_series_puzzle(request, db, user, puzzle_id)
     save_photo(puzzle_id, file, notes, user.id, db)
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
@@ -4999,6 +5313,7 @@ def web_reset_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get
     user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
+    require_web_series_puzzle(request, db, user, puzzle_id)
     reset_user_puzzle(puzzle_id, user.id, db)
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
@@ -5700,6 +6015,12 @@ def get_latest_puzzle(request: Request, printable: bool = False, db: Session = D
     for puzzle in puzzles:
         if not can_discover(user,puzzle): continue
         if not puzzle_access_granted(request, puzzle): continue
+        try:
+            require_series_access(db, puzzle, user)
+        except HTTPException as error:
+            if error.status_code == 423:
+                continue
+            raise
         puzzle_type = get_puzzle_type(puzzle.puzzle_type)
         if printable and (puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only):
             continue

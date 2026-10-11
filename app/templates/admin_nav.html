@@ -2,6 +2,7 @@
   <a href="/admin">Dashboard</a>
   {% if current_user.can('puzzles.generate') %}<a href="/admin/generate">Generate</a>{% endif %}
   {% if current_user.can('puzzles.edit.own') or current_user.can('puzzles.edit.any') or current_user.can('puzzles.create') %}<a href="/admin/puzzles">Puzzles</a>{% endif %}
+  {% if current_user.can('puzzles.metadata.own') or current_user.can('puzzles.metadata.any') %}<a href="/admin/series">Series</a>{% endif %}
   {% if current_user.can('content.manage') %}
   <a href="/admin/dictionary">Dictionary</a><a href="/admin/word-banks">Word Banks</a><a href="/admin/tags">Tags</a>
   {% endif %}

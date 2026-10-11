@@ -139,6 +139,40 @@ class Puzzle(Base):
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     group_solves: Mapped[list[GroupSolve]] = relationship(cascade="all, delete-orphan")
     guest_links: Mapped[list[PuzzleGuestLink]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    series_entries: Mapped[list[PuzzleSeriesEntry]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+
+
+class PuzzleSeries(Base):
+    __tablename__ = "puzzle_series"
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    require_previous: Mapped[bool] = mapped_column(Boolean, default=False)
+    group_progression: Mapped[str] = mapped_column(String(16), default="shared")
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    entries: Mapped[list[PuzzleSeriesEntry]] = relationship(
+        back_populates="series", cascade="all, delete-orphan", order_by="PuzzleSeriesEntry.position"
+    )
+
+
+class PuzzleSeriesEntry(Base):
+    __tablename__ = "puzzle_series_entries"
+    __table_args__ = (
+        UniqueConstraint("series_id", "position", name="uq_puzzle_series_position"),
+        UniqueConstraint("series_id", "puzzle_id", name="uq_puzzle_series_puzzle"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    series_id: Mapped[str] = mapped_column(ForeignKey("puzzle_series.id"), index=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    completion_message: Mapped[str] = mapped_column(String(500), default="")
+
+    series: Mapped[PuzzleSeries] = relationship(back_populates="entries")
+    puzzle: Mapped[Puzzle] = relationship(back_populates="series_entries")
 
 
 class PuzzleGuestLink(Base):

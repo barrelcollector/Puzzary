@@ -496,8 +496,8 @@
       const select = moveForm.elements.puzzle_id; select.replaceChildren();
       for (const puzzle of data.puzzles) {
         const option = document.createElement('option'); option.value = puzzle.id;
-        option.textContent = `${puzzle.title} - ${puzzle.puzzle_type} / ${puzzle.difficulty}${puzzle.password_protected ? ' / locked' : ''}${puzzle.visited ? ' (saved progress)' : ''}`;
-        option.disabled = puzzle.id === panel.dataset.puzzle; select.append(option);
+        option.textContent = `${puzzle.title} - ${puzzle.puzzle_type} / ${puzzle.difficulty}${puzzle.password_protected ? ' / password' : ''}${puzzle.series_locked ? ' / series locked' : ''}${puzzle.visited ? ' (saved progress)' : ''}`;
+        option.disabled = puzzle.id === panel.dataset.puzzle || puzzle.series_locked; select.append(option);
       }
       const first = [...select.options].find(o => !o.disabled);
       select.value = first?.value || '';

@@ -159,6 +159,96 @@
       </section>
     {% endif %}
 
+    {% if section == "series" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Puzzle Series</h1>
+          <p class="muted">Publish an ordered path and optionally require each stage before the next unlocks.</p>
+        </div>
+      </section>
+      {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
+      <section class="admin-grid two">
+        <form class="panel" method="post" action="/admin/series">
+          <h2>New series</h2>
+          <label>Title <input name="title" maxlength="160" required></label>
+          <label>Description <textarea name="description" rows="3" maxlength="2000"></textarea></label>
+          <label class="check"><input type="checkbox" name="require_previous" value="true"> Require the previous active puzzle to be completed</label>
+          <label>Group Solve progression
+            <select name="group_progression">
+              <option value="shared">Shared group progress</option>
+              <option value="individual">Each player’s personal progress</option>
+            </select>
+          </label>
+          <button type="submit">Create series</button>
+        </form>
+        <div class="panel">
+          <h2>Series</h2>
+          <div class="list compact">
+            {% for item in series %}
+              <a class="row" href="/admin/series/{{ item.id }}">
+                <span><strong>{{ item.title }}</strong><small>{{ item.entries | length }} stage{% if item.entries | length != 1 %}s{% endif %} / {{ 'sequential' if item.require_previous else 'open order' }}</small></span>
+                <small>{{ 'Archived' if item.archived_at else 'Edit' }}</small>
+              </a>
+            {% else %}<p class="muted">No puzzle series yet.</p>{% endfor %}
+          </div>
+        </div>
+      </section>
+
+      {% if selected_series %}
+        <section class="panel">
+          <h2>Edit {{ selected_series.title }}</h2>
+          <form method="post" action="/admin/series/{{ selected_series.id }}">
+            <label>Title <input name="title" maxlength="160" value="{{ selected_series.title }}" required></label>
+            <label>Description <textarea name="description" rows="3" maxlength="2000">{{ selected_series.description }}</textarea></label>
+            <label class="check"><input type="checkbox" name="require_previous" value="true" {% if selected_series.require_previous %}checked{% endif %}> Require prior completion</label>
+            <label>Group Solve progression
+              <select name="group_progression">
+                <option value="shared" {% if selected_series.group_progression == 'shared' %}selected{% endif %}>Shared group progress</option>
+                <option value="individual" {% if selected_series.group_progression == 'individual' %}selected{% endif %}>Each player’s personal progress</option>
+              </select>
+            </label>
+            <button type="submit">Save series</button>
+          </form>
+          <form method="post" action="/admin/series/{{ selected_series.id }}/archive" class="inline-form">
+            {% if selected_series.archived_at %}<input type="hidden" name="restore" value="true"><button type="submit">Restore series</button>
+            {% else %}<button type="submit" class="danger-button">Archive series</button>{% endif %}
+          </form>
+        </section>
+        <section class="panel">
+          <h2>Ordered stages</h2>
+          <div class="list">
+            {% for entry in selected_series.entries %}
+              <form class="row" method="post" action="/admin/series/{{ selected_series.id }}/entries/{{ entry.id }}">
+                <span><strong>{{ entry.position }}. {{ entry.puzzle.title }}</strong><small>{{ entry.puzzle.puzzle_type }}{% if entry.puzzle.archived_at or (entry.puzzle.puzzle_metadata and entry.puzzle.puzzle_metadata.get('draft')) %} / unavailable{% endif %}</small></span>
+                <label>After-stage message <input name="completion_message" maxlength="500" value="{{ entry.completion_message }}"></label>
+                <span class="action-row">
+                  <button name="action" value="save" type="submit">Save</button>
+                  <button name="action" value="up" type="submit" aria-label="Move up">Up</button>
+                  <button name="action" value="down" type="submit" aria-label="Move down">Down</button>
+                  <button name="action" value="remove" type="submit" class="danger-button">Remove</button>
+                </span>
+              </form>
+            {% else %}<p class="muted">Add a published puzzle to begin.</p>{% endfor %}
+          </div>
+          <form method="post" action="/admin/series/{{ selected_series.id }}/entries">
+            <h3>Add stage</h3>
+            <label>Puzzle
+              <select name="puzzle_id" required>
+                <option value="">Choose a published active puzzle</option>
+                {% for puzzle in puzzles %}
+                  {% if not puzzle.archived_at and (not puzzle.puzzle_metadata or not puzzle.puzzle_metadata.get('draft')) %}
+                    <option value="{{ puzzle.id }}">{{ puzzle.title }} ({{ puzzle.puzzle_type }})</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            </label>
+            <label>After-stage message <input name="completion_message" maxlength="500" placeholder="Optional message shown after this stage"></label>
+            <button type="submit">Add stage</button>
+          </form>
+        </section>
+      {% endif %}
+    {% endif %}
+
     {% if section == "puzzles" %}
       <section class="puzzle-head">
         <div>

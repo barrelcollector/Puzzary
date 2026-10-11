@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Series stage locked - Puzzary{% endblock %}
+{% block content %}
+<section class="panel">
+  <p class="muted">Sequential puzzle series</p>
+  <h1>This stage is locked</h1>
+  <p role="alert">{{ error }}</p>
+  <a class="ghost-button" href="/library">Back to Library</a>
+</section>
+{% include "series_progress.html" %}
+{% endblock %}

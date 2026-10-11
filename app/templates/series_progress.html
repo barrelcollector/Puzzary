@@ -1,0 +1,33 @@
+{% for context in series_contexts %}
+<section class="panel series-progress" data-series="{{ context.series.id }}">
+  <div class="puzzle-head">
+    <div>
+      <p class="muted">Puzzle series</p>
+      <h2>{{ context.series.title }}</h2>
+      {% if context.series.description %}<p>{{ context.series.description }}</p>{% endif %}
+    </div>
+    <strong>Step {{ context.current_number }} of {{ context.total }}</strong>
+  </div>
+  <ol class="list compact">
+    {% for stage in context.stages %}
+      <li class="row" data-series-stage="{{ stage.entry.position }}" data-series-status="{{ 'unavailable' if not stage.available else 'completed' if stage.completed else 'current' if stage.current else 'locked' if not stage.unlocked else 'available' }}">
+        <span>
+          <strong>{{ stage.entry.position }}. {{ stage.puzzle.title }}</strong>
+          <small>
+            {% if not stage.available %}Unavailable
+            {% elif stage.completed %}Completed
+            {% elif stage.current %}Current step
+            {% elif not stage.unlocked %}Locked — complete earlier stages
+            {% elif current_user.is_guest_link %}A guest link for this puzzle is required
+            {% else %}Available{% endif %}
+          </small>
+          {% if stage.completed and stage.entry.completion_message %}<small>{{ stage.entry.completion_message }}</small>{% endif %}
+        </span>
+        {% if stage.available and stage.unlocked and not stage.current and not current_user.is_guest_link %}
+          <a class="ghost-button" href="/puzzles/{{ stage.puzzle.id }}">Open</a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endfor %}

@@ -227,6 +227,10 @@ def authorize_request(request, db, user, administrative=False):
         if issue: require_owned(user,'issues',action,issue.created_by_id)
         else: require(user,'issues.edit.own')
         return
+    if path.startswith('/admin/series'):
+        if not (user.can('puzzles.metadata.own') or user.can('puzzles.metadata.any')):
+            raise HTTPException(403, 'Puzzle metadata permission required')
+        return
     if path=='/admin':
         if not management_access(user): raise HTTPException(403,'Management access required')
         return
