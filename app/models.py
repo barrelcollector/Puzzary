@@ -138,6 +138,41 @@ class Puzzle(Base):
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     group_solves: Mapped[list[GroupSolve]] = relationship(cascade="all, delete-orphan")
+    guest_links: Mapped[list[PuzzleGuestLink]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+
+
+class PuzzleGuestLink(Base):
+    __tablename__ = "puzzle_guest_links"
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(120), default="")
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    max_uses: Mapped[int] = mapped_column(Integer, default=0)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_concurrent_guests: Mapped[int] = mapped_column(Integer, default=0)
+    allow_group_solve: Mapped[bool] = mapped_column(Boolean, default=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="guest_links")
+    sessions: Mapped[list[PuzzleGuestSession]] = relationship(back_populates="link", cascade="all, delete-orphan")
+
+
+class PuzzleGuestSession(Base):
+    __tablename__ = "puzzle_guest_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    link_id: Mapped[str] = mapped_column(ForeignKey("puzzle_guest_links.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(80))
+    progress_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    link: Mapped[PuzzleGuestLink] = relationship(back_populates="sessions")
 
 
 class GroupSolve(Base):

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Guest puzzle access - Puzzary{% endblock %}
+{% block content %}
+<section class="panel narrow-panel" style="margin: 24px auto;">
+  <span class="status-pill">Guest link</span>
+  <h1>{{ puzzle.title }}</h1>
+  <p class="muted">{{ puzzle.puzzle_type.replace('_', ' ').title() }} / {{ puzzle.difficulty }}</p>
+  <p>This link grants play-only guest access. Your progress is saved to this browser while the link remains active.</p>
+  {% if error %}<p class="notice danger" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/share/{{ token }}">
+    <label>Guest display name <input name="display_name" maxlength="80" autocomplete="nickname" required autofocus></label>
+    {% if puzzle.access_password_hash %}<label>Puzzle access password <input name="puzzle_password" type="password" maxlength="128" autocomplete="current-password" required><small class="muted">The guest link and puzzle password are both required.</small></label>{% endif %}
+    <button type="submit">Open puzzle</button>
+  </form>
+  {% if link.expires_at %}<small class="muted">This link expires {{ local_datetime_label(link.expires_at) }}.</small>{% endif %}
+</section>
+{% endblock %}

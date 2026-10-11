@@ -38,11 +38,9 @@ def context(puzzle_id, request, db):
     if not puzzle or puzzle.puzzle_type != 'spell_it': raise HTTPException(404, 'Spell It puzzle not found')
     if not core().is_puzzle_type_enabled(db, 'spell_it'): raise HTTPException(400, 'Spell It is disabled')
     if not can_view(user, puzzle, play=True): raise HTTPException(403, 'Puzzle access denied')
-    db.scalar(select(User).where(User.id == user.id).with_for_update())
-    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle.id, PuzzleProgress.user_id == user.id))
-    if not progress:
-        progress = PuzzleProgress(puzzle_id=puzzle.id, user_id=user.id, progress_payload={})
-        db.add(progress)
+    if not getattr(user, 'is_guest_link', False):
+        db.scalar(select(User).where(User.id == user.id).with_for_update())
+    progress = core().progress_record_for_user(db, puzzle, user, create=True)
     return user, puzzle, progress
 
 
@@ -78,7 +76,8 @@ async def check_spell_entry(puzzle_id: str, request: Request, db=Depends(get_db)
     if not isinstance(answers, dict): raise HTTPException(422, 'Answers must be an object')
     progress.progress_payload = game().merge_progress(SimpleNamespace(answers=answers), puzzle.solution_payload, progress.progress_payload or {})
     matched, expected = game().count_progress(progress.progress_payload, puzzle.solution_payload)
-    db.add(PuzzleAttempt(puzzle_id=puzzle.id, user_id=user.id, answer=json.dumps(progress.progress_payload['answers']), is_correct=matched == expected))
+    if not getattr(user, 'is_guest_link', False):
+        db.add(PuzzleAttempt(puzzle_id=puzzle.id, user_id=user.id, answer=json.dumps(progress.progress_payload['answers']), is_correct=matched == expected))
     db.commit()
     return {**response(puzzle, progress), 'completed': matched == expected, 'matched_count': matched, 'expected_count': expected}
 

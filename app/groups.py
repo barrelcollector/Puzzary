@@ -240,7 +240,41 @@ def require_group_user(request, db, group):
         if error.status_code != 401 or request.headers.get('authorization'):
             raise
     token = request.session.get('group_guests', {}).get(group.id, '')
-    if not token or not guests_allowed(db, group):
+    guest_access_allowed = guests_allowed(db, group)
+    share_user = core().guest_link_user_for_puzzle(request, db, group.puzzle_id, require_group_solve=True)
+    if share_user is not None and group.allow_guests:
+        host = db.get(User, group.host_id)
+        guest_access_allowed = bool(host and host.can('groups.guests'))
+    if not token and guest_access_allowed and not group.password_hash:
+        if share_user is not None:
+            existing = db.execute(select(GroupMember, User).outerjoin(User, GroupMember.user_id == User.id)
+                                  .where(GroupMember.group_id == group.id)).all()
+            if len(existing) >= 200:
+                raise HTTPException(429, 'Guest join limit reached')
+            active = sum(member.status == 'active' for member, _ in existing)
+            if active >= (group.participant_limit or SERVER_LIMIT):
+                raise HTTPException(409, 'Participant limit reached')
+            name = share_user.display_name
+            if any(name.casefold() == (user.display_name if user else member.guest_name or '').casefold()
+                   for member, user in existing):
+                raise HTTPException(409, 'That name is already used in this group')
+            token = secrets.token_urlsafe(32)
+            member = GroupMember(
+                group_id=group.id,
+                guest_name=name,
+                guest_token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                status='pending' if group.approval_required else 'active',
+                seen_at=now(),
+            )
+            db.add(member)
+            db.commit()
+            sessions = dict(request.session.get('group_guests', {}))
+            if len(sessions) >= 20:
+                sessions.pop(next(iter(sessions)))
+            sessions[group.id] = token
+            request.session['group_guests'] = sessions
+            publish_state_change(group.id)
+    if not token or not guest_access_allowed:
         raise HTTPException(401, 'Sign in or join this group as a guest')
     member = db.scalar(select(GroupMember).where(
         GroupMember.group_id == group.id, GroupMember.user_id.is_(None),

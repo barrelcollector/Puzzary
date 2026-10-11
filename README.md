@@ -458,6 +458,12 @@ Locked library cards show a lock indicator and a generic preview without clues. 
 
 Group Solve session passwords and puzzle passwords are independent. Anonymous guests must supply both when both are enabled; neither credential is put in the invite URL. The public lobby discloses only that each gate exists. Moving a Group Solve to a protected puzzle requires that the host first unlock it. Regression check: `PYTHONPATH=. python scripts/verify_puzzle_passwords.py`.
 
+## Expiring guest links
+
+Authorized puzzle managers can create revocable, unguessable guest links from the puzzle-management page. Links may have an expiration, total-use cap and active-guest cap; the plaintext URL is displayed only when it is created, while the database stores only its SHA-256 hash. Draft and archived puzzles are ineligible. Published unlisted and password-protected puzzles are eligible, and a protected puzzle still requires its separate puzzle password.
+
+Each activation creates a browser-scoped guest identity with persisted puzzle progress. Guest links grant play only: they do not grant library discovery, printing, exports, account access, photo uploads, admin access or solution access. A manager may opt a link into Group Solve; that opt-in permits its guest to join an allow-guests, passwordless session for the same puzzle, including an unlisted puzzle, while expiry and revocation continue to be checked on every request. Regression check: `PYTHONPATH=. python scripts/verify_guest_links.py`.
+
 ## Group Solve
 
 Hosts can use **Session settings > Move group to another puzzle** to search active, collaboration-compatible puzzles. Moving keeps the same group, participants, guest permissions and invite link (`/groups/{id}`), and connected players follow automatically. Each puzzle's shared progress is saved when leaving and restored when returning. Delayed edits from an earlier puzzle are rejected rather than applied to the new board. Groups support up to 100 visited puzzles.

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from types import SimpleNamespace
 
 import qrcode
 from qrcode.image.pure import PyPNGImage
@@ -51,6 +52,8 @@ from app.models import (
     PuzzleCategory,
     PuzzleDictionary,
     PuzzleHint,
+    PuzzleGuestLink,
+    PuzzleGuestSession,
     PuzzlePhoto,
     PuzzleProgress,
     PublishedIssue,
@@ -2154,6 +2157,85 @@ def request_puzzle(request: Request, db: Session) -> Puzzle | None:
     return None
 
 
+GUEST_LINK_ACTIVE_MINUTES = 20
+
+
+def puzzle_guest_link_eligible(puzzle: Puzzle | None) -> bool:
+    if puzzle is None or puzzle.archived_at is not None:
+        return False
+    if puzzle.auto_archive_at is not None and (puzzle.auto_archive_at.replace(tzinfo=timezone.utc) if puzzle.auto_archive_at.tzinfo is None else puzzle.auto_archive_at) <= utcnow():
+        return False
+    return not bool((puzzle.puzzle_metadata or {}).get("draft"))
+
+
+def guest_link_is_valid(link: PuzzleGuestLink, puzzle: Puzzle | None = None) -> bool:
+    if link.revoked_at is not None:
+        return False
+    if link.expires_at is not None and (link.expires_at.replace(tzinfo=timezone.utc) if link.expires_at.tzinfo is None else link.expires_at) <= utcnow():
+        return False
+    return puzzle_guest_link_eligible(puzzle or link.puzzle)
+
+
+templates.env.globals["guest_link_is_valid"] = guest_link_is_valid
+
+
+def guest_link_from_token(db: Session, token: str, for_update: bool = False) -> PuzzleGuestLink | None:
+    statement = select(PuzzleGuestLink).where(PuzzleGuestLink.token_hash == hash_secret(token))
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
+
+
+def guest_link_user_for_puzzle(
+    request: Request,
+    db: Session,
+    puzzle_id: str,
+    require_group_solve: bool = False,
+):
+    sessions = request.session.get("puzzle_guest_links", {})
+    raw_token = sessions.get(puzzle_id, "") if isinstance(sessions, dict) else ""
+    if not raw_token:
+        return None
+    guest_session = db.scalar(select(PuzzleGuestSession).where(
+        PuzzleGuestSession.token_hash == hash_secret(raw_token),
+        PuzzleGuestSession.revoked_at.is_(None),
+    ))
+    if guest_session is None:
+        return None
+    link = db.get(PuzzleGuestLink, guest_session.link_id)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if link is None or link.puzzle_id != puzzle_id or not guest_link_is_valid(link, puzzle):
+        return None
+    if require_group_solve and not link.allow_group_solve:
+        return None
+    guest_session.last_seen_at = utcnow()
+    db.commit()
+    permissions = {"library.view", "puzzles.play"}
+    if link.allow_group_solve:
+        permissions.add("groups.join")
+    return SimpleNamespace(
+        id=-(1_000_000 + guest_session.id),
+        display_name=guest_session.display_name,
+        is_admin=False,
+        is_guest=True,
+        is_guest_link=True,
+        guest_permissions=permissions,
+        guest_session=guest_session,
+        guest_link=link,
+        can=lambda permission: permission in permissions,
+    )
+
+
+def progress_record_for_user(db: Session, puzzle: Puzzle, user, create: bool = False):
+    if getattr(user, "is_guest_link", False):
+        return user.guest_session
+    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle.id, PuzzleProgress.user_id == user.id))
+    if progress is None and create:
+        progress = PuzzleProgress(puzzle_id=puzzle.id, user_id=user.id, progress_payload={})
+        db.add(progress)
+    return progress
+
+
 def issue_password_setup_token(db: Session, user: User) -> str:
     token = secrets.token_urlsafe(32)
     user.reset_token_hash = hash_secret(token)
@@ -2244,7 +2326,13 @@ def api_user_from_token(request: Request, db: Session) -> User | None:
 def require_api_user(request: Request, db: Session) -> User:
     user = api_user_from_token(request, db) or current_user(request, db)
     if user is None:
-        raise HTTPException(status_code=401, detail="API token required")
+        puzzle = request_puzzle(request, db)
+        user = guest_link_user_for_puzzle(request, db, puzzle.id) if puzzle is not None else None
+        if user is None:
+            raise HTTPException(status_code=401, detail="API token required")
+        require_puzzle_access(request, puzzle)
+        authorize_request(request, db, user)
+        return user
     request.state.puzzary_user_id = user.id
     authorize_request(request, db, user)
     route_name = getattr(request.scope.get("route"), "name", "")
@@ -2680,6 +2768,90 @@ def puzzle_qr_redirect(puzzle_id: str, request: Request, db: Session = Depends(g
     return RedirectResponse(url=f"/puzzles/{puzzle.id}?source=qr", status_code=303)
 
 
+def guest_share_context(request: Request, db: Session, token: str, error: str = ""):
+    link = guest_link_from_token(db, token)
+    puzzle = db.get(Puzzle, link.puzzle_id) if link else None
+    if link is None or not guest_link_is_valid(link, puzzle):
+        raise HTTPException(410, "This guest link has expired or was revoked")
+    existing = guest_link_user_for_puzzle(request, db, puzzle.id)
+    if existing and existing.guest_link.id == link.id:
+        return RedirectResponse(f"/puzzles/{puzzle.id}", status_code=303)
+    account = current_user(request, db)
+    if account is not None and can_view(account, puzzle, play=True) and puzzle_access_granted(request, puzzle):
+        return RedirectResponse(f"/puzzles/{puzzle.id}", status_code=303)
+    return templates.TemplateResponse("guest_share_join.html", {
+        "request": request, "current_user": account, "link": link,
+        "puzzle": puzzle, "token": token, "error": error,
+    })
+
+
+@app.get("/share/{token}", response_class=HTMLResponse)
+def open_guest_share(token: str, request: Request, db: Session = Depends(get_db)):
+    return guest_share_context(request, db, token)
+
+
+@app.post("/share/{token}", response_class=HTMLResponse)
+def activate_guest_share(
+    token: str,
+    request: Request,
+    display_name: str = Form(""),
+    puzzle_password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    link = guest_link_from_token(db, token, for_update=True)
+    puzzle = db.get(Puzzle, link.puzzle_id) if link else None
+    if link is None or not guest_link_is_valid(link, puzzle):
+        raise HTTPException(410, "This guest link has expired or was revoked")
+    name = display_name.strip()
+    if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+        return guest_share_context(request, db, token, "Enter a guest display name.")
+    try:
+        require_puzzle_access(request, puzzle, puzzle_password)
+    except HTTPException as error:
+        if error.status_code == 429:
+            raise
+        return guest_share_context(request, db, token, "The puzzle password was not accepted.")
+    account = current_user(request, db)
+    if account is not None and can_view(account, puzzle, play=True):
+        return RedirectResponse(f"/puzzles/{puzzle.id}", status_code=303)
+    if link.max_uses and link.use_count >= link.max_uses:
+        raise HTTPException(410, "This guest link has reached its use limit")
+    active_cutoff = utcnow() - timedelta(minutes=GUEST_LINK_ACTIVE_MINUTES)
+    active_count = db.scalar(select(func.count()).select_from(PuzzleGuestSession).where(
+        PuzzleGuestSession.link_id == link.id,
+        PuzzleGuestSession.revoked_at.is_(None),
+        PuzzleGuestSession.last_seen_at >= active_cutoff,
+    )) or 0
+    if link.max_concurrent_guests and active_count >= link.max_concurrent_guests:
+        raise HTTPException(409, "This guest link currently has no available guest slots")
+    duplicate = db.scalar(select(PuzzleGuestSession).where(
+        PuzzleGuestSession.link_id == link.id,
+        func.lower(PuzzleGuestSession.display_name) == name.lower(),
+        PuzzleGuestSession.revoked_at.is_(None),
+        PuzzleGuestSession.last_seen_at >= active_cutoff,
+    ))
+    if duplicate is not None:
+        return guest_share_context(request, db, token, "That guest name is already active on this link.")
+    session_token = secrets.token_urlsafe(32)
+    guest_session = PuzzleGuestSession(
+        link_id=link.id,
+        token_hash=hash_secret(session_token),
+        display_name=name,
+        progress_payload={},
+        last_seen_at=utcnow(),
+    )
+    db.add(guest_session)
+    link.use_count += 1
+    link.last_used_at = utcnow()
+    db.commit()
+    sessions = dict(request.session.get("puzzle_guest_links", {}))
+    if len(sessions) >= 20 and puzzle.id not in sessions:
+        sessions.pop(next(iter(sessions)))
+    sessions[puzzle.id] = session_token
+    request.session["puzzle_guest_links"] = sessions
+    return RedirectResponse(f"/puzzles/{puzzle.id}", status_code=303)
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)):
     return_to = safe_return_to(request.query_params.get("return_to", ""))
@@ -3026,6 +3198,7 @@ def admin_context(
         "request": request,
         "current_user": user,
         "section": section,
+        "now_utc": utcnow(),
         "issues": [i for i in db.scalars(select(PublishedIssue).order_by(desc(PublishedIssue.created_at))) if can_owned(user,'issues','edit',i.created_by_id)] if section == "publishing" else [],
         "selected_issue": None,
         "publishing_puzzles": [
@@ -3707,6 +3880,69 @@ async def admin_import_puzzles(
         }
     context["puzzle_import_result"] = result
     return templates.TemplateResponse("admin.html", context)
+
+
+@app.post("/admin/puzzles/{puzzle_id}/guest-links", response_class=HTMLResponse)
+def admin_create_guest_link(
+    puzzle_id: str,
+    request: Request,
+    label: str = Form(""),
+    expires_at: str = Form(""),
+    max_uses: int = Form(0),
+    max_concurrent_guests: int = Form(0),
+    allow_group_solve: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(404, "Puzzle not found")
+    require_owned(user, "puzzles", "metadata", puzzle.created_by_id)
+    if not puzzle_guest_link_eligible(puzzle):
+        raise HTTPException(409, "Publish and activate this puzzle before creating a guest link")
+    expiry = parse_local_datetime(expires_at)
+    if expiry is not None and expiry <= utcnow():
+        raise HTTPException(422, "Guest link expiration must be in the future")
+    if not 0 <= max_uses <= 100000 or not 0 <= max_concurrent_guests <= 1000:
+        raise HTTPException(422, "Guest link limits are out of range")
+    token = secrets.token_urlsafe(32)
+    link = PuzzleGuestLink(
+        id=uuid.uuid4().hex[:24], puzzle_id=puzzle.id, token_hash=hash_secret(token),
+        label=label.strip()[:120], created_by_id=user.id, expires_at=expiry,
+        max_uses=max_uses, max_concurrent_guests=max_concurrent_guests,
+        allow_group_solve=allow_group_solve,
+    )
+    db.add(link)
+    audit(db, user, "puzzle_guest_link", link.id, "guest_link.created", {}, {
+        "puzzle_id": puzzle.id, "expires_at": expiry.isoformat() if expiry else None,
+        "max_uses": max_uses, "max_concurrent_guests": max_concurrent_guests,
+        "allow_group_solve": allow_group_solve,
+    })
+    db.commit()
+    context = admin_context(request, db, user, "puzzles")
+    context["new_guest_link"] = {
+        "id": link.id, "url": f"{app_base_url(db)}/share/{token}", "label": link.label or puzzle.title,
+    }
+    return templates.TemplateResponse("admin.html", context, status_code=201)
+
+
+@app.post("/admin/puzzles/{puzzle_id}/guest-links/{link_id}/revoke")
+def admin_revoke_guest_link(puzzle_id: str, link_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzle = db.get(Puzzle, puzzle_id)
+    link = db.get(PuzzleGuestLink, link_id)
+    if puzzle is None or link is None or link.puzzle_id != puzzle.id:
+        raise HTTPException(404, "Guest link not found")
+    require_owned(user, "puzzles", "metadata", puzzle.created_by_id)
+    if link.revoked_at is None:
+        link.revoked_at = utcnow()
+        audit(db, user, "puzzle_guest_link", link.id, "guest_link.revoked", {"revoked": False}, {"revoked": True})
+        db.commit()
+    return RedirectResponse("/admin/puzzles", status_code=303)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/metadata")
@@ -4527,6 +4763,8 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             member = member_for(db, group, user, active=False)
             if member.status == 'removed':
                 raise HTTPException(403, 'You were removed from this session')
+    if not user and not group_id:
+        user = guest_link_user_for_puzzle(request, db, puzzle_id)
     if not user:
         user = require_web_user(request, db)
     if isinstance(user, RedirectResponse):
@@ -4555,7 +4793,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     if not is_guest and not user.can('activity.view'):
         attempts = [a for a in attempts if a.user_id == user.id]
         photos = [p for p in photos if p.user_id == user.id]
-    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
+    progress = progress_record_for_user(db, puzzle, user)
     progress_payload = progress.progress_payload if progress is not None else {}
     progress_answers = progress_payload.get("answers", {})
     if not isinstance(progress_answers, dict):
@@ -4606,11 +4844,11 @@ def unlock_puzzle(
     return_to: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    user = current_user(request, db)
+    user = current_user(request, db) or guest_link_user_for_puzzle(request, db, puzzle_id)
     if user is None:
         return RedirectResponse(url=f"/login?return_to={quote('/puzzles/' + puzzle_id)}", status_code=303)
     puzzle = db.get(Puzzle, puzzle_id)
-    if puzzle is None or not can_view(user, puzzle, play=True):
+    if puzzle is None or (not getattr(user, "is_guest_link", False) and not can_view(user, puzzle, play=True)):
         raise HTTPException(404, "Puzzle not found")
     try:
         require_puzzle_access(request, puzzle, password)
@@ -5592,7 +5830,7 @@ def get_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
+    progress = progress_record_for_user(db, puzzle, user)
     return progress_response(puzzle, user, progress)
 
 
@@ -5610,12 +5848,9 @@ def save_progress(
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
-    if puzzle_type.progress_merger:
+    if puzzle_type.progress_merger and not getattr(user, "is_guest_link", False):
         db.scalar(select(User).where(User.id == user.id).with_for_update())
-    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
-    if progress is None:
-        progress = PuzzleProgress(puzzle_id=puzzle_id, user_id=user.id, progress_payload={})
-        db.add(progress)
+    progress = progress_record_for_user(db, puzzle, user, create=True)
     progress.progress_payload = (
         puzzle_type.progress_merger(payload, puzzle.solution_payload, progress.progress_payload or {})
         if puzzle_type.progress_merger else puzzle_type.progress_normalizer(payload, puzzle.solution_payload)
@@ -5639,11 +5874,9 @@ def play_action(
     puzzle_type = get_puzzle_type(puzzle.puzzle_type)
     if puzzle_type is None or puzzle_type.collaboration is None:
         raise HTTPException(status_code=400, detail="This puzzle does not support server-side play actions")
-    db.scalar(select(User).where(User.id == user.id).with_for_update())
-    progress = db.scalar(select(PuzzleProgress).where(PuzzleProgress.puzzle_id == puzzle_id, PuzzleProgress.user_id == user.id))
-    if progress is None:
-        progress = PuzzleProgress(puzzle_id=puzzle_id, user_id=user.id, progress_payload={})
-        db.add(progress)
+    if not getattr(user, "is_guest_link", False):
+        db.scalar(select(User).where(User.id == user.id).with_for_update())
+    progress = progress_record_for_user(db, puzzle, user, create=True)
     state = deepcopy(progress.progress_payload or {})
     try:
         if payload.changes:
@@ -5668,6 +5901,11 @@ def play_action(
 @app.post("/api/puzzles/{puzzle_id}/reset", response_model=PuzzleProgressResponse)
 def reset_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleProgressResponse:
     user = require_api_user(request, db)
+    if getattr(user, "is_guest_link", False):
+        puzzle = db.get(Puzzle, puzzle_id)
+        user.guest_session.progress_payload = {}
+        db.commit()
+        return progress_response(puzzle, user, user.guest_session)
     puzzle = reset_user_puzzle(puzzle_id, user.id, db)
     return progress_response(puzzle, user, None)
 
@@ -5680,6 +5918,15 @@ def submit_attempt(
     db: Session = Depends(get_db),
 ) -> PuzzleAttemptResponse:
     user = require_api_user(request, db)
+    if getattr(user, "is_guest_link", False):
+        if payload.user_id is not None:
+            raise HTTPException(403, "Guest links cannot submit for another player")
+        puzzle = db.get(Puzzle, puzzle_id)
+        if puzzle is None:
+            raise HTTPException(404, "Puzzle not found")
+        puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+        is_correct, expected_count, matched_count = puzzle_type.answer_checker(payload.answer, puzzle.solution_payload)
+        return PuzzleAttemptResponse(is_correct=is_correct, message="Correct" if is_correct else "Not yet", expected_count=expected_count, matched_count=matched_count)
     if payload.user_id is not None and payload.user_id != user.id:
         require_permission(user,'puzzles.progress.any')
     user_id = payload.user_id if payload.user_id is not None else user.id
@@ -5731,6 +5978,8 @@ def upload_photo(
     db: Session = Depends(get_db),
 ) -> dict[str, str | int]:
     user = require_api_user(request, db)
+    if getattr(user, "is_guest_link", False):
+        raise HTTPException(403, "Guest links do not allow photo uploads")
     if user_id is not None and user_id != user.id:
         require_permission(user,'puzzles.progress.any')
     photo_user_id = user_id if user_id is not None else user.id

@@ -55,6 +55,8 @@ DANGEROUS = {'roles.manage','users.reset','users.tokens','users.disable','settin
 
 
 def effective_permissions(user):
+    if user and getattr(user, 'is_guest_link', False):
+        return set(getattr(user, 'guest_permissions', set())) & CATALOG.keys()
     if not user or not user.is_active:
         return set()
     grants = set().union(*(set(r.permissions or []) for r in user.roles)) if user.roles else set()

@@ -43,7 +43,7 @@
     {% if has_puzzle_template %}
       {% include puzzle_template %}
     {% endif %}
-    {% if not playable_puzzle_type %}
+    {% if not playable_puzzle_type and not current_user.is_guest %}
       <p>{{ puzzle.prompt }}</p>
       {% if puzzle_type_definition and not has_puzzle_template %}
         <p class="muted">This puzzle type is registered, but it does not have a custom web-play template yet.</p>
@@ -87,7 +87,7 @@
       </details>
     {% endif %}
 
-    {% if not group_id %}
+    {% if not group_id and not current_user.is_guest %}
     <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/reset">
       <h2>Reset Puzzle</h2>
       <p class="muted">Clear your saved progress and answer attempts for this puzzle.</p>

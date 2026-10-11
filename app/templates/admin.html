@@ -172,6 +172,14 @@
         </span>
       </section>
       {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
+      {% if new_guest_link %}
+        <section class="panel notice" data-new-guest-link>
+          <h2>Guest link created</h2>
+          <p>Copy this link now. For security, Puzzary stores only its hash and cannot show it again.</p>
+          <label>{{ new_guest_link.label }} <input type="text" value="{{ new_guest_link.url }}" readonly data-guest-link-url></label>
+          <button type="button" onclick="navigator.clipboard.writeText(this.parentElement.querySelector('[data-guest-link-url]').value); this.textContent='Copied';">Copy link</button>
+        </section>
+      {% endif %}
       <section class="admin-grid two">
         <form class="panel" method="post" action="/admin/puzzles/import" enctype="multipart/form-data">
           <h2>Import Puzzle</h2>
@@ -285,6 +293,29 @@
               <div class="notice" data-completion-message-preview><strong>Completion preview:</strong> <span data-completion-message-preview-text>{{ puzzle.completion_message or 'Nice solve.' }}</span></div>
               <button type="submit">Save</button>
             </form>{% endif %}
+            {% if can_owned(current_user,'puzzles','metadata',puzzle.created_by_id) %}
+            <details class="guest-link-manager">
+              <summary>Guest share links ({{ puzzle.guest_links | length }})</summary>
+              {% if not puzzle.puzzle_metadata.get('draft') and not puzzle.archived_at %}
+              <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/guest-links">
+                <label>Label <input name="label" maxlength="120" placeholder="Optional note"></label>
+                <label>Expires <input name="expires_at" type="datetime-local"><small class="muted">{{ puzzary_timezone }}; blank means no expiration.</small></label>
+                <label>Use limit <input name="max_uses" type="number" min="0" max="100000" value="0"><small class="muted">0 is unlimited; counted once per new guest browser.</small></label>
+                <label>Concurrent guests <input name="max_concurrent_guests" type="number" min="0" max="1000" value="0"><small class="muted">0 is unlimited; active means seen in the last 20 minutes.</small></label>
+                <label><input name="allow_group_solve" type="checkbox" value="true"> Allow Group Solve guest entry</label>
+                <button type="submit">Create guest link</button>
+              </form>
+              {% else %}<p class="muted">Publish and activate this puzzle before creating a guest link.</p>{% endif %}
+              <div class="list compact">
+                {% for link in puzzle.guest_links | sort(attribute='created_at', reverse=true) %}
+                <div class="row">
+                  <span><strong>{{ link.label or 'Guest link' }}</strong><small>{{ link.use_count }} use{% if link.use_count != 1 %}s{% endif %}{% if link.max_uses %} / {{ link.max_uses }} max{% endif %}{% if link.expires_at %} / expires {{ local_datetime_label(link.expires_at) }}{% endif %}{% if link.allow_group_solve %} / Group Solve enabled{% endif %}</small></span>
+                  {% if link.revoked_at %}<span class="status-pill">Revoked</span>{% elif not guest_link_is_valid(link) %}<span class="status-pill">Expired</span>{% else %}<form method="post" action="/admin/puzzles/{{ puzzle.id }}/guest-links/{{ link.id }}/revoke"><button type="submit" class="danger-button">Revoke</button></form>{% endif %}
+                </div>
+                {% else %}<p class="muted">No guest links yet.</p>{% endfor %}
+              </div>
+            </details>
+            {% endif %}
             <div class="action-row">
               <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
               {% if can_owned(current_user,'puzzles','edit',puzzle.created_by_id) %}<a class="ghost-link" href="/admin/puzzles/{{ puzzle.id }}/edit">Edit</a>{% endif %}
