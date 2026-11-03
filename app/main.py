@@ -76,7 +76,12 @@ from app.appearance import (
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
 from app.user_activity import account_activity, progress_states
-from app.permissions import authorize_request, initialize_permissions, require as require_permission, can_view, can_discover, puzzle_is_unlisted, require_owned, can_owned, audit, lock_permissions, protect_last_admin
+from app.permissions import (
+    authorize_request, initialize_permissions, require as require_permission,
+    can_view, can_discover, puzzle_is_unlisted, puzzle_is_published,
+    puzzle_is_scheduled, puzzle_publication_state, require_owned, can_owned,
+    audit, lock_permissions, protect_last_admin,
+)
 from app.schemas import (
     DictionaryDefinitionPatch,
     DictionaryDefinitionWrite,
@@ -188,8 +193,8 @@ def local_datetime_label(value: datetime | None) -> str:
     return value.astimezone(app_timezone()).strftime("%Y-%m-%d %I:%M %p %Z")
 
 
-def default_auto_archive_at() -> datetime:
-    return utcnow() + timedelta(hours=24)
+def default_auto_archive_at(publication_time: datetime | None = None) -> datetime:
+    return (publication_time or utcnow()) + timedelta(hours=24)
 
 
 def default_auto_archive_value() -> str:
@@ -202,6 +207,9 @@ templates.env.globals["activity_datetime_label"] = lambda value: local_datetime_
 templates.env.globals["activity_event_summary"] = event_summary
 templates.env.globals["default_auto_archive_value"] = default_auto_archive_value
 templates.env.globals["puzzary_timezone"] = PUZZARY_TIMEZONE
+templates.env.globals["puzzle_publication_state"] = puzzle_publication_state
+templates.env.globals["puzzle_is_published"] = puzzle_is_published
+templates.env.globals["puzzle_is_scheduled"] = puzzle_is_scheduled
 
 
 def template_exists(template_name: str) -> bool:
@@ -444,6 +452,8 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         hints=[hint.text for hint in sorted(puzzle.hints, key=lambda item: item.order)],
         visibility="unlisted" if puzzle_is_unlisted(puzzle) else "public",
         password_protected=bool(puzzle.access_password_hash),
+        publication_state=puzzle_publication_state(puzzle),
+        publish_at=puzzle.publish_at,
     )
 
 
@@ -697,6 +707,7 @@ def manual_payload_from_form(
     visibility: str = "public",
     access_password: str = "",
     remove_access_password: bool = False,
+    publish_at: str = "",
 ) -> PuzzleManualWrite:
     hint_lines = [line.strip() for line in hints.splitlines() if line.strip()]
     if not title.strip():
@@ -717,6 +728,7 @@ def manual_payload_from_form(
         visibility="unlisted" if visibility == "unlisted" else "public",
         access_password=access_password,
         remove_access_password=remove_access_password,
+        publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
     )
 
 
@@ -730,9 +742,12 @@ def write_manual_puzzle(
         require_owned(creator, 'puzzles', 'edit', puzzle.created_by_id) if puzzle else require_permission(creator, 'puzzles.create')
         if not payload.draft:
             require_owned(creator, 'puzzles', 'publish', puzzle.created_by_id if puzzle else creator.id)
+        if not payload.draft and payload.publish_at is not None:
+            require_owned(creator, 'puzzles', 'schedule', puzzle.created_by_id if puzzle else creator.id)
     valid, error = validate_manual_puzzle_payload(db, payload)
     if not valid:
         raise ValueError(error)
+    schedule_at = require_future_publish_at(payload.publish_at) if not payload.draft and payload.publish_at else None
     metadata = dict(payload.metadata or {})
     metadata["manual"] = True
     metadata["draft"] = bool(payload.draft)
@@ -740,6 +755,8 @@ def write_manual_puzzle(
     metadata["manual_updated_at"] = utcnow().isoformat()
     now = datetime.now(timezone.utc)
     creating = puzzle is None
+    before_state = None if creating else puzzle_publication_state(puzzle)
+    before_publish_at = None if creating or puzzle.publish_at is None else puzzle.publish_at.isoformat()
     if creating:
         puzzle = Puzzle(
             id=uuid.uuid4().hex[:12],
@@ -754,7 +771,8 @@ def write_manual_puzzle(
             solution_payload=payload.solution_payload,
             puzzle_metadata=metadata,
             source="manual",
-            auto_archive_at=None if payload.draft else default_auto_archive_at(),
+            publish_at=schedule_at,
+            auto_archive_at=None if payload.draft else default_auto_archive_at(schedule_at),
             archived_at=now if payload.draft else None,
             created_by_id=creator.id if creator is not None else None,
         )
@@ -772,9 +790,15 @@ def write_manual_puzzle(
         puzzle.solution_payload = payload.solution_payload
         puzzle.puzzle_metadata = metadata
         puzzle.source = "manual"
+        puzzle.publish_at = schedule_at
         puzzle.archived_at = now if payload.draft else None
-        if not payload.draft and puzzle.auto_archive_at is None:
-            puzzle.auto_archive_at = default_auto_archive_at()
+        if payload.draft:
+            puzzle.auto_archive_at = None
+        elif puzzle.auto_archive_at is None or (
+            schedule_at is not None
+            and (puzzle.auto_archive_at.replace(tzinfo=timezone.utc) if puzzle.auto_archive_at.tzinfo is None else puzzle.auto_archive_at) <= schedule_at
+        ):
+            puzzle.auto_archive_at = default_auto_archive_at(schedule_at)
     update_puzzle_access_password(
         puzzle,
         payload.access_password,
@@ -784,6 +808,22 @@ def write_manual_puzzle(
     db.flush()
     for index, hint_text in enumerate(payload.hints, start=1):
         db.add(PuzzleHint(puzzle_id=puzzle.id, order=index, text=hint_text))
+    if creator is not None:
+        after_state = puzzle_publication_state(puzzle)
+        action = None
+        if after_state == "scheduled":
+            action = "puzzle.rescheduled" if before_state == "scheduled" else "puzzle.scheduled"
+        elif before_state == "scheduled" and after_state == "draft":
+            action = "puzzle.schedule_canceled"
+        elif after_state == "published" and (creating or before_state in {"draft", "scheduled"}):
+            action = "puzzle.published"
+        if action:
+            audit(db, creator, "puzzle", puzzle.id, action, {
+                "state": before_state, "publish_at": before_publish_at,
+            }, {
+                "state": after_state,
+                "publish_at": puzzle.publish_at.isoformat() if puzzle.publish_at else None,
+            })
     db.commit()
     db.refresh(puzzle)
     return puzzle
@@ -1352,6 +1392,8 @@ def serialize_library_item(puzzle: Puzzle, current_user: User, preview: dict, pr
         },
         "created_at": puzzle.created_at.isoformat() if puzzle.created_at else None,
         "auto_archive_at": puzzle.auto_archive_at.isoformat() if puzzle.auto_archive_at else None,
+        "publication_state": puzzle_publication_state(puzzle),
+        "publish_at": puzzle.publish_at.isoformat() if puzzle.publish_at else None,
         "archived_at": puzzle.archived_at.isoformat() if puzzle.archived_at else None,
         "source": puzzle.source,
         "progress": progress,
@@ -1503,6 +1545,7 @@ def build_manual_payload_from_helper(
     visibility: str = "public",
     access_password: str = "",
     remove_access_password: bool = False,
+    publish_at: str = "",
 ) -> PuzzleManualWrite:
     puzzle_type = get_puzzle_type(puzzle_type_slug)
     if puzzle_type is None or not is_puzzle_type_enabled(db, puzzle_type_slug):
@@ -1539,6 +1582,7 @@ def build_manual_payload_from_helper(
         visibility="unlisted" if visibility == "unlisted" else "public",
         access_password=access_password,
         remove_access_password=remove_access_password,
+        publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
     )
 
 
@@ -1946,17 +1990,93 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def parse_local_datetime(value: str) -> datetime | None:
+def parse_local_datetime(value: str, label: str = "Date/time") -> datetime | None:
     text = value.strip()
     if not text:
         return None
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail="Archive date/time is not valid") from error
+        raise HTTPException(status_code=400, detail=f"{label} is not valid") from error
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=app_timezone())
+        zone = app_timezone()
+        localized = parsed.replace(tzinfo=zone)
+        round_trip = localized.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None)
+        if round_trip != parsed:
+            raise HTTPException(status_code=422, detail=f"{label} falls in a daylight-saving time gap")
+        parsed = localized
     return parsed.astimezone(timezone.utc)
+
+
+def normalize_publish_at(value: datetime | str | None) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        return parse_local_datetime(value, "Publication date/time")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=app_timezone())
+    return value.astimezone(timezone.utc)
+
+
+def require_future_publish_at(value: datetime | str | None) -> datetime | None:
+    publish_at = normalize_publish_at(value)
+    if publish_at is not None and publish_at <= utcnow():
+        raise HTTPException(422, "Do not publish until must be in the future; publish now instead")
+    return publish_at
+
+
+def schedule_puzzle(db: Session, actor: User, puzzle: Puzzle, value: datetime | str | None) -> None:
+    before_state = puzzle_publication_state(puzzle)
+    before_time = puzzle.publish_at.isoformat() if puzzle.publish_at else None
+    publish_at = require_future_publish_at(value)
+    if publish_at is None:
+        if before_state != "scheduled":
+            return
+        metadata = dict(puzzle.puzzle_metadata or {})
+        metadata["draft"] = True
+        puzzle.puzzle_metadata = metadata
+        puzzle.publish_at = None
+        puzzle.archived_at = utcnow()
+        puzzle.auto_archive_at = None
+        audit(db, actor, "puzzle", puzzle.id, "puzzle.schedule_canceled", {
+            "state": before_state, "publish_at": before_time,
+        }, {"state": "draft", "publish_at": None})
+        return
+    if before_state not in {"draft", "scheduled"}:
+        raise HTTPException(409, "Only a draft or scheduled puzzle can be scheduled")
+    metadata = dict(puzzle.puzzle_metadata or {})
+    metadata["draft"] = False
+    puzzle.puzzle_metadata = metadata
+    puzzle.publish_at = publish_at
+    puzzle.archived_at = None
+    archive_at = normalize_publish_at(puzzle.auto_archive_at)
+    if archive_at is None or archive_at <= publish_at:
+        puzzle.auto_archive_at = default_auto_archive_at(publish_at)
+    audit(db, actor, "puzzle", puzzle.id,
+          "puzzle.rescheduled" if before_state == "scheduled" else "puzzle.scheduled",
+          {"state": before_state, "publish_at": before_time},
+          {"state": "scheduled", "publish_at": publish_at.isoformat()})
+
+
+def publish_puzzle_now(db: Session, actor: User, puzzle: Puzzle) -> None:
+    before = {
+        "state": puzzle_publication_state(puzzle),
+        "publish_at": puzzle.publish_at.isoformat() if puzzle.publish_at else None,
+    }
+    metadata = dict(puzzle.puzzle_metadata or {})
+    if puzzle.source == "manual":
+        metadata["manual"] = True
+        metadata["manual_published_at"] = utcnow().isoformat()
+    metadata["draft"] = False
+    puzzle.puzzle_metadata = metadata
+    puzzle.publish_at = None
+    puzzle.archived_at = None
+    archive_at = normalize_publish_at(puzzle.auto_archive_at)
+    if archive_at is None or archive_at <= utcnow():
+        puzzle.auto_archive_at = default_auto_archive_at()
+    audit(db, actor, "puzzle", puzzle.id, "puzzle.published", before, {
+        "state": "published", "publish_at": None,
+    })
 
 
 def apply_due_auto_archives(db: Session) -> int:
@@ -1966,6 +2086,7 @@ def apply_due_auto_archives(db: Session) -> int:
             Puzzle.archived_at.is_(None),
             Puzzle.auto_archive_at.is_not(None),
             Puzzle.auto_archive_at <= now,
+            or_(Puzzle.publish_at.is_(None), Puzzle.publish_at <= now),
         )
     ).all()
     for puzzle in due_puzzles:
@@ -2183,7 +2304,7 @@ def puzzle_guest_link_eligible(puzzle: Puzzle | None) -> bool:
         return False
     if puzzle.auto_archive_at is not None and (puzzle.auto_archive_at.replace(tzinfo=timezone.utc) if puzzle.auto_archive_at.tzinfo is None else puzzle.auto_archive_at) <= utcnow():
         return False
-    return not bool((puzzle.puzzle_metadata or {}).get("draft"))
+    return puzzle_is_published(puzzle)
 
 
 def guest_link_is_valid(link: PuzzleGuestLink, puzzle: Puzzle | None = None) -> bool:
@@ -2256,7 +2377,7 @@ def progress_record_for_user(db: Session, puzzle: Puzzle, user, create: bool = F
 
 def series_entry_available(entry: PuzzleSeriesEntry) -> bool:
     puzzle = entry.puzzle
-    if puzzle is None or puzzle.archived_at is not None or (puzzle.puzzle_metadata or {}).get("draft"):
+    if puzzle is None or not puzzle_is_published(puzzle):
         return False
     archive_at = puzzle.auto_archive_at
     if archive_at is not None and archive_at.tzinfo is None:
@@ -2315,18 +2436,20 @@ def puzzle_series_contexts(db: Session, puzzle: Puzzle, user, group=None) -> lis
         stages = []
         for entry in ordered:
             available = entry in active
+            scheduled = entry.puzzle is not None and puzzle_is_scheduled(entry.puzzle)
             unlocked = series_admin_bypass(user, series) or (available and (not series.require_previous or previous_complete))
             completed = bool(completed_by_id.get(entry.id))
             stages.append({
                 "entry": entry,
                 "puzzle": entry.puzzle,
                 "available": available,
+                "scheduled": scheduled,
                 "unlocked": unlocked,
                 "completed": completed,
                 "current": entry.puzzle_id == puzzle.id,
             })
-            if available and series.require_previous:
-                previous_complete = previous_complete and completed
+            if series.require_previous and (available or scheduled):
+                previous_complete = previous_complete and available and completed
         current = next((stage for stage in stages if stage["current"]), None)
         contexts.append({
             "series": series,
@@ -2868,14 +2991,15 @@ def puzzle_qr_svg(puzzle_id: str, request: Request, db: Session = Depends(get_db
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-    if puzzle_is_unlisted(puzzle):
+    private = puzzle_is_unlisted(puzzle) or not puzzle_is_published(puzzle)
+    if private:
         user = current_user(request, db)
         if user is None or not can_view(user, puzzle):
             raise HTTPException(status_code=404, detail="Puzzle not found")
     return Response(
         content=qr_svg_bytes(puzzle_qr_short_url(puzzle.id, db)),
         media_type="image/svg+xml",
-        headers={"Cache-Control": "private, max-age=3600" if puzzle_is_unlisted(puzzle) else "public, max-age=3600"},
+        headers={"Cache-Control": "private, max-age=3600" if private else "public, max-age=3600"},
     )
 
 
@@ -2884,7 +3008,7 @@ def puzzle_qr_redirect(puzzle_id: str, request: Request, db: Session = Depends(g
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
-    if puzzle_is_unlisted(puzzle):
+    if puzzle_is_unlisted(puzzle) or not puzzle_is_published(puzzle):
         user = current_user(request, db)
         if user is None or not can_view(user, puzzle):
             raise HTTPException(status_code=404, detail="Puzzle not found")
@@ -3212,6 +3336,7 @@ async def web_generate_puzzle(
     word_bank_slugs: list[str] = Form(default=[]),
     difficulty: str = Form("easy"),
     seed: str = Form(""),
+    publish_at: str = Form(""),
     auto_archive_at: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
@@ -3236,13 +3361,17 @@ async def web_generate_puzzle(
             difficulty=difficulty,
             seed=seed or None,
             generation_options=generation_options_from_form(form),
+            publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
         ),
         db,
         creator=user,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle and 'auto_archive_at' in form and not puzzle_is_draft(saved_puzzle):
-        saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
+        archive_at = parse_local_datetime(auto_archive_at or '', "Archive date/time")
+        if archive_at and saved_puzzle.publish_at and archive_at <= normalize_publish_at(saved_puzzle.publish_at):
+            raise HTTPException(422, "Auto-archive must be after scheduled publication")
+        saved_puzzle.auto_archive_at = archive_at
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -3352,7 +3481,7 @@ def admin_context(
             {"id": puzzle.id, "title": puzzle.title, "puzzle_type": puzzle.puzzle_type,
              "archived": puzzle.archived_at is not None}
             for puzzle in puzzles
-            if not (puzzle.puzzle_metadata or {}).get("draft")
+            if puzzle_is_published(puzzle)
             and not puzzle_is_unlisted(puzzle)
             and not puzzle.access_password_hash
             and (plugin := get_puzzle_type(puzzle.puzzle_type)) is not None
@@ -3552,8 +3681,8 @@ def admin_add_series_entry(
         return user
     series = managed_series(db, user, series_id)
     puzzle = db.get(Puzzle, puzzle_id)
-    if not puzzle_guest_link_eligible(puzzle):
-        raise HTTPException(409, "Only published active puzzles can be added to a series")
+    if puzzle is None or puzzle.archived_at is not None or puzzle_publication_state(puzzle) not in {"scheduled", "published"}:
+        raise HTTPException(409, "Only scheduled or published active puzzles can be added to a series")
     require_owned(user, "puzzles", "metadata", puzzle.created_by_id)
     if any(entry.puzzle_id == puzzle.id for entry in series.entries):
         raise HTTPException(409, "That puzzle is already in this series")
@@ -3987,6 +4116,7 @@ async def admin_create_manual_puzzle(
     draft: str = Form("true"),
     visibility: str = Form("public"),
     access_password: str = Form(""),
+    publish_at: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -3995,7 +4125,7 @@ async def admin_create_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, False, publish_at)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -4012,6 +4142,8 @@ async def admin_create_manual_puzzle(
                 draft,
                 visibility,
                 access_password,
+                False,
+                publish_at,
             )
         puzzle = write_manual_puzzle(db, payload, user)
     except ValueError as error:
@@ -4039,6 +4171,7 @@ async def admin_update_manual_puzzle(
     visibility: str = Form("public"),
     access_password: str = Form(""),
     remove_access_password: bool = Form(False),
+    publish_at: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -4050,7 +4183,7 @@ async def admin_update_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, remove_access_password)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, remove_access_password, publish_at)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -4068,6 +4201,7 @@ async def admin_update_manual_puzzle(
                 visibility,
                 access_password,
                 remove_access_password,
+                publish_at,
             )
         puzzle = write_manual_puzzle(db, payload, user, puzzle)
     except ValueError as error:
@@ -4086,14 +4220,7 @@ def admin_publish_manual_puzzle(puzzle_id: str, request: Request, db: Session = 
     error = manual_puzzle_publish_error(db, puzzle)
     if error:
         return render_admin(request, db, "puzzle_edit", selected_puzzle=puzzle, manual_form_error=error)
-    metadata = dict(puzzle.puzzle_metadata or {})
-    if puzzle.source == 'manual': metadata["manual"] = True
-    metadata["draft"] = False
-    metadata["manual_published_at"] = utcnow().isoformat()
-    puzzle.puzzle_metadata = metadata
-    puzzle.archived_at = None
-    if puzzle.auto_archive_at is None:
-        puzzle.auto_archive_at = default_auto_archive_at()
+    publish_puzzle_now(db, user, puzzle)
     db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -4270,6 +4397,7 @@ async def admin_update_puzzle_metadata(
     category_id: int = Form(0),
     tag_ids: list[int] = Form(default=[]),
     auto_archive_at: str | None = Form(None),
+    publish_at: str | None = Form(None),
     completion_message: str = Form(""),
     visibility: str = Form("public"),
     access_password: str = Form(""),
@@ -4298,7 +4426,14 @@ async def admin_update_puzzle_metadata(
             raise HTTPException(status_code=422, detail=str(error)) from error
         if 'auto_archive_at' in form:
             require_owned(user,'puzzles','schedule',puzzle.created_by_id)
-            puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
+            archive_at = parse_local_datetime(auto_archive_at or '', "Archive date/time")
+            if archive_at and puzzle.publish_at and puzzle_is_scheduled(puzzle) and archive_at <= normalize_publish_at(puzzle.publish_at):
+                raise HTTPException(422, "Auto-archive must be after scheduled publication")
+            puzzle.auto_archive_at = archive_at
+        if 'publish_at' in form:
+            require_owned(user, 'puzzles', 'schedule', puzzle.created_by_id)
+            require_owned(user, 'puzzles', 'publish', puzzle.created_by_id)
+            schedule_puzzle(db, user, puzzle, publish_at or '')
         db.commit()
     return RedirectResponse(url="/admin/puzzles", status_code=303)
 
@@ -4319,6 +4454,7 @@ async def admin_generate_puzzle(
     tag_ids: list[int] = Form(default=[]),
     excluded_tag_ids: list[int] = Form(default=[]),
     auto_archive_at: str | None = Form(None),
+    publish_at: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -4351,6 +4487,7 @@ async def admin_generate_puzzle(
             completion_message=normalize_completion_message(completion_message),
             visibility="unlisted" if visibility == "unlisted" else "public",
             access_password=access_password,
+            publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
         ),
         db,
         creator=user,
@@ -4362,7 +4499,10 @@ async def admin_generate_puzzle(
         saved_puzzle.category_id = category_id or source_category
         saved_puzzle.tags = tags_for_ids(db, tag_ids) if tag_ids else source_tags
         if 'auto_archive_at' in form and not puzzle_is_draft(saved_puzzle):
-            saved_puzzle.auto_archive_at = parse_local_datetime(auto_archive_at or '')
+            archive_at = parse_local_datetime(auto_archive_at or '', "Archive date/time")
+            if archive_at and saved_puzzle.publish_at and archive_at <= normalize_publish_at(saved_puzzle.publish_at):
+                raise HTTPException(422, "Auto-archive must be after scheduled publication")
+            saved_puzzle.auto_archive_at = archive_at
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -5065,6 +5205,9 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
         group = group_for(db, group_id)
         if group.puzzle_id != puzzle_id:
             return RedirectResponse(f'/groups/{group.id}', status_code=303)
+        guest_puzzle = db.get(Puzzle, group.puzzle_id)
+        if not puzzle_is_published(guest_puzzle):
+            raise HTTPException(404, 'Puzzle not found')
         if guests_allowed(db, group):
             try:
                 user = require_group_user(request, db, group)
@@ -5072,7 +5215,6 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
                 if error.status_code not in {401, 423}:
                     raise
                 writable(group)
-                guest_puzzle = db.get(Puzzle, group.puzzle_id)
                 return templates.TemplateResponse('group_guest_join.html', {
                     'request': request, 'group': group, 'password_protected': bool(group.password_hash),
                     'puzzle_password_protected': bool(guest_puzzle and guest_puzzle.access_password_hash),
@@ -5090,6 +5232,13 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    is_guest = getattr(user, 'is_guest', False)
+    if is_guest and not puzzle_is_published(puzzle):
+        raise HTTPException(status_code=403, detail="Puzzle access denied")
+    if not is_guest and not can_view(user, puzzle, play=True):
+        raise HTTPException(status_code=403, detail="Puzzle access denied")
+    if not is_guest:
+        authorize_request(request, db, user)
     if not puzzle_access_granted(request, puzzle):
         return templates.TemplateResponse("puzzle_unlock.html", {
             "request": request,
@@ -5111,9 +5260,6 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "series_contexts": puzzle_series_contexts(db, puzzle, user, series_group),
             "error": error.detail,
         }, status_code=423)
-    is_guest = getattr(user, 'is_guest', False)
-    if not is_guest:
-        authorize_request(request, db, user)
     users = [] if is_guest else db.scalars(select(User).order_by(User.display_name)).all()
     attempts = [] if is_guest else db.scalars(
         select(PuzzleAttempt).where(PuzzleAttempt.puzzle_id == puzzle_id).order_by(desc(PuzzleAttempt.created_at)).limit(10)
@@ -5156,6 +5302,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
             "progress_payload": progress_payload,
             "progress_answers": progress_answers,
             "group_id": group_id,
+            "publication_state": puzzle_publication_state(puzzle),
             "puzzle_type_definition": puzzle_type,
             "puzzle_template": puzzle_template_name,
             "solution_template": solution_template_name,
@@ -6036,6 +6183,10 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         generated.metadata["word_bank_slugs"] = [bank.slug for bank in selected_banks]
         generated.metadata["word_bank_names"] = [bank.name for bank in selected_banks]
     draft = bool(creator and not can_owned(creator,'puzzles','publish',creator.id))
+    schedule_at = require_future_publish_at(payload.publish_at) if payload.publish_at else None
+    if schedule_at is not None and creator is not None:
+        require_owned(creator, 'puzzles', 'publish', creator.id)
+        require_owned(creator, 'puzzles', 'schedule', creator.id)
     generated.metadata['draft'] = draft
     generated.metadata['visibility'] = payload.visibility
     puzzle = Puzzle(
@@ -6051,7 +6202,8 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         play_payload=generated.play_payload,
         solution_payload=generated.solution_payload,
         puzzle_metadata=generated.metadata,
-        auto_archive_at=None if draft else default_auto_archive_at(),
+        publish_at=None if draft else schedule_at,
+        auto_archive_at=None if draft else default_auto_archive_at(schedule_at),
         archived_at=utcnow() if draft else None,
         created_by_id=creator.id if creator is not None else None,
     )
@@ -6061,6 +6213,11 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         raise HTTPException(status_code=422, detail=str(error)) from error
     db.add(puzzle)
     db.flush()
+    if creator is not None and not draft:
+        audit(db, creator, "puzzle", puzzle.id, "puzzle.scheduled" if schedule_at else "puzzle.published", {}, {
+            "state": "scheduled" if schedule_at else "published",
+            "publish_at": schedule_at.isoformat() if schedule_at else None,
+        })
     for index, hint_text in enumerate(generated.hints, start=1):
         db.add(PuzzleHint(puzzle_id=puzzle.id, order=index, text=hint_text))
     db.commit()

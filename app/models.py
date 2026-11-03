@@ -126,6 +126,7 @@ class Puzzle(Base):
     solution_payload: Mapped[dict] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(80), default="local")
     puzzle_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    publish_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     auto_archive_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

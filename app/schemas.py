@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,7 @@ class PuzzleGenerateRequest(BaseModel):
     completion_message: str = Field("", max_length=500)
     visibility: Literal["public", "unlisted"] = "public"
     access_password: str = Field("", max_length=128)
+    publish_at: datetime | None = None
 
 
 class PuzzleAttemptCreate(BaseModel):
@@ -72,6 +74,8 @@ class PuzzleSummary(BaseModel):
     hints: list[str] = []
     visibility: Literal["public", "unlisted"] = "public"
     password_protected: bool = False
+    publication_state: Literal["draft", "scheduled", "published", "archived"] = "published"
+    publish_at: datetime | None = None
 
 
 class PuzzlePrintPreview(BaseModel):
@@ -111,6 +115,7 @@ class PuzzleManualWrite(BaseModel):
     visibility: Literal["public", "unlisted"] = "public"
     access_password: str = Field("", max_length=128)
     remove_access_password: bool = False
+    publish_at: datetime | None = None
 
 
 class DictionaryDefinitionWrite(BaseModel):

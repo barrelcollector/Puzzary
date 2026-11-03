@@ -16,7 +16,7 @@ from app.database import get_db
 from app.models import PublishedIssue, Puzzle
 from app.print_pdf import render_pdf
 from app.booklet import booklet_layout, impose_booklet
-from app.permissions import can_owned, require_owned, can_view, puzzle_is_unlisted
+from app.permissions import can_owned, require_owned, can_view, puzzle_is_unlisted, puzzle_is_published
 
 router = APIRouter()
 
@@ -106,7 +106,7 @@ def validate_puzzle(db, puzzle_id, publishing=False):
     plugin = core().get_puzzle_type(puzzle.puzzle_type)
     if plugin is None or not plugin.supports_print or plugin.digital_only:
         raise HTTPException(422, f"{puzzle.title} does not support printing")
-    if publishing and (puzzle.puzzle_metadata or {}).get("draft"):
+    if publishing and not puzzle_is_published(puzzle):
         raise HTTPException(422, f"Publish the puzzle '{puzzle.title}' before publishing this issue")
     if publishing and puzzle_is_unlisted(puzzle):
         raise HTTPException(422, f"Make the puzzle '{puzzle.title}' public before publishing this issue")

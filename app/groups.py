@@ -20,7 +20,7 @@ from app.database import get_db
 from app.models import GroupSolve, GroupMember, GroupAction, Puzzle, User
 from app.puzzles import get_puzzle_type, list_puzzle_types
 from app.group_presence import publish_state_change
-from app.permissions import puzzle_is_unlisted
+from app.permissions import puzzle_is_unlisted, puzzle_is_published
 
 router = APIRouter()
 SERVER_LIMIT = 50
@@ -150,9 +150,8 @@ def require_lobby_rate(request):
 
 
 def puzzle_is_public(puzzle):
-    metadata = puzzle.puzzle_metadata or {}
-    return not (metadata.get('draft') or puzzle_is_unlisted(puzzle)
-                or puzzle.archived_at or (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()))
+    return (puzzle_is_published(puzzle) and not puzzle_is_unlisted(puzzle)
+            and not (puzzle.auto_archive_at and utc(puzzle.auto_archive_at) <= now()))
 
 
 def public_lobby_items(db, q='', puzzle_type='', available='any', password='any', sort='recent'):
@@ -552,6 +551,7 @@ def create_group(puzzle_id: str, payload: GroupOptions, request: Request, db: Se
         raise HTTPException(403, 'Only an admin host can allow guests')
     puzzle = db.get(Puzzle, puzzle_id)
     if not puzzle: raise HTTPException(404, 'Puzzle not found')
+    if not puzzle_is_published(puzzle): raise HTTPException(409, 'Publish this puzzle before starting Group Solve')
     plugin = get_puzzle_type(puzzle.puzzle_type)
     if not plugin or not plugin.collaboration: raise HTTPException(400, 'This plugin does not support Group Solve')
     count = db.scalar(select(func.count()).select_from(GroupSolve).where(
@@ -858,7 +858,7 @@ def group_puzzles(group_id: str, request: Request, q: str = '', offset: int = 0,
     if q.strip():
         query = query.where(Puzzle.title.icontains(q.strip()[:160], autoescape=True))
     from app.permissions import can_view
-    puzzles = [p for p in db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id)) if can_view(user,p,play=True)]
+    puzzles = [p for p in db.scalars(query.order_by(Puzzle.created_at.desc(), Puzzle.id)) if puzzle_is_published(p) and can_view(user,p,play=True)]
     puzzles = puzzles[max(0,offset):max(0,offset)+51]
     items = []
     for puzzle in puzzles[:50]:
@@ -888,6 +888,8 @@ def move_group(group_id: str, payload: MoveGroup, request: Request, db: Session 
     puzzle = db.get(Puzzle, payload.puzzle_id)
     if not puzzle:
         raise HTTPException(404, 'Puzzle not found')
+    if not puzzle_is_published(puzzle):
+        raise HTTPException(409, 'Choose a published puzzle')
     core().require_puzzle_access(request, puzzle)
     from app.permissions import can_view
     if not can_view(user, puzzle, play=True): raise HTTPException(403, 'Puzzle access denied')

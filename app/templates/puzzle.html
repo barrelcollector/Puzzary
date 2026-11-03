@@ -17,6 +17,12 @@
   </div>
 </section>
 
+{% if publication_state == 'scheduled' %}
+<p class="notice"><strong>Scheduled preview.</strong> This puzzle will publish at {{ local_datetime_label(puzzle.publish_at) }} ({{ puzzary_timezone }}). Only authorized preview users can open it before then.</p>
+{% elif publication_state == 'draft' %}
+<p class="notice"><strong>Draft preview.</strong> This puzzle is not published.</p>
+{% endif %}
+
 {% include 'group_solve.html' %}
 {% include 'series_progress.html' %}
 <div id="puzzle-play-context" data-puzzle="{{ puzzle.id }}" data-group="{{ 'true' if group_id else 'false' }}" hidden></div>

@@ -67,6 +67,12 @@
     </label>
     <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
     <div data-generation-fields></div>
+    {% if can_owned(current_user,'puzzles','publish',current_user.id) and can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
+      Do not publish until
+      <input type="datetime-local" name="publish_at" data-publish-at-input data-timezone="{{ puzzary_timezone }}">
+      <small class="muted">Optional. Leave blank to publish immediately. Timezone: {{ puzzary_timezone }}.</small>
+      <span class="muted" data-publish-at-preview>Publishes immediately.</span>
+    </label>{% endif %}
     {% if can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
       Auto-archive
       <input type="datetime-local" name="auto_archive_at" value="{{ default_auto_archive_value() }}">
@@ -87,5 +93,6 @@
 </form>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=9"></script>
+  <script src="/static/generation-form.js?v=10"></script>
+  <script src="/static/publication-schedule.js?v=1"></script>
 {% endblock %}

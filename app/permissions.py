@@ -1,4 +1,6 @@
 """Shared web/API authorization. Explicit deny > allow > union of roles > deny."""
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from app.models import AppSetting, PermissionAudit, PermissionRole, Puzzle, PublishedIssue, User
@@ -91,10 +93,38 @@ def can_owned(user, resource, action, owner_id):
     return user.can(f'{resource}.{action}.any') or (owner_id == user.id and user.can(f'{resource}.{action}.own'))
 
 
+def utc_datetime(value):
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def puzzle_publication_state(puzzle, at=None):
+    if (puzzle.puzzle_metadata or {}).get('draft'):
+        return 'draft'
+    if puzzle.archived_at is not None:
+        return 'archived'
+    publish_at = utc_datetime(getattr(puzzle, 'publish_at', None))
+    if publish_at is not None and publish_at > (at or datetime.now(timezone.utc)):
+        return 'scheduled'
+    return 'published'
+
+
+def puzzle_is_scheduled(puzzle, at=None):
+    return puzzle_publication_state(puzzle, at) == 'scheduled'
+
+
+def puzzle_is_published(puzzle, at=None):
+    return puzzle_publication_state(puzzle, at) == 'published'
+
+
 def can_view(user, puzzle, play=False):
     if not user or not puzzle or not user.can('library.view'):
         return False
     if (puzzle.puzzle_metadata or {}).get('draft'):
+        if not (user.can('puzzles.drafts.any') or (puzzle.created_by_id == user.id and user.can('puzzles.drafts.own'))):
+            return False
+    elif puzzle_is_scheduled(puzzle):
         if not (user.can('puzzles.drafts.any') or (puzzle.created_by_id == user.id and user.can('puzzles.drafts.own'))):
             return False
     elif puzzle.archived_at:
@@ -109,7 +139,7 @@ def puzzle_is_unlisted(puzzle):
 
 
 def can_discover(user, puzzle, play=False):
-    return can_view(user, puzzle, play=play) and not puzzle_is_unlisted(puzzle)
+    return can_view(user, puzzle, play=play) and puzzle_is_published(puzzle) and not puzzle_is_unlisted(puzzle)
 
 
 def initialize_permissions(db):

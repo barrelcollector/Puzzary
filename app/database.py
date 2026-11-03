@@ -110,6 +110,9 @@ def ensure_schema() -> None:
             connection.execute(text("ALTER TABLE group_members ADD COLUMN presence JSON"))
         if "archived_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN archived_at TIMESTAMP WITH TIME ZONE"))
+        if "publish_at" not in puzzle_columns:
+            connection.execute(text("ALTER TABLE puzzles ADD COLUMN publish_at TIMESTAMP WITH TIME ZONE"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzles_publish_at ON puzzles (publish_at)"))
         if "auto_archive_at" not in puzzle_columns:
             connection.execute(text("ALTER TABLE puzzles ADD COLUMN auto_archive_at TIMESTAMP WITH TIME ZONE"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzles_auto_archive_at ON puzzles (auto_archive_at)"))

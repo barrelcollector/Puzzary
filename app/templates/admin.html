@@ -219,7 +219,8 @@
           <div class="list">
             {% for entry in selected_series.entries %}
               <form class="row" method="post" action="/admin/series/{{ selected_series.id }}/entries/{{ entry.id }}">
-                <span><strong>{{ entry.position }}. {{ entry.puzzle.title }}</strong><small>{{ entry.puzzle.puzzle_type }}{% if entry.puzzle.archived_at or (entry.puzzle.puzzle_metadata and entry.puzzle.puzzle_metadata.get('draft')) %} / unavailable{% endif %}</small></span>
+                {% set entry_state = puzzle_publication_state(entry.puzzle) %}
+                <span><strong>{{ entry.position }}. {{ entry.puzzle.title }}</strong><small>{{ entry.puzzle.puzzle_type }} / {{ entry_state | capitalize }}{% if entry_state == 'scheduled' %} for {{ local_datetime_label(entry.puzzle.publish_at) }}{% endif %}</small></span>
                 <label>After-stage message <input name="completion_message" maxlength="500" value="{{ entry.completion_message }}"></label>
                 <span class="action-row">
                   <button name="action" value="save" type="submit">Save</button>
@@ -228,16 +229,16 @@
                   <button name="action" value="remove" type="submit" class="danger-button">Remove</button>
                 </span>
               </form>
-            {% else %}<p class="muted">Add a published puzzle to begin.</p>{% endfor %}
+            {% else %}<p class="muted">Add a published or scheduled puzzle to begin.</p>{% endfor %}
           </div>
           <form method="post" action="/admin/series/{{ selected_series.id }}/entries">
             <h3>Add stage</h3>
             <label>Puzzle
               <select name="puzzle_id" required>
-                <option value="">Choose a published active puzzle</option>
+                <option value="">Choose a published or scheduled puzzle</option>
                 {% for puzzle in puzzles %}
-                  {% if not puzzle.archived_at and (not puzzle.puzzle_metadata or not puzzle.puzzle_metadata.get('draft')) %}
-                    <option value="{{ puzzle.id }}">{{ puzzle.title }} ({{ puzzle.puzzle_type }})</option>
+                  {% if puzzle_publication_state(puzzle) in ['published', 'scheduled'] %}
+                    <option value="{{ puzzle.id }}">{{ puzzle.title }} ({{ puzzle.puzzle_type }} / {{ puzzle_publication_state(puzzle) }}{% if puzzle_is_scheduled(puzzle) %} {{ local_datetime_label(puzzle.publish_at) }}{% endif %})</option>
                   {% endif %}
                 {% endfor %}
               </select>
@@ -323,15 +324,16 @@
       </section>
       <div class="admin-list">
         {% for puzzle in puzzles %}
+          {% set publication_state = puzzle_publication_state(puzzle) %}
           <div class="panel admin-puzzle">
             <div>
               <strong>{{ puzzle.title }}</strong>
               <small>{{ puzzle.puzzle_type }} / {{ puzzle.difficulty }} / {{ puzzle.id }}</small>
               {% if puzzle.word_bank %}<small>Word bank: {{ puzzle.word_bank.name }}</small>{% endif %}
-              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") %}<span class="status-pill">Draft</span>{% endif %}
+              <span class="status-pill">{{ publication_state | capitalize }}</span>
+              {% if publication_state == 'scheduled' %}<small>Publishes at {{ local_datetime_label(puzzle.publish_at) }} ({{ puzzary_timezone }})</small>{% endif %}
               {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("visibility") == "unlisted" %}<span class="status-pill">Unlisted</span>{% endif %}
               {% if puzzle.access_password_hash %}<span class="status-pill">Password protected</span>{% endif %}
-              {% if puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
               {% if puzzle.auto_archive_at %}
                 <small>Auto-archives at {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
               {% endif %}
@@ -361,6 +363,14 @@
                 <input type="datetime-local" name="auto_archive_at" value="{{ local_datetime_value(puzzle.auto_archive_at) }}">
                 <small class="muted">{{ puzzary_timezone }}. Leave blank for no automatic archive.</small>
               </label>{% endif %}
+              {% if publication_state in ['draft', 'scheduled'] and can_owned(current_user,'puzzles','schedule',puzzle.created_by_id) and can_owned(current_user,'puzzles','publish',puzzle.created_by_id) %}<label>
+                Do not publish until
+                <input type="datetime-local" name="publish_at" value="{{ local_datetime_value(puzzle.publish_at) }}" data-publish-at-input data-timezone="{{ puzzary_timezone }}">
+                <small class="muted">Set a future time to schedule. Clear a scheduled time to return the puzzle to Draft.</small>
+                <span class="muted" data-publish-at-preview></span>
+              </label>{% elif publication_state == 'published' %}
+                <p class="muted">Published puzzles cannot be moved back onto a schedule.</p>
+              {% endif %}
               <label>
                 Visibility
                 <select name="visibility">
@@ -386,7 +396,7 @@
             {% if can_owned(current_user,'puzzles','metadata',puzzle.created_by_id) %}
             <details class="guest-link-manager">
               <summary>Guest share links ({{ puzzle.guest_links | length }})</summary>
-              {% if not puzzle.puzzle_metadata.get('draft') and not puzzle.archived_at %}
+              {% if puzzle_is_published(puzzle) %}
               <form class="inline-form" method="post" action="/admin/puzzles/{{ puzzle.id }}/guest-links">
                 <label>Label <input name="label" maxlength="120" placeholder="Optional note"></label>
                 <label>Expires <input name="expires_at" type="datetime-local"><small class="muted">{{ puzzary_timezone }}; blank means no expiration.</small></label>
@@ -410,8 +420,8 @@
               <a class="ghost-link" href="/puzzles/{{ puzzle.id }}">Open</a>
               {% if can_owned(current_user,'puzzles','edit',puzzle.created_by_id) %}<a class="ghost-link" href="/admin/puzzles/{{ puzzle.id }}/edit">Edit</a>{% endif %}
               {% if current_user.can('puzzles.export') %}<a class="ghost-link" href="/api/puzzles/{{ puzzle.id }}/export">Export</a>{% endif %}
-              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("draft") and can_owned(current_user,'puzzles','publish',puzzle.created_by_id) %}
-                <form method="post" action="/admin/puzzles/{{ puzzle.id }}/publish"><button type="submit" class="ghost-button">Publish</button></form>
+              {% if publication_state in ['draft', 'scheduled'] and can_owned(current_user,'puzzles','publish',puzzle.created_by_id) %}
+                <form method="post" action="/admin/puzzles/{{ puzzle.id }}/publish"><button type="submit" class="ghost-button">Publish now</button></form>
               {% endif %}
               {% if can_owned(current_user,'puzzles','archive',puzzle.created_by_id) %}{% if puzzle.archived_at %}
                 <form method="post" action="/admin/puzzles/{{ puzzle.id }}/unarchive"><button type="submit" class="ghost-button">Unarchive</button></form>
@@ -431,24 +441,25 @@
       {% set is_edit = selected_puzzle is not none %}
       {% set manual_meta = selected_puzzle.puzzle_metadata if is_edit and selected_puzzle.puzzle_metadata else {} %}
       {% set is_draft = (not is_edit) or manual_meta.get("draft") %}
+      {% set publication_state = puzzle_publication_state(selected_puzzle) if is_edit else 'draft' %}
       <section class="puzzle-head">
         <div>
           <a class="ghost-link" href="/admin/puzzles">Back to Puzzles</a>
           <h1>{{ "Edit Puzzle" if is_edit else "Puzzle Builder" }}</h1>
           <p class="muted">Build a puzzle with the editor provided by its module, preview it, then publish when it feels right.</p>
           {% if is_edit %}
-            {% if is_draft %}<span class="status-pill">Draft</span>{% endif %}
+            <span class="status-pill">{{ publication_state | capitalize }}</span>
+            {% if publication_state == 'scheduled' %}<small>Publishes at {{ local_datetime_label(selected_puzzle.publish_at) }} ({{ puzzary_timezone }})</small>{% endif %}
             {% if manual_meta.get("visibility") == "unlisted" %}<span class="status-pill">Unlisted</span>{% endif %}
             {% if selected_puzzle.access_password_hash %}<span class="status-pill">Password protected</span>{% endif %}
-            {% if selected_puzzle.archived_at %}<span class="status-pill">Archived</span>{% endif %}
           {% endif %}
         </div>
         {% if is_edit %}
           <span class="action-row">
             <a class="ghost-button" href="/puzzles/{{ selected_puzzle.id }}">Preview</a>
             <a class="ghost-button" href="/api/puzzles/{{ selected_puzzle.id }}/export">Export</a>
-            {% if is_draft and can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id) %}
-              <form method="post" action="/admin/puzzles/{{ selected_puzzle.id }}/publish"><button type="submit">Publish</button></form>
+            {% if publication_state in ['draft', 'scheduled'] and can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id) %}
+              <form method="post" action="/admin/puzzles/{{ selected_puzzle.id }}/publish"><button type="submit">Publish now</button></form>
             {% endif %}
           </span>
         {% endif %}
@@ -485,9 +496,15 @@
           Save mode
           <select name="draft">
             <option value="true" {% if is_draft %}selected{% endif %}>Draft: hide from library, allow preview</option>
-            {% if can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id if is_edit else current_user.id) %}<option value="false" {% if not is_draft %}selected{% endif %}>Publish: show in library</option>{% endif %}
+            {% if can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id if is_edit else current_user.id) %}<option value="false" {% if not is_draft %}selected{% endif %}>Publish now or at the scheduled time</option>{% endif %}
           </select>
         </label>
+        {% if can_owned(current_user,'puzzles','publish',selected_puzzle.created_by_id if is_edit else current_user.id) and can_owned(current_user,'puzzles','schedule',selected_puzzle.created_by_id if is_edit else current_user.id) %}<label>
+          Do not publish until
+          <input type="datetime-local" name="publish_at" value="{{ local_datetime_value(selected_puzzle.publish_at) if is_edit else '' }}" data-publish-at-input data-timezone="{{ puzzary_timezone }}">
+          <small class="muted">Optional. Choose Publish mode and a future time. Timezone: {{ puzzary_timezone }}.</small>
+          <span class="muted" data-publish-at-preview></span>
+        </label>{% endif %}
         <label>
           Visibility
           <select name="visibility">
@@ -617,6 +634,12 @@
           </label>
           <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
           <div data-generation-fields></div>
+          {% if can_owned(current_user,'puzzles','publish',current_user.id) and can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
+            Do not publish until
+            <input type="datetime-local" name="publish_at" data-publish-at-input data-timezone="{{ puzzary_timezone }}">
+            <small class="muted">Optional. Leave blank to publish immediately. Timezone: {{ puzzary_timezone }}.</small>
+            <span class="muted" data-publish-at-preview></span>
+          </label>{% endif %}
           {% if can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
             Auto-archive
             <input type="datetime-local" name="auto_archive_at" value="{{ default_auto_archive_value() }}">
@@ -1446,7 +1469,8 @@
 </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/generation-form.js?v=11"></script>
+  <script src="/static/generation-form.js?v=12"></script>
+  <script src="/static/publication-schedule.js?v=1"></script>
   {% for puzzle_type in puzzle_types %}{% if puzzle_type.manual_editor_script %}<script src="/static/{{ puzzle_type.manual_editor_script }}"></script>{% endif %}{% endfor %}
   <script src="/static/manual-builder.js?v=3"></script>
   <script src="/static/completion-message.js?v=1"></script>
