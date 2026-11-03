@@ -23,4 +23,15 @@
       {% endfor %}
     </ul>
   {% else %}<p class="muted">No puzzle activity yet.</p>{% endif %}
+  <h3>History</h3>
+  {% if activity.history %}
+    <ol class="account-history">
+      {% for event in activity.history %}
+        <li data-history-event="{{ event.event_type }}">
+          <div><strong>{{ event.summary }}</strong>{% if event.url %}<a href="{{ event.url }}">{{ event.title }}</a>{% else %}<span>{{ event.title }}</span>{% endif %}</div>
+          <time datetime="{{ event.created_at }}">{{ activity_datetime_label(event.created_at) }}</time>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}<p class="muted">No recorded history yet.</p>{% endif %}
 </div>

@@ -4,9 +4,11 @@ import random
 from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
+from app.activity_events import record_progress_transition, record_puzzle_event
 from app.database import get_db
 from app.models import Puzzle, PuzzleAttempt, PuzzleProgress, User
 from app.permissions import can_view, register_route_permission, require
+from app.puzzles import get_puzzle_type
 
 router = APIRouter()
 register_route_permission('spell_it_preview', 'puzzles.create')
@@ -74,10 +76,15 @@ async def check_spell_entry(puzzle_id: str, request: Request, db=Depends(get_db)
     user, puzzle, progress = context(puzzle_id, request, db)
     answers = payload.get('answers', {})
     if not isinstance(answers, dict): raise HTTPException(422, 'Answers must be an object')
-    progress.progress_payload = game().merge_progress(SimpleNamespace(answers=answers), puzzle.solution_payload, progress.progress_payload or {})
+    before = dict(progress.progress_payload or {})
+    progress.progress_payload = game().merge_progress(SimpleNamespace(answers=answers), puzzle.solution_payload, before)
     matched, expected = game().count_progress(progress.progress_payload, puzzle.solution_payload)
     if not getattr(user, 'is_guest_link', False):
         db.add(PuzzleAttempt(puzzle_id=puzzle.id, user_id=user.id, answer=json.dumps(progress.progress_payload['answers']), is_correct=matched == expected))
+        record_puzzle_event(db, puzzle.id, user.id, 'attempt', {
+            'is_correct': matched == expected, 'matched_count': matched, 'expected_count': expected,
+        })
+        record_progress_transition(db, puzzle, user.id, get_puzzle_type(puzzle.puzzle_type), before, progress.progress_payload)
     db.commit()
     return {**response(puzzle, progress), 'completed': matched == expected, 'matched_count': matched, 'expected_count': expected}
 
@@ -85,7 +92,7 @@ async def check_spell_entry(puzzle_id: str, request: Request, db=Depends(get_db)
 @router.post('/api/puzzles/{puzzle_id}/spell-it/hint')
 async def spell_hint(puzzle_id: str, request: Request, db=Depends(get_db)):
     payload = await body(request)
-    _, puzzle, progress = context(puzzle_id, request, db)
+    user, puzzle, progress = context(puzzle_id, request, db)
     index = payload.get('entry', 0)
     entries = puzzle.solution_payload['entries']
     if type(index) is not int or not 0 <= index < len(entries): raise HTTPException(422, 'Invalid entry')
@@ -106,5 +113,9 @@ async def spell_hint(puzzle_id: str, request: Request, db=Depends(get_db)):
         answers[f'hint:{index}'] = ','.join(map(str, [*used, position]))
         answers[f'{index}:{position}'] = entry['answer'][position]
     progress.progress_payload = game().normalize_progress(SimpleNamespace(answers=answers), puzzle.solution_payload)
+    if not getattr(user, 'is_guest_link', False):
+        record_puzzle_event(db, puzzle.id, user.id, 'hint', {
+            'target': f"entry:{index}:{payload.get('kind') or 'letter'}",
+        })
     db.commit()
     return response(puzzle, progress)

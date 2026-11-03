@@ -30,4 +30,17 @@
       return true;
     },
   };
+  const hints = document.querySelector('[data-puzzle-hints]');
+  if (hints && hints.querySelector('li')) {
+    let recorded = false;
+    hints.addEventListener('toggle', () => {
+      if (!hints.open || recorded) return;
+      recorded = true;
+      fetch(`/api/puzzles/${context.dataset.puzzle}/activity`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kind: 'hint', target: 'general'}),
+      }).catch(() => { recorded = false; });
+    });
+  }
 })();

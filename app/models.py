@@ -102,6 +102,7 @@ class User(Base):
 
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="user")
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="user")
+    activity_events: Mapped[list[PuzzleActivityEvent]] = relationship(back_populates="user")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="user")
     created_puzzles: Mapped[list[Puzzle]] = relationship(back_populates="creator")
 
@@ -136,6 +137,7 @@ class Puzzle(Base):
     hints: Mapped[list[PuzzleHint]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    activity_events: Mapped[list[PuzzleActivityEvent]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     group_solves: Mapped[list[GroupSolve]] = relationship(cascade="all, delete-orphan")
     guest_links: Mapped[list[PuzzleGuestLink]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
@@ -302,6 +304,20 @@ class PuzzleAttempt(Base):
 
     puzzle: Mapped[Puzzle] = relationship(back_populates="attempts")
     user: Mapped[User | None] = relationship(back_populates="attempts")
+
+
+class PuzzleActivityEvent(Base):
+    __tablename__ = "puzzle_activity_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(24), index=True)
+    event_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="activity_events")
+    user: Mapped[User] = relationship(back_populates="activity_events")
 
 
 class PuzzleProgress(Base):

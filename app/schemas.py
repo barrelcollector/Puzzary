@@ -44,6 +44,11 @@ class PuzzlePlayAction(BaseModel):
     changes: dict[str, str] = Field(default_factory=dict)
 
 
+class PuzzleActivityCreate(BaseModel):
+    kind: Literal["hint"]
+    target: str = Field("general", max_length=120)
+
+
 class PuzzleProgressResponse(BaseModel):
     puzzle_id: str
     user_id: int

@@ -2927,3 +2927,14 @@ input.spell-slot { width: 34px; margin: 0; }
 .word-bank-entry-option small { color: var(--muted); }
 .word-bank-entry-option:hover,
 .word-bank-entry-option.is-active { background: var(--surface-muted); color: var(--ink); }
+
+.account-history { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.account-history li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.account-history li:last-child { border-bottom: 0; }
+.account-history li > div { display: grid; gap: 2px; }
+.account-history time { color: var(--muted); font-size: .85rem; text-align: right; }
+.admin-grid-wide { grid-column: 1 / -1; }
+@media (max-width: 640px) {
+  .account-history li { align-items: start; flex-direction: column; }
+  .account-history time { text-align: left; }
+}

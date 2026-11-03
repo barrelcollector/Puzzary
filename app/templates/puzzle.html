@@ -64,7 +64,7 @@
       </form>
     {% endif %}
 
-    <details class="panel">
+    <details class="panel" data-puzzle-hints>
       <summary>Hints</summary>
       <ol>
         {% for hint in puzzle.hints | sort(attribute="order") %}
@@ -153,7 +153,7 @@
 {% endif %}
 <script src="/static/celebration.js?v=4"></script>
 <script src="/static/group-solve.js?v=17"></script>
-<script src="/static/puzzle-actions.js?v=1"></script>
+<script src="/static/puzzle-actions.js?v=2"></script>
 <script src="/static/word-search.js?v=14"></script>
 <script src="/static/crossword.js?v=15"></script>
 <script src="/static/word-pyramid.js?v=5"></script>

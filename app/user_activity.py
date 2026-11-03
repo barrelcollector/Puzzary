@@ -1,9 +1,10 @@
 """Account-scoped activity shared by the library, account page and admin views."""
 from datetime import timezone
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, desc, func, or_, select
 
-from app.models import Puzzle, PuzzleAttempt, PuzzleProgress
+from app.activity_events import event_summary
+from app.models import Puzzle, PuzzleActivityEvent, PuzzleAttempt, PuzzleProgress
 from app.permissions import can_view
 from app.puzzles import get_puzzle_type
 from app.schemas import PuzzleProgressUpdate
@@ -104,4 +105,34 @@ def account_activity(db, user, viewer=None):
             'label': row['label'], 'archived': puzzle.archived_at is not None, **state,
         })
     recent.sort(key=lambda row: row['last_activity'] or '', reverse=True)
-    return {'user_id': user.id, 'totals': totals, 'by_type': sorted(types.values(), key=lambda row: row['label']), 'recent': recent[:20]}
+    history = []
+    events = db.scalars(
+        select(PuzzleActivityEvent)
+        .where(PuzzleActivityEvent.user_id == user.id)
+        .order_by(desc(PuzzleActivityEvent.created_at), desc(PuzzleActivityEvent.id))
+        .limit(50)
+    ).all()
+    event_puzzles = {puzzle.id: puzzle for puzzle in db.scalars(
+        select(Puzzle).where(Puzzle.id.in_({event.puzzle_id for event in events}))
+    )} if events else {}
+    for event in events:
+        puzzle = event_puzzles.get(event.puzzle_id)
+        if puzzle is None:
+            continue
+        visible = can_view(viewer or user, puzzle, play=True)
+        history.append({
+            'id': event.id,
+            'puzzle_id': puzzle.id,
+            'title': puzzle.title if visible else 'Unavailable puzzle',
+            'url': f'/puzzles/{puzzle.id}' if visible else None,
+            'event_type': event.event_type,
+            'summary': event_summary(event),
+            'created_at': _utc(event.created_at).isoformat(),
+        })
+    return {
+        'user_id': user.id,
+        'totals': totals,
+        'by_type': sorted(types.values(), key=lambda row: row['label']),
+        'recent': recent[:20],
+        'history': history,
+    }

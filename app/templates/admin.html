@@ -1353,6 +1353,16 @@
         </div>
       </section>
       <section class="admin-grid">
+        <div class="panel admin-grid-wide">
+          <h2>History</h2>
+          <div class="list compact">
+            {% for event in activity_events %}
+              <div class="row" data-history-event="{{ event.event_type }}"><span><strong>{{ activity_event_summary(event) }}</strong><small>{{ event.user.display_name }} &middot; {{ event.puzzle.title }}</small></span><small>{{ local_datetime_label(event.created_at) }}</small></div>
+            {% else %}
+              <p class="muted">No recorded history yet.</p>
+            {% endfor %}
+          </div>
+        </div>
         <div class="panel">
           <h2>Progress</h2>
           <div class="list compact">

@@ -37,6 +37,7 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
+from app.activity_events import event_summary, record_progress_transition, record_puzzle_event
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
 from app.dictionary_queries import dictionary_statement, tag_usage_counts, word_bank_entry_counts
@@ -48,6 +49,7 @@ from app.models import (
     DictionaryImportSource,
     DictionaryWord,
     Puzzle,
+    PuzzleActivityEvent,
     PuzzleAttempt,
     PuzzleCategory,
     PuzzleDictionary,
@@ -85,6 +87,7 @@ from app.schemas import (
     PuzzleTagPatch,
     PuzzleTagWrite,
     PuzzleAttemptCreate,
+    PuzzleActivityCreate,
     PuzzleAttemptResponse,
     PuzzleGenerateRequest,
     PuzzleProgressResponse,
@@ -192,6 +195,7 @@ def default_auto_archive_value() -> str:
 templates.env.globals["local_datetime_value"] = local_datetime_value
 templates.env.globals["local_datetime_label"] = local_datetime_label
 templates.env.globals["activity_datetime_label"] = lambda value: local_datetime_label(datetime.fromisoformat(value))
+templates.env.globals["activity_event_summary"] = event_summary
 templates.env.globals["default_auto_archive_value"] = default_auto_archive_value
 templates.env.globals["puzzary_timezone"] = PUZZARY_TIMEZONE
 
@@ -3280,11 +3284,17 @@ def admin_context(
     tag_usage = tag_usage_counts(db, tags) if section in {"dashboard", "tags", "tag_detail"} else {}
     for tag in tags:
         tag_groups.setdefault(tag.tag_type or "General", []).append(tag)
+    activity_events = db.scalars(
+        select(PuzzleActivityEvent)
+        .options(selectinload(PuzzleActivityEvent.puzzle), selectinload(PuzzleActivityEvent.user))
+        .order_by(desc(PuzzleActivityEvent.created_at), desc(PuzzleActivityEvent.id))
+        .limit(50)
+    ).all()
     attempts = db.scalars(select(PuzzleAttempt).order_by(desc(PuzzleAttempt.created_at)).limit(20)).all()
     progress_rows = db.scalars(select(PuzzleProgress).order_by(desc(PuzzleProgress.updated_at)).limit(20)).all()
     photos = db.scalars(select(PuzzlePhoto).order_by(desc(PuzzlePhoto.created_at)).limit(20)).all()
     if not user.can('activity.view'):
-        attempts, progress_rows, photos = [], [], []
+        activity_events, attempts, progress_rows, photos = [], [], [], []
     dictionary_words = []
     dictionary_page = list_page
     dictionary_search = request.query_params.get("q", "").strip()[:80]
@@ -3365,6 +3375,7 @@ def admin_context(
         "tag_total": tag_total,
         "tag_has_more": list_page * 200 < tag_total,
         "attempts": attempts,
+        "activity_events": activity_events,
         "progress_rows": progress_rows,
         "photos": photos,
         "dictionary_words": dictionary_words,
@@ -6248,10 +6259,13 @@ def save_progress(
     if puzzle_type.progress_merger and not getattr(user, "is_guest_link", False):
         db.scalar(select(User).where(User.id == user.id).with_for_update())
     progress = progress_record_for_user(db, puzzle, user, create=True)
+    before = deepcopy(progress.progress_payload or {})
     progress.progress_payload = (
         puzzle_type.progress_merger(payload, puzzle.solution_payload, progress.progress_payload or {})
         if puzzle_type.progress_merger else puzzle_type.progress_normalizer(payload, puzzle.solution_payload)
     )
+    if not getattr(user, "is_guest_link", False):
+        record_progress_transition(db, puzzle, user.id, puzzle_type, before, progress.progress_payload)
     db.commit()
     db.refresh(progress)
     return progress_response(puzzle, user, progress)
@@ -6274,7 +6288,8 @@ def play_action(
     if not getattr(user, "is_guest_link", False):
         db.scalar(select(User).where(User.id == user.id).with_for_update())
     progress = progress_record_for_user(db, puzzle, user, create=True)
-    state = deepcopy(progress.progress_payload or {})
+    before = deepcopy(progress.progress_payload or {})
+    state = deepcopy(before)
     try:
         if payload.changes:
             state = puzzle_type.collaboration(
@@ -6291,8 +6306,52 @@ def play_action(
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     progress.progress_payload = state
+    if not getattr(user, "is_guest_link", False):
+        if payload.kind in {"check", "progressive_check", "check_entry"}:
+            found, expected = puzzle_type.progress_counter(state, puzzle.solution_payload)
+            record_puzzle_event(db, puzzle.id, user.id, "attempt", {
+                "is_correct": bool(expected > 0 and found >= expected),
+                "found_count": found,
+                "expected_count": expected,
+                "target": payload.target,
+            })
+        elif payload.kind in {"hint", "clue"}:
+            record_puzzle_event(
+                db, puzzle.id, user.id, "hint",
+                {"target": payload.target or payload.kind},
+            )
+        elif payload.kind in {"reveal", "reveal_entry"}:
+            record_puzzle_event(
+                db, puzzle.id, user.id, "reveal",
+                {"target": payload.target or "solution", "scope": "entry" if payload.kind == "reveal_entry" else "solution"},
+                once_per_run=True,
+            )
+        record_progress_transition(db, puzzle, user.id, puzzle_type, before, state)
     db.commit()
     return state
+
+
+@app.post("/api/puzzles/{puzzle_id}/activity")
+def record_puzzle_activity(
+    puzzle_id: str,
+    payload: PuzzleActivityCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    user = require_api_user(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    if getattr(user, "is_guest_link", False):
+        return {"recorded": False}
+    if payload.kind == "hint" and not puzzle.hints:
+        raise HTTPException(status_code=400, detail="This puzzle has no general hints")
+    event = record_puzzle_event(
+        db, puzzle.id, user.id, payload.kind,
+        {"target": payload.target or "general"}, once_per_run=True,
+    )
+    db.commit()
+    return {"recorded": event is not None}
 
 
 @app.post("/api/puzzles/{puzzle_id}/reset", response_model=PuzzleProgressResponse)
@@ -6354,6 +6413,18 @@ def submit_puzzle_attempt(
             attempt_metadata={"matched_count": matched_count, "expected_count": expected_count},
         )
     )
+    record_puzzle_event(db, puzzle.id, user_id, "attempt", {
+        "is_correct": is_correct,
+        "matched_count": matched_count,
+        "expected_count": expected_count,
+    })
+    record_puzzle_event(db, puzzle.id, user_id, "started", once_per_run=True)
+    if is_correct:
+        record_puzzle_event(
+            db, puzzle.id, user_id, "completion",
+            {"matched_count": matched_count, "expected_count": expected_count},
+            once_per_run=True,
+        )
     db.commit()
     return PuzzleAttemptResponse(
         is_correct=is_correct,
@@ -6394,6 +6465,10 @@ def reset_user_puzzle(puzzle_id: str, user_id: int, db: Session) -> Puzzle:
     if progress is not None:
         db.delete(progress)
     attempts = db.scalars(select(PuzzleAttempt).where(PuzzleAttempt.puzzle_id == puzzle_id, PuzzleAttempt.user_id == user_id)).all()
+    record_puzzle_event(db, puzzle.id, user_id, "reset", {
+        "cleared_progress": progress is not None,
+        "cleared_attempts": len(attempts),
+    })
     for attempt in attempts:
         db.delete(attempt)
     db.commit()

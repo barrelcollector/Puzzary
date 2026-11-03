@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from app.database import Base, engine, SessionLocal, init_db
-from app.models import User, Puzzle, PuzzleProgress, PuzzleAttempt, PermissionRole
+from app.models import User, Puzzle, PuzzleActivityEvent, PuzzleHint, PuzzleProgress, PuzzleAttempt, PermissionRole
 from app.permissions import initialize_permissions
 from app.main import hash_secret, hash_password, SESSION_SECRET
 from app.puzzles import get_puzzle_type
@@ -22,6 +22,9 @@ from app.user_activity import account_activity, progress_states
 
 Base.metadata.drop_all(engine)
 Base.metadata.create_all(engine)
+PuzzleActivityEvent.__table__.drop(engine)
+init_db()
+assert 'puzzle_activity_events' in inspect(engine).get_table_names()
 with SessionLocal() as db:
     admin = User(display_name='admin', is_admin=True, is_active=True, password_hash=hash_password('isolated-activity-password'))
     db.add(admin)
@@ -45,6 +48,7 @@ with SessionLocal() as db:
     db.add(Puzzle(id='gimme',puzzle_type='word_search',title='Gimme fixture',theme='',difficulty='easy',created_by_id=admin.id,
                   print_payload={'grid':['CAT','DOG','XYZ'],'words':['CAT','DOG']},play_payload={},
                   solution_payload={'words':['CAT','DOG'],'gimmes':{'words':['CAT']}},puzzle_metadata={},auto_archive_at=None,source='test'))
+    db.add(PuzzleHint(puzzle_id='empty', order=1, text='A durable general hint.'))
     db.flush()
     for pid,uid,payload in [('alpha',alice.id,{'answers':complete}),('alpha',bob.id,{'answers':wrong_guess}),
                             ('empty',alice.id,{'answers':{}}),('gimme',alice.id,{'found_words':['CAT']}),
@@ -116,6 +120,21 @@ try:
         assert stats['totals']['completed']==2 and stats['totals']['attempts']==4
         assert stats['by_type'][0]['puzzle_type']=='takuzu' and stats['by_type'][0]['attempts']==4
         assert next(row for row in stats['recent'] if row['id']=='archived')['url'] is None
+        assert alice.request.post(base+'/api/puzzles/empty/progress',data={'answers':wrong_guess}).ok
+        checked=alice.request.post(base+'/api/puzzles/empty/actions',data={'kind':'check','changes':{}})
+        assert checked.ok,checked.text()
+        hinted=alice.request.post(base+'/api/puzzles/empty/actions',data={'kind':'hint','changes':{}})
+        assert hinted.ok,hinted.text()
+        revealed=alice.request.post(base+'/api/puzzles/empty/actions',data={'kind':'reveal','changes':{}})
+        assert revealed.ok,revealed.text()
+        hint_page=alice.new_page(); assert hint_page.goto(base+'/puzzles/empty').ok
+        with hint_page.expect_response(lambda response: response.url.endswith('/api/puzzles/empty/activity')):
+            hint_page.locator('[data-puzzle-hints] summary').click()
+        hint_page.close()
+        assert alice.request.post(base+'/api/puzzles/empty/reset').ok
+        history=alice.request.get(base+'/api/account/stats').json()['history']
+        empty_types=[row['event_type'] for row in history if row['puzzle_id']=='empty']
+        assert {'started','attempt','hint','reveal','completion','reset'} <= set(empty_types),empty_types
         output=Path('/tmp/activity-qa'); output.mkdir(exist_ok=True)
         errors=[]
         for width in [1280,390]:
@@ -123,6 +142,7 @@ try:
             page.on('pageerror',lambda error: errors.append(str(error)))
             assert page.goto(base+'/account').ok
             assert page.locator('[data-stat="completed"]').inner_text()=='2'
+            assert page.locator('[data-history-event="reset"]').count()>=1
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
             page.screenshot(path=str(output/f'account-{width}.png'),full_page=True)
             assert page.goto(base+'/account/password').ok
@@ -136,6 +156,7 @@ try:
             page=admin.new_page(); page.set_viewport_size({'width':width,'height':900})
             assert page.goto(base+f'/admin/users/{ids["alice"]}?tab=activity').ok
             assert page.locator('[data-stat="completed"]').inner_text()=='2'
+            assert page.locator('[data-history-event="completion"]').count()>=1
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
             page.screenshot(path=str(output/f'admin-activity-{width}.png'),full_page=True)
             page.close()
@@ -151,8 +172,24 @@ try:
         assert alice.request.post(base+'/api/puzzles/beta/reset').ok
         assert library(alice)[0]['beta']['progress']['status']=='not_started'
         assert alice.request.get(base+'/api/account/stats').json()['totals']['attempts']==1
+        global_activity=admin.new_page(); assert global_activity.goto(base+'/admin/activity').ok
+        assert global_activity.locator('[data-history-event="reset"]').count()>=1
+        global_activity.close()
+        with SessionLocal() as db:
+            assert db.scalar(select(PuzzleActivityEvent).where(
+                PuzzleActivityEvent.user_id==ids['alice'], PuzzleActivityEvent.event_type=='reset'
+            )) is not None
+        server.terminate(); server.wait(timeout=10)
+        server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8793'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                if alice.request.get(base+'/health').ok: break
+            except Exception: time.sleep(.1)
+        else: raise RuntimeError('QA server did not restart')
+        restarted_history=alice.request.get(base+'/api/account/stats').json()['history']
+        assert any(row['event_type']=='reset' and row['puzzle_id']=='empty' for row in restarted_history)
         browser.close()
-    print('Account isolation, plugin starter handling, attempt completions, archive visibility, authenticated stats, admin activity permission, resets and desktop/mobile views passed.')
+    print('Account isolation, durable attempts/hints/reveals/completions/resets across restart, archive visibility, permissions, replay resets and desktop/mobile views passed.')
 finally:
     server.terminate()
     try: server.wait(timeout=10)
