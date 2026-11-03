@@ -33,7 +33,7 @@ from jinja2 import TemplateNotFound
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
@@ -3289,7 +3289,12 @@ def admin_context(
     dictionary_page = list_page
     dictionary_search = request.query_params.get("q", "").strip()[:80]
     dictionary_total = 0
-    if section in {"dashboard", "dictionary", "word_bank_detail"}:
+    needs_bank_dictionary = (
+        section == "word_bank_detail"
+        and selected_word_bank is not None
+        and word_bank_mode(selected_word_bank) == "automatic"
+    )
+    if section in {"dashboard", "dictionary"} or needs_bank_dictionary:
         statement = dictionary_statement(include_properties=section == "word_bank_detail")
         if section == "dictionary":
             count_statement = select(func.count(DictionaryWord.id))
@@ -5776,6 +5781,77 @@ def api_list_word_banks(
         "offset": offset,
         "items": [serialize_word_bank(bank, include_words=include_words) for bank in banks[offset : offset + limit]],
     }
+
+
+@app.get("/api/word-banks/{bank_id}/entry-options")
+def api_word_bank_entry_options(
+    bank_id: int,
+    request: Request,
+    q: str = "",
+    limit: int = 40,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_api_user(request, db)
+    require_permission(user, "content.manage")
+    bank = db.get(WordBank, bank_id)
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Word bank not found")
+    if word_bank_mode(bank) != "manual" or bank.archived_at is not None:
+        raise HTTPException(status_code=409, detail="Choose an active manual word bank")
+    query_text = q.strip()[:80]
+    if len(query_text) < 2:
+        return {"items": [], "query": query_text, "has_more": False}
+    escaped = query_text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    existing_word_ids = select(WordBankWord.word_id).where(WordBankWord.word_bank_id == bank.id)
+    matches = (
+        select(DictionaryWord.id)
+        .outerjoin(DictionaryDefinition, DictionaryDefinition.word_id == DictionaryWord.id)
+        .where(
+            DictionaryWord.archived_at.is_(None),
+            DictionaryWord.banned_at.is_(None),
+            DictionaryWord.id.not_in(existing_word_ids),
+            or_(
+                DictionaryWord.word.ilike(pattern, escape="\\"),
+                DictionaryWord.display_text.ilike(pattern, escape="\\"),
+                DictionaryWord.clue.ilike(pattern, escape="\\"),
+                DictionaryDefinition.definition.ilike(pattern, escape="\\"),
+            ),
+        )
+        .distinct()
+        .order_by(DictionaryWord.id)
+        .limit(max(1, min(limit, 60)) + 1)
+    )
+    word_ids = list(db.scalars(matches))
+    has_more = len(word_ids) > max(1, min(limit, 60))
+    word_ids = word_ids[:max(1, min(limit, 60))]
+    if not word_ids:
+        return {"items": [], "query": query_text, "has_more": False}
+    words = db.scalars(
+        select(DictionaryWord)
+        .where(DictionaryWord.id.in_(word_ids))
+        .options(selectinload(DictionaryWord.definitions).selectinload(DictionaryDefinition.tags))
+        .order_by(func.lower(DictionaryWord.display_text), DictionaryWord.id)
+    ).all()
+    items = []
+    for word in words:
+        display = word.display_text or word.word
+        items.append({
+            "value": f"{word.id}:0", "word": display, "definition": "Any active definition",
+            "label": f"{display} / any definition",
+        })
+        for definition in word.definitions:
+            if definition.archived_at is not None:
+                continue
+            clue = definition_clue(definition).strip()
+            description = clue[:240] or "Definition without display text"
+            prefix = f"{definition.part_of_speech}: " if definition.part_of_speech else ""
+            items.append({
+                "value": f"{word.id}:{definition.id}", "word": display,
+                "definition": prefix + description,
+                "label": f"{display} / {prefix}{description}",
+            })
+    return {"items": items, "query": query_text, "has_more": has_more}
 
 
 @app.post("/api/word-banks")

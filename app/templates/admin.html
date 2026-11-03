@@ -844,21 +844,25 @@
                 <p class="muted">No manual entries yet.</p>
               {% endfor %}
             </div>
-            <form method="post" action="/admin/word-banks/{{ bank.id }}/words">
-              <label>
-                Add word or definition
-                <select name="word_definition" required>
-                  {% for word in dictionary_words %}
-                    {% if not word.archived_at and not word.banned_at %}
-                      <option value="{{ word.id }}:0">{{ word.display_text or word.word }} / any definition</option>
-                      {% for definition in word.definitions %}
-                        <option value="{{ word.id }}:{{ definition.id }}">{{ word.display_text or word.word }} / {{ definition_clue(definition) or definition.definition }}</option>
-                      {% endfor %}
-                    {% endif %}
-                  {% endfor %}
-                </select>
-              </label>
-              <button type="submit">Add Entry</button>
+            <form method="post" action="/admin/word-banks/{{ bank.id }}/words" data-word-bank-picker data-picker-endpoint="/api/word-banks/{{ bank.id }}/entry-options">
+              <label for="word-bank-entry-search-{{ bank.id }}">Add word or definition</label>
+              <div class="word-bank-entry-picker">
+                <input
+                  id="word-bank-entry-search-{{ bank.id }}"
+                  type="search"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="word-bank-entry-results-{{ bank.id }}"
+                  placeholder="Search words or definition text"
+                  data-picker-search
+                >
+                <input type="hidden" name="word_definition" data-picker-value>
+                <div id="word-bank-entry-results-{{ bank.id }}" class="word-bank-entry-results" role="listbox" hidden data-picker-results></div>
+                <small class="muted" aria-live="polite" data-picker-status>Type at least 2 characters to search.</small>
+              </div>
+              <button type="submit" disabled data-picker-submit>Add selected entry</button>
             </form>
           {% endif %}
         </article>
@@ -1436,5 +1440,6 @@
   {% for puzzle_type in puzzle_types %}{% if puzzle_type.manual_editor_script %}<script src="/static/{{ puzzle_type.manual_editor_script }}"></script>{% endif %}{% endfor %}
   <script src="/static/manual-builder.js?v=3"></script>
   <script src="/static/completion-message.js?v=1"></script>
+  {% if section == "word_bank_detail" %}<script src="/static/word-bank-picker.js?v=1"></script>{% endif %}
   {% if section == "publishing" %}<script src="/static/publishing.js?v=1"></script>{% endif %}
 {% endblock %}

@@ -111,7 +111,11 @@ with SessionLocal() as db:
     other=User(display_name='Bank Editor',is_active=True,permissions_initialized=True,permission_overrides={'content.view':True,'content.manage':True,'api.use':True})
     word=DictionaryWord(word='CLOUD',display_text='Local cloud',clue='Local clue',properties={'local_note':'keep'},definitions=[DictionaryDefinition(definition='Visible water droplets.',part_of_speech='Noun',position=0,properties={})])
     banned=DictionaryWord(word='bannedqa',display_text='bannedqa',banned_at=__import__('datetime').datetime.now(__import__('datetime').timezone.utc))
-    db.add_all([player,other,word,banned]); db.commit()
+    picker=DictionaryWord(word='pickerqa',display_text='Picker QA',definitions=[
+        DictionaryDefinition(definition='First selectable meaning.',part_of_speech='Noun',position=0),
+        DictionaryDefinition(definition='Second selectable meaning.',part_of_speech='Verb',position=1),
+    ])
+    db.add_all([player,other,word,banned,picker]); db.commit()
     ids={'admin':admin.id,'player':player.id,'other':other.id}
 
 base='http://127.0.0.1:8794'
@@ -189,6 +193,12 @@ try:
         token=browser.new_context(extra_http_headers={'Authorization':'Bearer isolated-bank-token'})
         assert token.request.get(base+f'/api/word-banks/{bank_id}/export').ok
         assert 'word_bank_required_fields' in admin.request.get(base+'/api/puzzle-types').json()['puzzle_types'][0]
+        picker_endpoint=base+f'/api/word-banks/{bank_id}/entry-options'
+        assert browser.new_context().request.get(picker_endpoint+'?q=picker').status==401
+        assert player.request.get(picker_endpoint+'?q=picker').status==403
+        assert admin.request.get(picker_endpoint+'?q=p').json()['items']==[]
+        picker_results=admin.request.get(picker_endpoint+'?q=second%20selectable').json()['items']
+        assert any(item['definition']=='Verb: Second selectable meaning.' for item in picker_results)
         errors=[]
         for width in [1280,390]:
             page=admin.new_page(); page.set_viewport_size({'width':width,'height':900}); page.on('pageerror',lambda error:errors.append(str(error)))
@@ -209,9 +219,29 @@ try:
             assert page.get_by_role('heading',name='Import Complete').count()==1
             page.get_by_role('link',name='Open Word Bank').click()
             assert page.get_by_role('link',name='Export',exact=True).count()==1
+            assert page.locator('select[name="word_definition"]').count()==0
+            search=page.locator('[data-picker-search]')
+            picker_options=page.locator('[data-picker-results] [role="option"]')
+            search.fill('Picker QA')
+            picker_options.first.wait_for()
+            assert picker_options.count()==3
+            if width==1280:
+                search.press('ArrowDown'); search.press('ArrowDown'); search.press('ArrowDown'); search.press('Enter')
+            else:
+                picker_options.filter(has_text='Second selectable meaning.').click()
+            assert not page.locator('[data-picker-submit]').is_disabled()
+            assert page.locator('[data-picker-status]').inner_text().startswith('Selected Picker QA')
+            page.locator('[data-picker-submit]').click()
+            assert page.get_by_text('Second selectable meaning.',exact=True).count()==1
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
             page.close()
+        with SessionLocal() as db:
+            picker_word=db.scalar(select(DictionaryWord).where(DictionaryWord.word=='pickerqa'))
+            browser_banks=db.scalars(select(WordBank).where(WordBank.name.startswith('Browser QA'))).all()
+            assert len(browser_banks)==2
+            assert all(any(link.word_id==picker_word.id and link.definition.position==1 for link in bank.word_links) for bank in browser_banks)
         assert not errors,errors
         browser.close()
-    print('PASS: sources/SSRF/limits, definition merge and bank selection, portable roundtrip, policies/mapping, account permissions/ownership/replay, desktop/mobile upload wizard')
+    print('PASS: sources/SSRF/limits, definition merge and searchable bank selection, portable roundtrip, policies/mapping, account permissions/ownership/replay, desktop/mobile upload wizard')
 finally:
     server.terminate(); server.wait(timeout=10)

@@ -2903,3 +2903,27 @@ input.spell-slot { width: 34px; margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+.word-bank-entry-picker { display: grid; gap: 8px; margin-bottom: 10px; }
+.word-bank-entry-results {
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.word-bank-entry-option {
+  display: grid;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.word-bank-entry-option:last-child { border-bottom: 0; }
+.word-bank-entry-option small { color: var(--muted); }
+.word-bank-entry-option:hover,
+.word-bank-entry-option.is-active { background: var(--surface-muted); color: var(--ink); }
