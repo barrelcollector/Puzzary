@@ -87,7 +87,7 @@ password: admin
 
 Change that password after first login. Existing installations are migrated in place; the oldest existing user still becomes an admin if no admin exists.
 
-Admins can issue per-account API tokens from the Users page. Tokens are shown once, then stored only as hashes.
+Admins can issue per-account API tokens from the Users page. Tokens are shown once, then stored only as hashes. Use **Rotate API Token** on that account's Security tab to replace the credential; rotation immediately invalidates the previous token.
 
 ## API
 

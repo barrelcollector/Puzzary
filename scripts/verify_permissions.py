@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from websockets.sync.client import connect
@@ -162,6 +162,12 @@ try:
         published=post(publisher,f'/admin/puzzles/{pid}/publish',{})
         assert published.status==303,(published.status,published.text()[:500])
         token=browser.new_context(extra_http_headers={'Authorization':'Bearer isolated-permission-token'})
+        assert token.request.get(base+'/api/puzzles').ok
+        rotated=post(admin,f'/admin/users/{ids["Publisher"]}/api-token',{})
+        assert rotated.status==303
+        rotated_token=parse_qs(urlsplit(rotated.headers['location']).query)['api_token'][0]
+        assert token.request.get(base+'/api/puzzles').status==401
+        token=browser.new_context(extra_http_headers={'Authorization':'Bearer '+rotated_token})
         assert token.request.get(base+'/api/puzzles').ok
         assert post(admin,f'/admin/users/{ids["Publisher"]}/permissions',{'roles':str(publisher_role_id),'permission:api.use':'deny'}).status==303
         assert token.request.get(base+'/api/puzzles').status==403
