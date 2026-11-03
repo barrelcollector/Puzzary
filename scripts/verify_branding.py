@@ -21,8 +21,9 @@ opening = "\n".join(readme.splitlines()[:35])
 assert "self-hosted, extensible puzzle and game library" in opening
 assert "flexible API" in opening
 assert "modular plugins" in opening
-assert "supported\npublishing integration" in opening
 assert "library and answer portal for Daily Stripe" not in readme
+assert "product's defining purpose" not in readme
+assert "primary purpose" not in readme
 assert "docs/puzzle-modules.md" in readme
 assert "Architecture and integrations" in readme
 

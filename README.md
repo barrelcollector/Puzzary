@@ -6,8 +6,7 @@ flexible API.
 
 Puzzle and game types are supplied by modular plugins that own generation,
 play, checking, progress, collaboration, and print behavior. External clients
-can use the same API for automation and delivery. Daily Stripe is one supported
-publishing integration rather than the product's defining purpose.
+can use the same API for automation and delivery.
 
 ## Platform capabilities
 
