@@ -10,7 +10,7 @@ class UserCreate(BaseModel):
 
 class PuzzleGenerateRequest(BaseModel):
     puzzle_type: str = "word_search"
-    theme: str = "daily_stripe"
+    theme: str = "general"
     word_bank_slugs: list[str] = Field(default_factory=list)
     difficulty: str = "easy"
     excluded_tag_ids: list[int] = Field(default_factory=list)

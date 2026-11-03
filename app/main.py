@@ -110,7 +110,11 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-local-session-secret")
 PUZZARY_TIMEZONE = os.getenv("PUZZARY_TIMEZONE", "America/New_York")
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Puzzary", version="0.1.0")
+app = FastAPI(
+    title="Puzzary",
+    description="An extensible puzzle and game library with a flexible API and plugin-based game system.",
+    version="0.1.0",
+)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[appearance_template_context])
 templates.env.globals['can_owned'] = can_owned

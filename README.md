@@ -1,30 +1,36 @@
 # Puzzary
 
-Puzzary is a self-hosted puzzle library and answer portal for Daily Stripe.
+Puzzary is a self-hosted, extensible puzzle and game library. Create, manage,
+organize, play, and distribute puzzles and games through its web portal or
+flexible API.
 
-It owns puzzle generation, stored solutions, hints, attempts, photo submissions, and QR-backed web pages. Home Assistant and Daily Stripe should call Puzzary through its API instead of storing puzzle state themselves.
+Puzzle and game types are supplied by modular plugins that own generation,
+play, checking, progress, collaboration, and print behavior. External clients
+can use the same API for automation and delivery. Daily Stripe is one supported
+publishing integration rather than the product's defining purpose.
 
-## Current MVP
+## Platform capabilities
 
 - FastAPI app
 - PostgreSQL database
 - Web portal
 - Password-based user accounts
 - Admin-managed account creation and password resets
-- Puzzle library view
+- Searchable puzzle and game library
 - Admin panel for archiving, deleting, and organizing puzzles
 - Admin-managed dictionary, word banks, categories, and tags
 - Canonical dictionary words with reusable properties and tags
 - Word banks that reference canonical dictionary words without duplicating them
-- Word-search puzzle generator
-- Crossword puzzle generator
-- Word-pyramid puzzle generator
+- Auto-discovered puzzle and game plugin system
+- Built-in Word Search, Crossword, Word Pyramid, Sudoku, Nonogram, Maze,
+  Cross Equations, Takuzu, and Spell It modules
 - Puzzle hints
 - Answer checking
 - Account-based puzzle progress
 - Interactive word-search highlighting
 - Photo submission upload endpoint
-- Printable puzzle payload API for Daily Stripe
+- Flexible authenticated API for external clients and automation
+- Printable puzzle payloads and PDFs for publishing integrations
 
 ## Dictionary Content Pack
 
@@ -109,7 +115,7 @@ Generate a puzzle:
 curl -X POST http://localhost:8790/api/puzzles/generate \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
-  --data '{"puzzle_type":"word_search","theme":"daily_stripe","difficulty":"easy"}'
+  --data '{"puzzle_type":"word_search","theme":"general","difficulty":"easy"}'
 ```
 
 Get a puzzle:
@@ -277,13 +283,18 @@ curl http://localhost:8790/api/dictionary?search=codex \
   -H "Authorization: Bearer $PUZZARY_API_TOKEN"
 ```
 
-## Design Notes
+## Architecture and integrations
 
-Puzzary is intentionally separate from Home Assistant and Daily Stripe:
+Puzzary is the system of record for puzzle and game content, solutions,
+attempts, progress, and printable output. Its web portal is a complete client,
+and the API supports additional clients and delivery workflows:
 
-- Home Assistant triggers and displays state.
-- Daily Stripe renders and prints issues.
-- Puzzary generates puzzle content, stores answers, checks attempts, and serves QR pages.
+- Puzzle modules extend the platform without changing the core application.
+- Home Assistant can trigger workflows and display state through the API.
+- Daily Stripe can render and print Puzzary issues as a supported publishing
+  integration.
+- Other clients can generate, import, export, play, and print content through
+  the same authenticated API.
 
 ## Puzzle Types
 
@@ -407,8 +418,8 @@ Create a draft with this JSON, using real puzzle IDs from your library:
 
 ```json
 {
-  "title": "Daily Stripe",
-  "description": "Today's puzzles",
+  "title": "Community Puzzle Pack",
+  "description": "This week's puzzles",
   "modules": [
     {"kind": "puzzle", "puzzle_id": "PUZZLE_ID"},
     {"kind": "text", "title": "Quote", "body": "A curated quote.", "attribution": "Source"}
