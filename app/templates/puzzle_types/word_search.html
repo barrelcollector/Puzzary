@@ -10,7 +10,9 @@
   {% for row in play_payload.grid %}
     {% set y = loop.index0 %}
     {% for letter in row %}
-      <button type="button" data-x="{{ loop.index0 }}" data-y="{{ y }}" data-letter="{{ letter }}">{{ letter }}</button>
+      {% set x = loop.index0 %}
+      {% set coordinate = x ~ ',' ~ y %}
+      <button type="button" data-x="{{ x }}" data-y="{{ y }}" data-letter="{{ letter }}"{% if coordinate in (play_payload.gimmes.cells | default({})) %} data-gimme="true" class="found-cell"{% endif %}>{{ letter }}</button>
     {% endfor %}
   {% endfor %}
 </div>

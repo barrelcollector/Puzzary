@@ -106,6 +106,11 @@
     cellsForPlacement(placement).forEach((cell) => cell.classList.add("found-cell"));
   }
 
+  function markGimmeCells() {
+    cells.filter((cell) => cell.dataset.gimme === "true")
+      .forEach((cell) => cell.classList.add("found-cell"));
+  }
+
   function revealSolution() {
     words.forEach((word) => {
       found.add(word);
@@ -410,6 +415,7 @@
   });
 
   found.forEach(markStoredWord);
+  markGimmeCells();
   syncFoundWords();
   celebrationReady = true;
 
@@ -444,6 +450,7 @@
         lineCells(cellsByCoord.get(first),cellsByCoord.get(last)).forEach(cell => cell.classList.add('found-cell'));
       });
       found.forEach(markStoredWord);
+      markGimmeCells();
       syncFoundWords();
       if (status && (guesses.length || rejectedGuesses.length)) status.textContent = `${found.size} of ${words.size} words found. ${guesses.length} selections ready to check. ${rejectedGuesses.length} incorrect selections.`;
     }

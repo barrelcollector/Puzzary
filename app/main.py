@@ -446,7 +446,15 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
 def public_play_payload(puzzle: Puzzle) -> dict:
     """Return only data that is safe to expose to an ordinary player."""
     payload = deepcopy(puzzle.play_payload or {})
-    if puzzle.puzzle_type == "crossword":
+    if puzzle.puzzle_type == "word_search":
+        solution_gimmes = (puzzle.solution_payload or {}).get("gimmes", {})
+        words = solution_gimmes.get("words", []) if isinstance(solution_gimmes, dict) else []
+        payload["gimmes"] = {
+            "mode": "found_words",
+            "words": [str(word).upper() for word in words if str(word).strip()],
+            "cells": printable_gimme_cells(puzzle),
+        }
+    elif puzzle.puzzle_type == "crossword":
         payload["grid"] = [
             [
                 {"open": bool(cell.get("open", cell.get("letter"))), "number": cell.get("number", "")}

@@ -240,6 +240,24 @@ def find_word_placement(grid: list[str], word: str) -> dict | None:
     return None
 
 
+def gimme_cells_for_placements(placements: list[dict], gimme_words: list[str]) -> dict[str, str]:
+    wanted = {str(word).upper() for word in gimme_words}
+    cells = {}
+    for placement in placements:
+        word = str(placement.get("word", "")).upper()
+        if word not in wanted:
+            continue
+        start = placement.get("start", [])
+        direction = placement.get("direction", [])
+        if len(start) != 2 or len(direction) != 2:
+            continue
+        x, y = int(start[0]), int(start[1])
+        dx, dy = int(direction[0]), int(direction[1])
+        for index, letter in enumerate(word):
+            cells[f"{x + dx * index},{y + dy * index}"] = letter
+    return cells
+
+
 def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
     grid = parse_manual_grid(options.get("grid", ""))
     words = parse_manual_words(options.get("words", ""))
@@ -259,6 +277,7 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
         print_style = "boxed"
     gimme_count = integer_option(options, "gimme_count", 0, 0, max(0, len(words) - 1))
     gimme_words = words[:gimme_count]
+    gimme_cells = gimme_cells_for_placements(placements, gimme_words)
     settings = {
         "grid_size": max(len(grid), len(grid[0])),
         "grid_width": len(grid[0]),
@@ -276,7 +295,7 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
         "kind": "word_search",
         "grid": grid,
         "words": words,
-        "gimmes": {"mode": "found_words", "words": gimme_words},
+        "gimmes": {"mode": "found_words", "words": gimme_words, "cells": gimme_cells},
         "settings": settings,
     }
     solution_payload = {
@@ -422,6 +441,7 @@ def generate(
     default_gimme_count = len(gimme_words_for_difficulty(words, difficulty))
     gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, max(0, len(words) - 1))
     gimme_words = words[:gimme_count]
+    gimme_cells = gimme_cells_for_placements(placements, gimme_words)
 
     settings = {
         "grid_size": size,
@@ -440,7 +460,7 @@ def generate(
         "kind": "word_search",
         "grid": ["".join(row) for row in grid],
         "words": words,
-        "gimmes": {"mode": "found_words", "words": gimme_words},
+        "gimmes": {"mode": "found_words", "words": gimme_words, "cells": gimme_cells},
         "settings": settings,
     }
     solution_payload = {

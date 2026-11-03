@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import uuid
+from copy import deepcopy
 from pathlib import Path
 
 db_path = Path(tempfile.gettempdir()) / f"puzzary-solution-privacy-{uuid.uuid4().hex}.sqlite"
@@ -40,6 +41,7 @@ def generated_puzzles():
                 "grid": "CATXXXXX\nDOGXXXXX\nXXXXXXXX\nXXXXXXXX\nXXXXXXXX\nXXXXXXXX\nXXXXXXXX\nXXXXXXXX",
                 "words": "CAT,DOG",
                 "auto_confirm": "no",
+                "gimme_count": 1,
             })
         elif plugin.slug == "word_pyramid":
             item = plugin.manual_builder({
@@ -78,6 +80,12 @@ try:
         db.flush()
         player_id = player.id
         for slug, item in items.items():
+            play_payload = deepcopy(item.play_payload)
+            print_payload = deepcopy(item.print_payload)
+            if slug == "word_search":
+                # Simulate a puzzle saved before player-safe Gimme coordinates were added.
+                play_payload.get("gimmes", {}).pop("cells", None)
+                print_payload.get("gimmes", {}).pop("cells", None)
             db.add(Puzzle(
                 id=f"privacy-{slug}",
                 puzzle_type=slug,
@@ -85,8 +93,8 @@ try:
                 theme="",
                 difficulty="easy",
                 prompt=item.prompt,
-                play_payload=item.play_payload,
-                print_payload=item.print_payload,
+                play_payload=play_payload,
+                print_payload=print_payload,
                 solution_payload=item.solution_payload,
                 puzzle_metadata={},
                 source="test",
@@ -131,6 +139,9 @@ try:
                     assert all("letter" not in cell for row in public.get("grid", []) for cell in row)
                 if slug == "word_search":
                     assert "placements" not in public
+                    assert public["gimmes"]["words"] == ["CAT"]
+                    assert public["gimmes"]["cells"] == {"0,0": "C", "1,0": "A", "2,0": "T"}
+                    assert html.count('data-gimme="true" class="found-cell"') == 3
 
                 attempt = client.request.post(
                     base + f"/api/puzzles/privacy-{slug}/attempts",
