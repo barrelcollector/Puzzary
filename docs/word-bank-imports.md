@@ -48,7 +48,7 @@ HTTP connections pin a checked resolved address, validate every redirect, do not
 use proxy environment variables and do not forward tokens across origins.
 Loopback, link-local, reserved, multicast and unspecified addresses are rejected.
 Private-network sources require an operator-configured exact hostname/IP allowlist:
-`WORD_BANK_IMPORT_ALLOWED_HOSTS=puzzary-other.example,192.168.1.20`.
+`WORD_BANK_IMPORT_ALLOWED_HOSTS=puzzary-source.example.com,puzzles.example.net`.
 Only ports 80, 443 and 8790 are allowed. This deliberately does not change existing
 dictionary/puzzle import services or periodic synchronization configuration.
 

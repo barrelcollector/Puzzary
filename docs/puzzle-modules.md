@@ -2,6 +2,31 @@
 
 Puzzary puzzle types are small Python modules under `app/puzzle_types/`. A module is discovered at startup when it calls `register_puzzle_type(...)`.
 
+## Contributor workflow
+
+1. Create `app/puzzle_types/<slug>.py`; keep the slug stable because saved
+   puzzles use it as their type identifier.
+2. Implement generation or manual-building behavior and register one
+   `PuzzleType` as described below.
+3. Keep player-safe, printable, and secret answer data in separate payloads.
+4. Add optional web, print, solution, editor, and static assets using the
+   module slug and the paths documented below.
+5. Add a focused `scripts/verify_<slug>.py` regression check. Use a temporary
+   SQLite database or another disposable database, never a shared deployment.
+6. Run the focused check, Python compilation, and `git diff --check`. If the
+   module supports Group Solve, also run `scripts/verify_all_group_puzzles.py`.
+
+From the repository root with a virtual environment installed:
+
+```bash
+PYTHONPATH=. python scripts/verify_<slug>.py
+PYTHONPATH=. python -m compileall -q app scripts/verify_<slug>.py
+git diff --check
+```
+
+Windows PowerShell users can set `$env:PYTHONPATH = "."` and invoke
+`.venv\\Scripts\\python.exe` with the same script arguments.
+
 Modules are intentionally independent. Adding or removing a file should not require editing the generation wizard, print API, progress storage, or admin solution shell.
 
 ## Required Shape

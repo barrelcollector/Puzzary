@@ -41,16 +41,31 @@ its own bundled licenses; it is not part of the application's code license.
 
 ## Run
 
+Prerequisites are Docker Engine and Docker Compose v2. The full
+[local Docker deployment guide](docs/docker-deployment.md) covers persistent
+data, upgrades, automatic schema migrations, backups, restores, and health
+checks.
+
 Copy the sample environment:
 
 ```bash
 cp .env.example .env
 ```
 
+Replace every `change-*` value in `.env` before exposing Puzzary outside your
+local machine. Keep `.env` out of version control.
+
 Start the stack:
 
 ```bash
 docker compose up -d --build
+```
+
+Confirm both services are running and the application is healthy:
+
+```bash
+docker compose ps
+curl --fail http://localhost:8790/health
 ```
 
 Open:
