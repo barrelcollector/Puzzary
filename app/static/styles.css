@@ -3036,6 +3036,23 @@ input.spell-slot { width: 34px; margin: 0; }
 .account-history li > div { display: grid; gap: 2px; }
 .account-history time { color: var(--muted); font-size: .85rem; text-align: right; }
 .admin-grid-wide { grid-column: 1 / -1; }
+.minesweeper-play { display:grid; gap:12px; min-width:0; }
+.minesweeper-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.minesweeper-toolbar button { width:auto; }
+.minesweeper-toolbar button[aria-pressed="true"] { background:var(--accent); color:var(--accent-text); }
+.minesweeper-counter { margin-left:auto; color:var(--muted); }
+.minesweeper-scroll { max-width:100%; overflow:auto; overscroll-behavior:contain; }
+.minesweeper-board { --minesweeper-cell:clamp(28px,7vw,42px); display:grid; grid-template-columns:repeat(var(--minesweeper-columns),var(--minesweeper-cell)); width:max-content; border:1px solid var(--line); background:var(--line); gap:1px; }
+.minesweeper-cell { display:grid; place-items:center; width:var(--minesweeper-cell); height:var(--minesweeper-cell); min-width:0; padding:0; border:0; border-radius:0; background:var(--panel); color:var(--ink); font-weight:700; line-height:1; touch-action:manipulation; }
+button.minesweeper-cell:not(.is-revealed):hover { filter:brightness(.92); }
+.minesweeper-cell.is-revealed { background:var(--surface-muted); }
+.minesweeper-cell.is-flagged { color:var(--accent); }
+.minesweeper-cell.is-mine { color:var(--ink); }
+.minesweeper-cell.is-exploded { background:#c53442; color:#fff; }
+.minesweeper-cell.near-1 { color:#2471a3; } .minesweeper-cell.near-2 { color:#2e7d32; }
+.minesweeper-cell.near-3 { color:#c53442; } .minesweeper-cell.near-4,.minesweeper-cell.near-5,.minesweeper-cell.near-6,.minesweeper-cell.near-7,.minesweeper-cell.near-8 { color:#7b3f98; }
+.minesweeper-cell:focus-visible { outline:3px solid var(--accent); outline-offset:-3px; z-index:1; }
+.minesweeper-solution { --minesweeper-cell:30px; }
 @media (max-width: 640px) {
   .account-history li { align-items: start; flex-direction: column; }
   .account-history time { text-align: left; }

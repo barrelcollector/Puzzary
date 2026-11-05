@@ -185,12 +185,36 @@ try:
             assert revealed.ok, revealed.text()
             assert revealed.json()["answers"][key] == expected
             assert revealed.json()["completed"] is True
+
+            minesweeper = items["minesweeper"]
+            safe = next(iter(minesweeper.solution_payload["counts"]))
+            played = client.request.post(
+                base + "/api/puzzles/privacy-minesweeper/actions",
+                data={"kind": "reveal_cell", "target": safe, "changes": {}},
+            )
+            assert played.ok, played.text()
+            assert played.json()["answers"][safe] == minesweeper.solution_payload["counts"][safe]
+            persisted = client.request.get(base + "/api/puzzles/privacy-minesweeper/progress")
+            assert persisted.ok and persisted.json()["answers"][safe] == played.json()["answers"][safe]
+            forged = client.request.post(
+                base + "/api/puzzles/privacy-minesweeper/progress",
+                data={"answers": minesweeper.solution_payload["counts"]},
+            )
+            assert forged.ok and forged.json()["answers"] == {}
+            mine = minesweeper.solution_payload["mines"][0]
+            lost = client.request.post(
+                base + "/api/puzzles/privacy-minesweeper/actions",
+                data={"kind": "reveal_cell", "target": mine, "changes": {}},
+            )
+            assert lost.ok and lost.json()["status"] == "lost" and lost.json()["exploded"] == mine
+            reset = client.request.post(base + "/api/puzzles/privacy-minesweeper/reset", data={})
+            assert reset.ok and reset.json()["answers"] == {} and reset.json()["found_count"] == 0
             browser.close()
     finally:
         server.terminate()
         server.wait(timeout=10)
 
-    print("PASS: all nine player pages and APIs keep solutions private; checks, reveals, and Maze validation are server-side")
+    print("PASS: all ten player pages and APIs keep solutions private; checks, reveals, and Maze validation are server-side")
 finally:
     engine.dispose()
     for attempt in range(10):

@@ -292,7 +292,8 @@ class Action(BaseModel):
     action_id: uuid.UUID
     revision: int = Field(ge=0)
     puzzle_id: str | None = Field(default=None, max_length=26)
-    kind: Literal['patch', 'check', 'hint', 'reveal', 'clue', 'reveal_entry', 'check_entry'] = 'patch'
+    kind: Literal['patch', 'check', 'hint', 'reveal', 'clue', 'reveal_entry', 'check_entry',
+                  'reveal_cell', 'flag', 'reset'] = 'patch'
     target: str = Field(default='', max_length=80)
     changes: dict[str, str] = Field(default_factory=dict, max_length=4096)
 

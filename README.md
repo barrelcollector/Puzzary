@@ -22,7 +22,7 @@ can use the same API for automation and delivery.
 - Word banks that reference canonical dictionary words without duplicating them
 - Auto-discovered puzzle and game plugin system
 - Built-in Word Search, Crossword, Word Pyramid, Sudoku, Nonogram, Maze,
-  Cross Equations, Takuzu, and Spell It modules
+  Cross Equations, Takuzu, Minesweeper, and Spell It modules
 - Puzzle hints
 - Answer checking
 - Account-based puzzle progress
@@ -532,7 +532,7 @@ Hosts can optionally protect anonymous guest entry with a session password. Pass
 
 The public lobby at `/groups` lists only open sessions whose host enables **List in Public Group Solve Lobby**. Listing is off by default and can be changed without ending the session. A host change delists the session until the new host explicitly opts in. Public cards contain only the puzzle title/type, host display name, active player count/capacity, join status, guest availability, guest-password status and whether a separate puzzle password is required; session codes, passwords, shared progress and hidden puzzle content are excluded. Draft, archived, hidden, unlisted and private puzzles never appear. Full sessions remain visible as full, in-progress sessions permit late joining while capacity remains, and closed or delisted sessions disappear on the next 15-second refresh. Lobby pages and API responses are not cached, and discovery refreshes are rate limited.
 
-Supported adapters: Crossword, Sudoku, Cross Equations, Nonogram, Takuzu, Word Search, Word Pyramid, Spell It and Maze. Word Search shares unchecked and incorrect selections as well as confirmed finds. Pyramid shares row answers, incremental clues and row reveals; Spell It shares letter edits, checks and server-enforced hint budgets.
+Supported adapters: Crossword, Sudoku, Cross Equations, Nonogram, Takuzu, Minesweeper, Word Search, Word Pyramid, Spell It and Maze. Minesweeper reveal, flag, flood-fill, win and loss state is server-authoritative, so mine positions remain private until a loss or explicit solution reveal. Word Search shares unchecked and incorrect selections as well as confirmed finds. Pyramid shares row answers, incremental clues and row reveals; Spell It shares letter edits, checks and server-enforced hint budgets.
 
 The host can transfer control to any connected, eligible signed-in participant from the participant list. Eligible successors need both **Host groups** and **Moderate own groups** permissions. A voluntary transfer keeps the former host in the session. If the host explicitly leaves, the earliest-joined eligible active participant becomes host immediately, even if their browser is briefly away. If the host disconnects unexpectedly, the earliest connected successor is promoted after `GROUP_HOST_RECONNECT_GRACE_SECONDS` (30 seconds by default). Guests are never promoted. If no eligible host remains, the session closes while preserving its shared state. Host changes use the existing realtime channel, and the former host rejoins only as a regular participant.
 

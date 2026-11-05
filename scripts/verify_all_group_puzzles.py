@@ -68,12 +68,13 @@ try:
             response = host.request.post(base+f'/api/puzzles/all-{kind}/groups', data={})
             assert response.ok, (kind, response.text())
             groups[kind] = response.json()
-        print('All nine modules expose Group Solve and create sessions.')
+        print('All ten modules expose Group Solve and create sessions.')
 
         def attribution_change(kind, item):
             solution = item.solution_payload
             if kind == 'word_search': return {}, 'hint', ''
             if kind == 'maze': return {'path':json.dumps(solution['path'][:2],separators=(',',':'))}, 'patch', ''
+            if kind == 'minesweeper': return {}, 'reveal_cell', next(iter(solution['counts']))
             if kind == 'word_pyramid': return {'0':solution['rows'][0]['answer'][0]}, 'patch', ''
             if kind == 'spell_it':
                 entry = solution['entries'][0]; position = entry['hidden'][0]
@@ -101,7 +102,8 @@ try:
             owners = data['state'].get('_attribution',{}).get('owners',{})
             assert owners,kind
             assert all('value' not in owner and 'answer' not in owner for owner in owners.values()),kind
-        print('All nine modules report typed, timestamped attribution without embedding answer values.')
+            assert host.request.post(endpoint+'/close',data={}).ok
+        print('All ten modules report typed, timestamped attribution without embedding answer values.')
 
         # Colors remain unique/stable for late joins, and departed contributors retain credit.
         color_info = host.request.post(base+'/api/puzzles/all-takuzu/groups',data={}).json()
