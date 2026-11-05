@@ -27,7 +27,7 @@ can use the same API for automation and delivery.
 - Answer checking
 - Account-based puzzle progress
 - Interactive word-search highlighting
-- Photo submission upload endpoint
+- Photo submission and administrator review workflow
 - Flexible authenticated API for external clients and automation
 - Printable puzzle payloads and PDFs for publishing integrations
 
@@ -545,6 +545,12 @@ Appearance themes use validated semantic tokens rather than arbitrary CSS. Puzza
 Optional plugin hooks: `collaboration_fields` declares host controls using `GenerationField`; `collaboration_setup(state, options, solution)` initializes or changes mode state without a schema migration. `collaboration_value_limit` bounds each patch value (16 by default; Maze allows serialized paths). Actions receive authenticated `_actor` and active `participants` from the server. Frontend `apply(state, snapshot)` receives participant context; `scope(answers, snapshot)` limits diffing to a player's editable values. Use `PuzzaryGroup.action(kind, target)` for module-specific checks/hints/clues/reveals and `PuzzaryGroup.color(participantId)` for the participant's stable, session-unique color. Names, numbered markers, tooltips and the contribution summary keep attribution accessible without relying on color alone, including after a contributor leaves. Plugin authors must provide both server and browser adapters; registration never silently bypasses game validation. `PYTHONPATH=. python scripts/verify_all_group_puzzles.py` checks all built-ins plus typed attribution, ten-player color uniqueness, ownership transfer/clears/departures, two-browser play, all maze modes, invalid paths/ownership, hint budgets, reload, responsive views and personal-progress isolation in a disposable database.
 
 Rally shows an ordered list of leg assignments and checkpoint pairs, with the current player highlighted both in that list and in the member roster. The next leg is labeled Up next; later legs wait. A confirmed non-final leg plays the shared progress chime once; the final leg uses the puzzle completion sound. Initial loads, reconnects without a new completion, and leg-count resets do not replay old chimes. Turn ownership follows authoritative snapshots, not optimistic local paths. Snapshots include `puzzle_epoch`, which changes when switching puzzles or resetting a game mode; clients discard obsolete pending edits on a new epoch without requiring a refresh.
+
+## Completed-work photo submissions
+
+Signed-in players can upload completed paper work from a puzzle page and optionally associate it with one of their digital attempts for the same puzzle. Puzzary accepts JPEG, PNG and WebP images up to 10 MB and identifies the format from the file contents rather than trusting the filename or browser media type. Notes are limited to 2,000 characters. Files are stored under `UPLOAD_DIR` (by default `/data/uploads`) and are served only through authenticated, permission-checked routes; they are not public static assets.
+
+Players can preview and delete their own submissions. Accounts with `activity.view` can review the image, puzzle, submitting account, notes and upload time under **Admin > Activity**, and can delete a submission. Archiving a puzzle preserves its submission metadata and files for authorized archive/activity review. Permanently deleting a photo or its puzzle removes both the database record and the stored file. Regression check: `PYTHONPATH=. python scripts/verify_photo_submissions.py` uses an isolated SQLite database and temporary upload directory.
 
 ## Account Activity and Library Progress
 

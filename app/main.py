@@ -5,7 +5,6 @@ import base64
 import json
 import os
 import re
-import shutil
 import uuid
 import hashlib
 import hmac
@@ -26,7 +25,7 @@ import qrcode
 from qrcode.image.pure import PyPNGImage
 from qrcode.image.svg import SvgPathImage
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import TemplateNotFound
@@ -112,6 +111,12 @@ from app.schemas import (
 
 DEFAULT_APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
+PHOTO_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+PHOTO_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-local-session-secret")
 PUZZARY_TIMEZONE = os.getenv("PUZZARY_TIMEZONE", "America/New_York")
 BASE_DIR = Path(__file__).resolve().parent
@@ -4281,10 +4286,31 @@ def admin_delete_puzzle(puzzle_id: str, request: Request, db: Session = Depends(
         return user
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is not None:
+        photo_paths = [photo.file_path for photo in puzzle.photos]
         puzzle.tags = []
         db.delete(puzzle)
         db.commit()
+        for photo_path in photo_paths:
+            delete_photo_file(photo_path)
+        remove_empty_photo_directory(puzzle_id)
     return RedirectResponse(url="/admin/puzzles", status_code=303)
+
+
+@app.post("/admin/activity/photos/{photo_id}/delete")
+def admin_delete_photo(photo_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    photo = db.get(PuzzlePhoto, photo_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="Photo submission not found")
+    file_path = photo.file_path
+    puzzle_id = photo.puzzle_id
+    db.delete(photo)
+    db.commit()
+    delete_photo_file(file_path)
+    remove_empty_photo_directory(puzzle_id)
+    return RedirectResponse(url="/admin/activity", status_code=303)
 
 
 @app.post("/admin/puzzles/import")
@@ -5480,6 +5506,7 @@ def web_upload_photo(
     puzzle_id: str,
     request: Request,
     notes: str = Form(""),
+    attempt_id: int | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
@@ -5487,7 +5514,55 @@ def web_upload_photo(
     if isinstance(user, RedirectResponse):
         return user
     require_web_series_puzzle(request, db, user, puzzle_id)
-    save_photo(puzzle_id, file, notes, user.id, db)
+    save_photo(puzzle_id, file, notes, user.id, db, attempt_id=attempt_id)
+    return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
+
+
+@app.get("/web/puzzles/{puzzle_id}/photos/{photo_id}/content")
+def web_photo_content(
+    puzzle_id: str,
+    photo_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    photo = db.get(PuzzlePhoto, photo_id)
+    if photo is None or photo.puzzle_id != puzzle_id:
+        raise HTTPException(status_code=404, detail="Photo submission not found")
+    if photo.user_id != user.id and not user.can("activity.view"):
+        raise HTTPException(status_code=403, detail="Photo submission access denied")
+    target = stored_photo_path(photo.file_path)
+    return FileResponse(
+        target,
+        media_type=photo_media_type(target),
+        filename=photo.original_filename,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@app.post("/web/puzzles/{puzzle_id}/photos/{photo_id}/delete")
+def web_delete_photo(
+    puzzle_id: str,
+    photo_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    photo = db.get(PuzzlePhoto, photo_id)
+    if photo is None or photo.puzzle_id != puzzle_id:
+        raise HTTPException(status_code=404, detail="Photo submission not found")
+    if photo.user_id != user.id and not user.can("activity.view"):
+        raise HTTPException(status_code=403, detail="Photo submission access denied")
+    file_path = photo.file_path
+    db.delete(photo)
+    db.commit()
+    delete_photo_file(file_path)
+    remove_empty_photo_directory(puzzle_id)
     return RedirectResponse(url=f"/puzzles/{puzzle_id}", status_code=303)
 
 
@@ -6620,6 +6695,7 @@ def upload_photo(
     request: Request,
     user_id: int | None = Form(None),
     notes: str = Form(""),
+    attempt_id: int | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict[str, str | int]:
@@ -6629,7 +6705,7 @@ def upload_photo(
     if user_id is not None and user_id != user.id:
         require_permission(user,'puzzles.progress.any')
     photo_user_id = user_id if user_id is not None else user.id
-    return save_photo(puzzle_id, file, notes, photo_user_id, db)
+    return save_photo(puzzle_id, file, notes, photo_user_id, db, attempt_id=attempt_id)
 
 
 def reset_user_puzzle(puzzle_id: str, user_id: int, db: Session) -> Puzzle:
@@ -6659,26 +6735,106 @@ def save_photo(
     notes: str,
     user_id: int | None,
     db: Session,
+    *,
+    attempt_id: int | None = None,
 ) -> dict[str, str | int]:
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is None:
         raise HTTPException(status_code=404, detail="Puzzle not found")
+    if len(notes) > 2000:
+        raise HTTPException(status_code=422, detail="Photo notes must be 2,000 characters or fewer")
+    attempt = db.get(PuzzleAttempt, attempt_id) if attempt_id is not None else None
+    if attempt_id is not None and (
+        attempt is None or attempt.puzzle_id != puzzle_id or attempt.user_id != user_id
+    ):
+        raise HTTPException(status_code=422, detail="The selected attempt does not belong to this puzzle and user")
 
-    suffix = Path(file.filename or "upload.bin").suffix[:20]
+    original_filename = safe_photo_filename(file.filename)
+    first = file.file.read(16)
+    media_type = detect_photo_media_type(first)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, or WebP image")
     target_dir = UPLOAD_DIR / puzzle_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{uuid.uuid4().hex}{suffix}"
-    with target.open("wb") as handle:
-        shutil.copyfileobj(file.file, handle)
+    target = target_dir / f"{uuid.uuid4().hex}{PHOTO_TYPES[media_type]}"
+    temporary = target.with_suffix(target.suffix + ".upload")
+    size = len(first)
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(first)
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > PHOTO_UPLOAD_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="Photo uploads are limited to 10 MB")
+                handle.write(chunk)
+        os.replace(temporary, target)
+        photo = PuzzlePhoto(
+            puzzle_id=puzzle_id,
+            user_id=user_id,
+            attempt_id=attempt_id,
+            file_path=str(target),
+            original_filename=original_filename,
+            notes=notes.strip(),
+        )
+        db.add(photo)
+        db.flush()
+        record_puzzle_event(db, puzzle_id, user_id, "photo_upload", {
+            "photo_id": photo.id,
+            "content_type": media_type,
+            "size_bytes": size,
+        })
+        db.commit()
+        db.refresh(photo)
+        return {"id": photo.id, "status": "uploaded", "size_bytes": size}
+    except Exception:
+        db.rollback()
+        temporary.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
+        remove_empty_photo_directory(puzzle_id)
+        raise
 
-    photo = PuzzlePhoto(
-        puzzle_id=puzzle_id,
-        user_id=user_id,
-        file_path=str(target),
-        original_filename=file.filename or "upload",
-        notes=notes,
-    )
-    db.add(photo)
-    db.commit()
-    db.refresh(photo)
-    return {"id": photo.id, "status": "uploaded"}
+
+def safe_photo_filename(filename: str | None) -> str:
+    normalized = (filename or "photo").replace("\x00", "").replace("\\", "/")
+    cleaned = Path(normalized).name.strip()
+    return (cleaned or "photo")[:255]
+
+
+def detect_photo_media_type(header: bytes) -> str | None:
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def photo_media_type(path: Path) -> str:
+    media_types = {suffix: media_type for media_type, suffix in PHOTO_TYPES.items()}
+    return media_types.get(path.suffix.lower(), "application/octet-stream")
+
+
+def stored_photo_path(file_path: str) -> Path:
+    root = UPLOAD_DIR.resolve()
+    target = Path(file_path).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Photo file not found")
+    return target
+
+
+def delete_photo_file(file_path: str) -> None:
+    try:
+        stored_photo_path(file_path).unlink(missing_ok=True)
+    except HTTPException:
+        pass
+
+
+def remove_empty_photo_directory(puzzle_id: str) -> None:
+    directory = (UPLOAD_DIR / puzzle_id).resolve()
+    if directory.parent != UPLOAD_DIR.resolve():
+        return
+    try:
+        directory.rmdir()
+    except (FileNotFoundError, OSError):
+        pass

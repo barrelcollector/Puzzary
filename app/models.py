@@ -342,6 +342,9 @@ class PuzzlePhoto(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    attempt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("puzzle_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     file_path: Mapped[str] = mapped_column(String(500))
     original_filename: Mapped[str] = mapped_column(String(255))
     notes: Mapped[str] = mapped_column(Text, default="")
@@ -349,6 +352,7 @@ class PuzzlePhoto(Base):
 
     puzzle: Mapped[Puzzle] = relationship(back_populates="photos")
     user: Mapped[User | None] = relationship(back_populates="photos")
+    attempt: Mapped[PuzzleAttempt | None] = relationship()
 
 
 class PuzzleDictionary(Base):

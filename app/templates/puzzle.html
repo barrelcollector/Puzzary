@@ -105,9 +105,21 @@
       <h2>Upload Work</h2>
       <label>
         Notes
-        <input name="notes" autocomplete="off">
+        <input name="notes" maxlength="2000" autocomplete="off">
       </label>
-      <input type="file" name="file" accept="image/*" required>
+      {% if attempts %}
+      <label>
+        Related digital attempt (optional)
+        <select name="attempt_id">
+          <option value="">None</option>
+          {% for attempt in attempts %}
+          <option value="{{ attempt.id }}">{{ local_datetime_label(attempt.created_at) }} — {{ "Correct" if attempt.is_correct else "Not completed" }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required>
+      <small class="muted">JPEG, PNG, or WebP. Maximum 10 MB.</small>
       <button type="submit">Upload</button>
     </form>
     {% endif %}
@@ -142,13 +154,20 @@
     {% if photos %}
       <div class="list compact">
         {% for photo in photos %}
-          <div class="row">
-            <span>
+          <article class="photo-submission-card">
+            <a class="photo-preview" href="/web/puzzles/{{ puzzle.id }}/photos/{{ photo.id }}/content" target="_blank" rel="noopener">
+              <img src="/web/puzzles/{{ puzzle.id }}/photos/{{ photo.id }}/content" alt="Uploaded work: {{ photo.original_filename }}" loading="lazy">
+            </a>
+            <div class="photo-submission-details">
               <strong>{{ photo.original_filename }}</strong>
-              <small>{{ photo.notes }}</small>
-            </span>
-            <small>{{ photo.created_at }}</small>
-          </div>
+              {% if photo.notes %}<span>{{ photo.notes }}</span>{% endif %}
+              {% if photo.attempt_id %}<small>Related attempt #{{ photo.attempt_id }}</small>{% endif %}
+              <small>{{ local_datetime_label(photo.created_at) }}</small>
+              <form method="post" action="/web/puzzles/{{ puzzle.id }}/photos/{{ photo.id }}/delete">
+                <button type="submit" class="danger-button compact-button" onclick="return confirm('Delete this uploaded photo?')">Delete</button>
+              </form>
+            </div>
+          </article>
         {% endfor %}
       </div>
     {% else %}

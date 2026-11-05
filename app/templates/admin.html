@@ -1408,9 +1408,24 @@
         </div>
         <div class="panel">
           <h2>Photos</h2>
-          <div class="list compact">
+          <div class="photo-review-grid">
             {% for photo in photos %}
-              <div class="row"><span><strong>{{ photo.original_filename }}</strong><small>{{ photo.puzzle.title }}</small></span><small>{{ photo.created_at }}</small></div>
+              <article class="photo-submission-card" data-photo-submission="{{ photo.id }}">
+                <a class="photo-preview" href="/web/puzzles/{{ photo.puzzle_id }}/photos/{{ photo.id }}/content" target="_blank" rel="noopener">
+                  <img src="/web/puzzles/{{ photo.puzzle_id }}/photos/{{ photo.id }}/content" alt="Uploaded work: {{ photo.original_filename }}" loading="lazy">
+                </a>
+                <div class="photo-submission-details">
+                  <strong>{{ photo.original_filename }}</strong>
+                  <a href="/puzzles/{{ photo.puzzle_id }}">{{ photo.puzzle.title }}</a>
+                  <span>{{ photo.user.display_name if photo.user else "Unknown user" }}</span>
+                  {% if photo.notes %}<span>{{ photo.notes }}</span>{% endif %}
+                  {% if photo.attempt_id %}<small>Related attempt #{{ photo.attempt_id }}</small>{% endif %}
+                  <small>{{ local_datetime_label(photo.created_at) }}</small>
+                  <form method="post" action="/admin/activity/photos/{{ photo.id }}/delete">
+                    <button type="submit" class="danger-button compact-button" onclick="return confirm('Permanently delete this photo submission?')">Delete</button>
+                  </form>
+                </div>
+              </article>
             {% else %}
               <p class="muted">No photos yet.</p>
             {% endfor %}

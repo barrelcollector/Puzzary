@@ -11,6 +11,7 @@ EVENT_LABELS = {
     "reveal": "Revealed part of the solution",
     "completion": "Completed puzzle",
     "reset": "Reset puzzle for replay",
+    "photo_upload": "Uploaded completed work",
 }
 
 

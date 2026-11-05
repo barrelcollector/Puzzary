@@ -36,6 +36,8 @@ The supplied Compose file bind-mounts `./data` into the application at `/data`:
 - `./data/uploads` contains uploaded work and photos;
 - other application-owned files under `/data` survive container replacement.
 
+Completed-work uploads are limited to 10 MB and to JPEG, PNG or WebP content. They are private application data, not static web files. Include `./data/uploads` in backups that need to preserve photo submissions; permanently deleting a submission or puzzle removes its corresponding stored photo files.
+
 `docker compose down` removes containers and the private network but leaves
 these bind-mounted files intact. Do not use `docker compose down --volumes` as
 a data-management strategy, and do not copy a live PostgreSQL data directory as

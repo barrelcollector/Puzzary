@@ -53,6 +53,7 @@ def ensure_schema() -> None:
     dictionary_word_columns = {column["name"] for column in inspector.get_columns("dictionary_words")} if "dictionary_words" in table_names else set()
     dictionary_definition_columns = {column["name"] for column in inspector.get_columns("dictionary_definitions")} if "dictionary_definitions" in table_names else set()
     tag_columns = {column["name"] for column in inspector.get_columns("puzzle_tags")} if "puzzle_tags" in table_names else set()
+    photo_columns = {column["name"] for column in inspector.get_columns("puzzle_photos")} if "puzzle_photos" in table_names else set()
     with engine.begin() as connection:
         if 'permissions_initialized' not in user_columns:
             connection.execute(text('ALTER TABLE users ADD COLUMN permissions_initialized BOOLEAN NOT NULL DEFAULT FALSE'))
@@ -167,6 +168,12 @@ def ensure_schema() -> None:
         if "puzzle_tags" in table_names and "tag_type" not in tag_columns:
             connection.execute(text("ALTER TABLE puzzle_tags ADD COLUMN tag_type VARCHAR(80) NOT NULL DEFAULT 'General'"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzle_tags_tag_type ON puzzle_tags (tag_type)"))
+        if "puzzle_photos" in table_names and "attempt_id" not in photo_columns:
+            connection.execute(text(
+                "ALTER TABLE puzzle_photos ADD COLUMN attempt_id INTEGER "
+                "REFERENCES puzzle_attempts(id) ON DELETE SET NULL"
+            ))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_puzzle_photos_attempt_id ON puzzle_photos (attempt_id)"))
 
         if "word_banks" in table_names:
             word_bank_columns = {column["name"] for column in inspector.get_columns("word_banks")}
