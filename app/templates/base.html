@@ -7,7 +7,7 @@
   {% if print_pdf_css %}
     <style>{{ print_pdf_css | safe }}</style>
   {% else %}
-  <link rel="stylesheet" href="/static/styles.css?v=47">
+  <link rel="stylesheet" href="/static/styles.css?v=48">
   {% endif %}
 </head>
 <body data-signed-in="{{ 'true' if current_user and not current_user.is_guest else 'false' }}">
@@ -24,7 +24,7 @@
         {% if current_user.can_manage %}
           <a class="nav-link" href="/admin">Admin</a>
         {% endif %}
-        <a class="nav-link" href="/account">Account</a>
+        <a class="nav-link" href="/account" data-account-link>Account</a>
         <span class="user-pill">{{ current_user.display_name }}</span>
         <form method="post" action="/logout" class="logout-form">
           <button type="submit" class="ghost-button">Log out</button>
@@ -35,6 +35,7 @@
   <main class="page">
     {% block content %}{% endblock %}
   </main>
+  {% if current_user and not current_user.is_guest and not hide_app_chrome and not print_pdf_css %}<script src="/static/notifications.js?v=1" defer></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

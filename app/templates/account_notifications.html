@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Notifications - Puzzary{% endblock %}
+{% block content %}
+<section class="account-page notification-account" data-notification-settings data-public-key="{{ vapid_public_key }}">
+  <header class="account-page-head">
+    <div><h1>Notifications</h1><p class="muted">New puzzles for {{ current_user.display_name }}</p></div>
+    <a class="ghost-link" href="/account">Back to Account</a>
+  </header>
+  {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
+  {% if https_warning %}<p class="notice danger">Background notifications require HTTPS when Puzzary is not on localhost. In-app notifications still work over HTTP.</p>{% endif %}
+
+  <section class="account-security notification-browser-card">
+    <h2>Enable this browser</h2>
+    <p>Permission is requested only when you press the button. Each browser or device has its own subscription and can be removed independently.</p>
+    <label>Device name<input data-device-name maxlength="120" value="This browser" autocomplete="off"></label>
+    <button type="button" data-enable-notifications>Enable notifications</button>
+    <p class="muted" data-notification-status aria-live="polite">Checking browser support…</p>
+  </section>
+
+  <section class="account-security">
+    <h2>New-puzzle preferences</h2>
+    <form method="post" action="/account/notifications/preferences" class="feed-create-form">
+      <label class="notification-enable-row"><input type="checkbox" name="enabled" value="true" {% if preference.enabled %}checked{% endif %}> Enable new-puzzle notifications</label>
+      <p class="muted">When browser delivery is unavailable or blocked, matching items remain visible in the in-app notification list.</p>
+      {% if puzzle_types %}<fieldset><legend>Puzzle types</legend><div class="feed-options">
+        {% for item in puzzle_types %}<label class="check-row"><input type="checkbox" name="puzzle_types" value="{{ item.slug }}" {% if item.slug in filters.puzzle_types %}checked{% endif %}> {{ item.label }}</label>{% endfor %}
+      </div></fieldset>{% endif %}
+      {% if themes %}<fieldset><legend>Themes</legend><div class="feed-options">
+        {% for item in themes %}<label class="check-row"><input type="checkbox" name="themes" value="{{ item }}" {% if item in filters.themes %}checked{% endif %}> {{ item }}</label>{% endfor %}
+      </div></fieldset>{% endif %}
+      {% if tags %}<fieldset><legend>Tags</legend><div class="feed-options">
+        {% for item in tags %}<label class="check-row"><input type="checkbox" name="tag_ids" value="{{ item.id }}" {% if item.id in filters.tag_ids %}checked{% endif %}> {{ item.label }}</label>{% endfor %}
+      </div></fieldset>{% endif %}
+      {% if creators %}<fieldset><legend>Creators</legend><div class="feed-options">
+        {% for item in creators %}<label class="check-row"><input type="checkbox" name="creator_ids" value="{{ item.id }}" {% if item.id in filters.creator_ids %}checked{% endif %}> {{ item.display_name }}</label>{% endfor %}
+      </div></fieldset>{% endif %}
+      <button type="submit">Save preferences</button>
+    </form>
+  </section>
+
+  <section class="account-security">
+    <h2>Browsers and devices</h2>
+    {% if subscriptions %}<ul class="feed-token-list">
+      {% for subscription in subscriptions %}<li class="feed-token-card">
+        <div><h3>{{ subscription.device_name }}</h3><small>Added {{ subscription.created_at.strftime('%Y-%m-%d') }}{% if subscription.last_success_at %} · Last delivered {{ subscription.last_success_at.strftime('%Y-%m-%d %H:%M') }} UTC{% endif %}{% if subscription.last_error %} · Last delivery failed{% endif %}</small></div>
+        {% if subscription.revoked_at %}<span class="library-progress-status">Disabled</span>{% else %}<form method="post" action="/account/notifications/subscriptions/{{ subscription.id }}/revoke"><button type="submit" class="danger-button">Disable</button></form>{% endif %}
+      </li>{% endfor %}
+    </ul>{% else %}<p>No browsers are enabled.</p>{% endif %}
+  </section>
+
+  <section class="account-security">
+    <div class="notification-history-head"><h2>Recent notifications</h2>{% if notifications %}<form method="post" action="/account/notifications/read"><button type="submit" class="ghost-button">Mark all read</button></form>{% endif %}</div>
+    {% if notifications %}<ul class="notification-history">
+      {% for item in notifications %}<li class="{% if not item.read_at %}unread{% endif %}"><a href="/puzzles/{{ item.puzzle_id }}"><strong>{{ item.title }}</strong><span>{{ item.body }}</span><small>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</small></a></li>{% endfor %}
+    </ul>{% else %}<p>No notifications yet.</p>{% endif %}
+  </section>
+</section>
+{% endblock %}
+{% block scripts %}{% endblock %}

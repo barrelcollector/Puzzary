@@ -108,6 +108,15 @@ class User(Base):
     feed_tokens: Mapped[list[PuzzleFeedToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    notification_preference: Mapped[PuzzleNotificationPreference | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    push_subscriptions: Mapped[list[PushSubscription]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    puzzle_notifications: Mapped[list[PuzzleNotification]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class PuzzleFeedToken(Base):
@@ -163,6 +172,90 @@ class Puzzle(Base):
     group_solves: Mapped[list[GroupSolve]] = relationship(cascade="all, delete-orphan")
     guest_links: Mapped[list[PuzzleGuestLink]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
     series_entries: Mapped[list[PuzzleSeriesEntry]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    notifications: Mapped[list[PuzzleNotification]] = relationship(
+        back_populates="puzzle", cascade="all, delete-orphan"
+    )
+
+
+class PuzzleNotificationPreference(Base):
+    __tablename__ = "puzzle_notification_preferences"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    filters: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="notification_preference")
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    endpoint: Mapped[str] = mapped_column(Text)
+    p256dh: Mapped[str] = mapped_column(Text)
+    auth: Mapped[str] = mapped_column(Text)
+    device_name: Mapped[str] = mapped_column(String(120), default="Browser")
+    user_agent: Mapped[str] = mapped_column(String(300), default="")
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="push_subscriptions")
+    deliveries: Mapped[list[PushDelivery]] = relationship(back_populates="subscription", cascade="all, delete-orphan")
+
+
+class PuzzlePublicationEvent(Base):
+    __tablename__ = "puzzle_publication_events"
+
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id", ondelete="CASCADE"), primary_key=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PuzzleNotification(Base):
+    __tablename__ = "puzzle_notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "puzzle_id", "event_type", name="uq_puzzle_notification_event"),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(40), default="published")
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(String(300), default="")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user: Mapped[User] = relationship(back_populates="puzzle_notifications")
+    puzzle: Mapped[Puzzle] = relationship(back_populates="notifications")
+    deliveries: Mapped[list[PushDelivery]] = relationship(back_populates="notification", cascade="all, delete-orphan")
+
+
+class PushDelivery(Base):
+    __tablename__ = "push_deliveries"
+    __table_args__ = (
+        UniqueConstraint("notification_id", "subscription_id", name="uq_push_delivery_notification_subscription"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    notification_id: Mapped[str] = mapped_column(ForeignKey("puzzle_notifications.id", ondelete="CASCADE"), index=True)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("push_subscriptions.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    notification: Mapped[PuzzleNotification] = relationship(back_populates="deliveries")
+    subscription: Mapped[PushSubscription] = relationship(back_populates="deliveries")
 
 
 class PuzzleSeries(Base):

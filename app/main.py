@@ -147,6 +147,8 @@ from app.publishing import router as publishing_router
 app.include_router(publishing_router)
 from app.feeds import router as feeds_router
 app.include_router(feeds_router)
+from app import notifications as puzzle_notifications
+app.include_router(puzzle_notifications.router)
 from app.groups import router as groups_router
 app.include_router(groups_router)
 from app.permission_admin import router as permission_router
@@ -253,6 +255,8 @@ async def startup() -> None:
         seed_word_banks(db)
         seed_word_definitions(db)
         apply_due_auto_archives(db)
+        puzzle_notifications.ensure_vapid_keys(db)
+        puzzle_notifications.apply_due_publication_notifications(db)
         run_due_dictionary_import_sources(db)
         effective_base_url = app_base_url(db)
         effective_https = effective_base_url.lower().startswith("https://")
@@ -270,6 +274,7 @@ async def startup() -> None:
             logging.getLogger("puzzary.transport").warning(warning)
     app.state.auto_archive_task = asyncio.create_task(auto_archive_loop())
     app.state.dictionary_sync_task = asyncio.create_task(dictionary_import_source_loop())
+    app.state.notification_task = asyncio.create_task(puzzle_notifications.notification_loop())
 
 
 @app.on_event("shutdown")
@@ -280,6 +285,9 @@ async def shutdown() -> None:
     sync_task = getattr(app.state, "dictionary_sync_task", None)
     if sync_task is not None:
         sync_task.cancel()
+    notification_task = getattr(app.state, "notification_task", None)
+    if notification_task is not None:
+        notification_task.cancel()
 
 
 def normalize_base_url(value: str) -> str:
@@ -853,8 +861,8 @@ def write_manual_puzzle(
     db.flush()
     for index, hint_text in enumerate(payload.hints, start=1):
         db.add(PuzzleHint(puzzle_id=puzzle.id, order=index, text=hint_text))
+    after_state = puzzle_publication_state(puzzle)
     if creator is not None:
-        after_state = puzzle_publication_state(puzzle)
         action = None
         if after_state == "scheduled":
             action = "puzzle.rescheduled" if before_state == "scheduled" else "puzzle.scheduled"
@@ -869,6 +877,8 @@ def write_manual_puzzle(
                 "state": after_state,
                 "publish_at": puzzle.publish_at.isoformat() if puzzle.publish_at else None,
             })
+    if after_state == "published" and (creating or before_state in {"draft", "scheduled"}):
+        puzzle_notifications.queue_puzzle_publication(db, puzzle)
     db.commit()
     db.refresh(puzzle)
     return puzzle
@@ -1064,6 +1074,8 @@ def import_portable_puzzles(
         for hint_index, hint_text in enumerate(item.get("hints") if isinstance(item.get("hints"), list) else [], start=1):
             if str(hint_text).strip():
                 db.add(PuzzleHint(puzzle_id=puzzle.id, order=hint_index, text=str(hint_text).strip()))
+        if not draft:
+            puzzle_notifications.queue_puzzle_publication(db, puzzle)
         result["imported"] += 1
         row["local_id"] = puzzle.id
     if not dry_run:
@@ -2124,6 +2136,7 @@ def publish_puzzle_now(db: Session, actor: User, puzzle: Puzzle) -> None:
     audit(db, actor, "puzzle", puzzle.id, "puzzle.published", before, {
         "state": "published", "publish_at": None,
     })
+    puzzle_notifications.queue_puzzle_publication(db, puzzle)
 
 
 def apply_due_auto_archives(db: Session) -> int:
@@ -3414,13 +3427,17 @@ async def web_generate_puzzle(
         ),
         db,
         creator=user,
+        notify=False,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
-    if saved_puzzle and 'auto_archive_at' in form and not puzzle_is_draft(saved_puzzle):
-        archive_at = parse_local_datetime(auto_archive_at or '', "Archive date/time")
-        if archive_at and saved_puzzle.publish_at and archive_at <= normalize_publish_at(saved_puzzle.publish_at):
-            raise HTTPException(422, "Auto-archive must be after scheduled publication")
-        saved_puzzle.auto_archive_at = archive_at
+    if saved_puzzle is not None:
+        if 'auto_archive_at' in form and not puzzle_is_draft(saved_puzzle):
+            archive_at = parse_local_datetime(auto_archive_at or '', "Archive date/time")
+            if archive_at and saved_puzzle.publish_at and archive_at <= normalize_publish_at(saved_puzzle.publish_at):
+                raise HTTPException(422, "Auto-archive must be after scheduled publication")
+            saved_puzzle.auto_archive_at = archive_at
+        if puzzle_is_published(saved_puzzle):
+            puzzle_notifications.queue_puzzle_publication(db, saved_puzzle)
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -4576,6 +4593,7 @@ async def admin_generate_puzzle(
         ),
         db,
         creator=user,
+        notify=False,
     )
     saved_puzzle = db.get(Puzzle, puzzle.id)
     if saved_puzzle is not None:
@@ -4588,6 +4606,8 @@ async def admin_generate_puzzle(
             if archive_at and saved_puzzle.publish_at and archive_at <= normalize_publish_at(saved_puzzle.publish_at):
                 raise HTTPException(422, "Auto-archive must be after scheduled publication")
             saved_puzzle.auto_archive_at = archive_at
+        if puzzle_is_published(saved_puzzle):
+            puzzle_notifications.queue_puzzle_publication(db, saved_puzzle)
         db.commit()
     return RedirectResponse(url=f"/puzzles/{puzzle.id}", status_code=303)
 
@@ -6279,7 +6299,13 @@ def api_delete_word_bank_word(
     return {"deleted": True, "id": link_id}
 
 
-def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: User | None = None) -> PuzzleSummary:
+def create_puzzle_record(
+    payload: PuzzleGenerateRequest,
+    db: Session,
+    creator: User | None = None,
+    *,
+    notify: bool = True,
+) -> PuzzleSummary:
     puzzle_type = get_puzzle_type(payload.puzzle_type)
     if puzzle_type is None:
         raise HTTPException(status_code=400, detail="Unsupported puzzle type")
@@ -6357,6 +6383,8 @@ def create_puzzle_record(payload: PuzzleGenerateRequest, db: Session, creator: U
         })
     for index, hint_text in enumerate(generated.hints, start=1):
         db.add(PuzzleHint(puzzle_id=puzzle.id, order=index, text=hint_text))
+    if notify and not draft and schedule_at is None:
+        puzzle_notifications.queue_puzzle_publication(db, puzzle)
     db.commit()
     db.refresh(puzzle)
     return serialize_puzzle(puzzle, db)

@@ -29,6 +29,7 @@ can use the same API for automation and delivery.
 - Interactive word-search highlighting
 - Photo submission and administrator review workflow
 - Private, filterable RSS and Atom puzzle feeds with revocable per-user URLs
+- Opt-in in-app and background browser notifications for newly available puzzles
 - Flexible authenticated API for external clients and automation
 - Printable puzzle payloads and PDFs for publishing integrations
 
@@ -116,6 +117,13 @@ Users can create private RSS or Atom subscriptions from **Account -> Manage
 puzzle feeds**. Feed URLs are independently revocable credentials and can be
 filtered by puzzle type, theme, tag, or creator. See [Private RSS and Atom
 feeds](docs/rss-atom-feeds.md) for security, contents, and reader setup.
+
+Users can also enable per-browser new-puzzle notifications from **Account ->
+Manage notifications**. Subscriptions support type, theme, tag, and creator
+filters, with an in-app fallback when browser permission or Web Push is not
+available. See [Browser notifications](docs/browser-notifications.md) for
+publication behavior, HTTPS requirements, device management, and VAPID key
+handling.
 
 ## API
 

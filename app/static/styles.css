@@ -36,6 +36,18 @@
 .feed-token-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .feed-token-actions form { margin: 0; }
 .feed-token-actions button { width: auto; white-space: nowrap; }
+.notification-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 5px; padding: 0 4px; border-radius: 10px; background: var(--danger); color: var(--danger-bg); font-size: 11px; font-weight: 700; }
+.notification-browser-card label { max-width: 480px; }
+.notification-enable-row { display: flex; align-items: center; gap: 10px; font-weight: 650; }
+.notification-enable-row input { width: 20px; height: 20px; margin: 0; }
+.notification-history-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.notification-history-head h2 { margin: 0; }
+.notification-history-head form, .notification-history-head button { width: auto; margin: 0; }
+.notification-history { list-style: none; padding: 0; }
+.notification-history li { border-bottom: 1px solid var(--line); }
+.notification-history li.unread { border-left: 4px solid var(--accent); padding-left: 12px; }
+.notification-history a { display: grid; gap: 5px; padding: 15px 0; color: var(--ink); text-decoration: none; }
+.notification-history span, .notification-history small { color: var(--muted); }
 .library-status-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .library-progress-status { display: inline-block; font-size: 12px; font-weight: 650; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; background: #f1f1ef; color: #555; }
 .library-progress-status.status-completed { color: #175f50; background: #e3f2ec; border-color: #9bc7b8; }
@@ -55,6 +67,7 @@
   .account-recent li > div:last-child { text-align: left; }
   .feed-copy-row, .feed-token-card, .feed-token-actions { flex-direction: column; }
   .feed-copy-row button, .feed-token-actions, .feed-token-actions form, .feed-token-actions button { width: 100%; }
+  .notification-history-head { align-items: start; flex-direction: column; }
 }
 .users-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .users-toolbar h1, .users-toolbar h2 { margin: 0; }
