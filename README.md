@@ -80,6 +80,8 @@ For Cloudflare Tunnel or reverse-proxy use, configure the public URL that printe
 APP_BASE_URL=https://puzzary.example.com docker compose up -d --build
 ```
 
+HTTP remains the default. For native certificate/key HTTPS, trusted reverse-proxy headers, secure session cookies, redirects, WebSockets, Docker mounts, and renewal guidance, follow [Optional HTTPS and trusted reverse proxies](docs/https-tls.md).
+
 Admin panel:
 
 ```text

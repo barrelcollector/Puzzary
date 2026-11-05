@@ -1449,6 +1449,10 @@
       {% if request.query_params.get("error") %}<p class="notice danger">{{ request.query_params.get("error") }}</p>{% endif %}
       {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
 
+      {% for warning in app_settings.transport.warnings %}
+      <p class="notice danger" role="alert">{{ warning }}</p>
+      {% endfor %}
+
       <form class="panel narrow-panel" method="post" action="/admin/settings">
         <h2>Public Base URL</h2>
         <p class="muted">Use the Cloudflare Tunnel URL here so printed QR codes open the public Puzzary address instead of the local LAN address.</p>
@@ -1457,6 +1461,15 @@
           <input name="public_base_url" value="{{ app_settings.public_base_url }}" placeholder="https://puzzary.example.com" {% if not current_user.can('settings.manage') %}readonly{% endif %}>
           <small class="muted">Current default from environment: {{ app_settings.default_base_url }}</small>
         </label>
+
+        <h2>Transport Security</h2>
+        <div class="list compact">
+          <div class="row"><span>Native TLS</span><strong>{{ "Enabled" if app_settings.transport.native_tls else "Off" }}</strong></div>
+          <div class="row"><span>Trusted proxy ranges</span><strong>{{ app_settings.transport.trusted_proxy_count }}</strong></div>
+          <div class="row"><span>HTTPS redirect</span><strong>{{ "Enabled" if app_settings.transport.https_redirect else "Off" }}</strong></div>
+          <div class="row"><span>Secure session cookies</span><strong>{{ "Enabled" if app_settings.transport.secure_cookies else "Off" }}</strong></div>
+        </div>
+        <p class="muted">Transport settings come from environment variables and require an application restart. Certificate paths and secrets are never displayed here.</p>
 
         <h2>Puzzle Modules</h2>
         <p class="muted">Disable a module to remove it from generation screens and API generation while keeping existing puzzles playable.</p>

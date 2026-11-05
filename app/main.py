@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import re
 import uuid
@@ -32,10 +33,12 @@ from jinja2 import TemplateNotFound
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
+from app.transport import load_transport_config
 from app.clues import properties_with_clues, stored_definition_clues
 from app.activity_events import event_summary, record_progress_transition, record_puzzle_event
 from app.database import SessionLocal, ensure_schema, get_db, init_db
@@ -111,6 +114,7 @@ from app.schemas import (
 
 
 DEFAULT_APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
+TRANSPORT_CONFIG = load_transport_config()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/data/uploads"))
 PHOTO_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 PHOTO_TYPES = {
@@ -127,7 +131,15 @@ app = FastAPI(
     description="An extensible puzzle and game library with a flexible API and plugin-based game system.",
     version="0.1.0",
 )
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", max_age=60 * 60 * 24 * 7)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    same_site="lax",
+    max_age=60 * 60 * 24 * 7,
+    https_only=TRANSPORT_CONFIG.secure_cookies,
+)
+if TRANSPORT_CONFIG.https_redirect:
+    app.add_middleware(HTTPSRedirectMiddleware)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[appearance_template_context])
 templates.env.globals['can_owned'] = can_owned
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -240,6 +252,20 @@ async def startup() -> None:
         seed_word_definitions(db)
         apply_due_auto_archives(db)
         run_due_dictionary_import_sources(db)
+        effective_base_url = app_base_url(db)
+        effective_https = effective_base_url.lower().startswith("https://")
+        if effective_https and not TRANSPORT_CONFIG.secure_cookies:
+            logging.getLogger("puzzary.transport").warning(
+                "The effective public base URL is HTTPS but session cookies are not Secure. "
+                "Set APP_BASE_URL to the HTTPS origin or PUZZARY_SECURE_COOKIES=true, then restart Puzzary."
+            )
+        if (TRANSPORT_CONFIG.native_tls or TRANSPORT_CONFIG.https_redirect) and not effective_https:
+            logging.getLogger("puzzary.transport").warning(
+                "TLS or HTTPS redirect is enabled while the saved public base URL is HTTP. "
+                "Update Admin > Settings to prevent mixed-content links."
+            )
+        for warning in TRANSPORT_CONFIG.warnings:
+            logging.getLogger("puzzary.transport").warning(warning)
     app.state.auto_archive_task = asyncio.create_task(auto_archive_loop())
     app.state.dictionary_sync_task = asyncio.create_task(dictionary_import_source_loop())
 
@@ -259,8 +285,17 @@ def normalize_base_url(value: str) -> str:
     if not text:
         return ""
     parsed = urlparse(text)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("Base URL must start with http:// or https:// and include a host.")
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Base URL must be an HTTP or HTTPS origin without credentials, path, query, or fragment.")
     return text
 
 
@@ -3480,6 +3515,14 @@ def admin_context(
     dashboard_review = dashboard_review_context(db, puzzles, dictionary_words, all_word_banks, tags, bank_counts, tag_usage) if section == "dashboard" else {}
     series = db.scalars(select(PuzzleSeries).order_by(desc(PuzzleSeries.updated_at), PuzzleSeries.title)).all()
     series = [item for item in series if series_admin_bypass(user, item)]
+    effective_base_url = app_base_url(db)
+    transport_warnings = list(TRANSPORT_CONFIG.warnings)
+    if effective_base_url.lower().startswith("https://") and not TRANSPORT_CONFIG.secure_cookies:
+        transport_warnings.append(
+            "The public URL is HTTPS but session cookies are not Secure. Set APP_BASE_URL to this HTTPS origin or PUZZARY_SECURE_COOKIES=true, then restart Puzzary."
+        )
+    if (TRANSPORT_CONFIG.native_tls or TRANSPORT_CONFIG.https_redirect) and not effective_base_url.lower().startswith("https://"):
+        transport_warnings.append("TLS or HTTPS redirect is enabled, but the saved public base URL still uses HTTP.")
     return {
         "request": request,
         "current_user": user,
@@ -3500,9 +3543,16 @@ def admin_context(
             and plugin.supports_print and not plugin.digital_only
         ] if section == "publishing" else [],
         "app_settings": {
-            "public_base_url": app_base_url(db),
+            "public_base_url": effective_base_url,
             "default_base_url": DEFAULT_APP_BASE_URL,
             "disabled_puzzle_types": sorted(disabled_puzzle_type_slugs(db)),
+            "transport": {
+                "native_tls": TRANSPORT_CONFIG.native_tls,
+                "trusted_proxy_count": len(TRANSPORT_CONFIG.trusted_proxies),
+                "https_redirect": TRANSPORT_CONFIG.https_redirect,
+                "secure_cookies": TRANSPORT_CONFIG.secure_cookies,
+                "warnings": transport_warnings,
+            },
         },
         "puzzles": puzzles,
         "live_puzzles": [puzzle for puzzle in puzzles if puzzle.archived_at is None],

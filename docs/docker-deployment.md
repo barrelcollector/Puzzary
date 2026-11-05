@@ -28,6 +28,8 @@ and change its password immediately. Set `APP_BASE_URL` to the externally
 reachable HTTPS origin before printing QR codes or using Puzzary behind a
 reverse proxy.
 
+HTTP remains the compatibility default. Public deployments should follow the [HTTPS and trusted reverse-proxy guide](https-tls.md), including its secure-cookie, proxy allowlist, WebSocket, certificate-mount, and renewal checks.
+
 ## Persistent data
 
 The supplied Compose file bind-mounts `./data` into the application at `/data`:
