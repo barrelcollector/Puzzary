@@ -4,6 +4,12 @@
   data-words="{{ play_payload.words | join(',') }}"
   data-found-words="{{ ((progress_found_words | default([])) + (play_payload.gimmes.words | default([]))) | unique | join(',') }}"
   data-auto-confirm="{{ 'true' if play_payload.settings.auto_confirm | default(true) else 'false' }}"
+  data-decoy-count="{{ play_payload.settings.decoy_count | default(0) }}"
+  data-penalty-mode="{{ play_payload.settings.penalty_mode | default('none') }}"
+  data-penalty-scope="{{ play_payload.settings.penalty_scope | default('individual') }}"
+  data-penalty-value="{{ play_payload.settings.penalty_value | default(1) }}"
+  data-attempt-limit="{{ play_payload.settings.attempt_limit | default(3) }}"
+  data-initial-penalty='{{ progress_payload.get("penalty", {}) | tojson }}'
   data-progress-url="/api/puzzles/{{ puzzle.id }}/progress"
   style="--grid-size: {{ play_payload.grid | length }}; --word-grid-width: {% if play_payload.grid | length >= 22 %}760px{% elif play_payload.grid | length >= 18 %}680px{% else %}520px{% endif %}; --word-grid-font: {% if play_payload.grid | length >= 22 %}20px{% elif play_payload.grid | length >= 18 %}20px{% else %}22px{% endif %}"
 >
@@ -16,6 +22,9 @@
     {% endfor %}
   {% endfor %}
 </div>
+{% if play_payload.settings.decoy_count | default(0) %}
+  <p class="muted"><strong>Decoys are active.</strong> Complete false words and one-character-omission fake-outs are not answers.</p>
+{% endif %}
 <h2>Words</h2>
 <div class="word-list" id="word-list">
   {% for word in play_payload.words %}
@@ -26,6 +35,7 @@
   {% endfor %}
 </div>
 <p class="muted" id="word-search-status">Drag across a word, or choose its first and last letters with Enter or Space.</p>
+<p class="word-search-penalty is-hidden" id="word-search-penalty" role="status" aria-live="polite"></p>
 {% if play_payload.settings.auto_confirm | default(true) == false %}
   <div class="action-row">
     <button type="button" class="ghost-button" id="word-search-check">Check Answers</button>

@@ -1684,6 +1684,19 @@ legend {
   color: #151515;
 }
 
+.word-grid.penalty-locked button {
+  cursor: not-allowed;
+  opacity: .72;
+}
+
+.word-search-penalty {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  font-weight: 750;
+}
+
 .word-list {
   display: flex;
   flex-wrap: wrap;

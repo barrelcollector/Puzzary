@@ -512,10 +512,15 @@ def snapshot(db, group, user):
                 'hints': 0, 'reveals': 0, 'checks': 0, 'clues': 0, 'current': 0, 'last_at': owner.get('at')}
         contributor_data[actor]['current'] += 1
     transfer_candidates = [member.user_id for member, _account in host_candidates(db, group)] if can_manage_group(user, group) else []
+    public_state = deepcopy(group.state)
+    has_player_penalties = 'player_penalties' in public_state
+    player_penalties = public_state.pop('player_penalties', {})
+    if has_player_penalties and isinstance(player_penalties, dict):
+        public_state['current_penalty'] = player_penalties.get(str(user.id), {})
     return {'id': group.id, 'code': group.code, 'puzzle_id': group.puzzle_id,
             'host_id': group.host_id, 'user_id': user.id, 'revision': group.revision,
             'puzzle_epoch': group.puzzle_started_revision,
-            'state': group.state, 'found_count': found, 'expected_count': total,
+            'state': public_state, 'found_count': found, 'expected_count': total,
             'context': context,
             'completion_message': puzzle.completion_message or '',
             'completed': total > 0 and found == total,

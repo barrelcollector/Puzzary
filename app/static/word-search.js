@@ -4,6 +4,7 @@
 
   const wordList = document.getElementById("word-list");
   const status = document.getElementById("word-search-status");
+  const penaltyStatus = document.getElementById("word-search-penalty");
   const checkButton = document.getElementById("word-search-check");
   const clearGuessesButton = document.getElementById("word-search-clear-guesses");
   const revealButton = document.getElementById("reveal-solution");
@@ -11,6 +12,10 @@
   const found = new Set((grid.dataset.foundWords || "").split(",").map((word) => word.trim().toUpperCase()).filter(Boolean));
   const progressUrl = grid.dataset.progressUrl;
   const autoConfirm = grid.dataset.autoConfirm !== "false";
+  const penaltyMode = grid.dataset.penaltyMode || "none";
+  const penaltyScope = grid.dataset.penaltyScope || "individual";
+  const attemptLimit = Number(grid.dataset.attemptLimit || 3);
+  const minimumSelectionLength = Math.min(2, ...Array.from(words, word => word.length));
   const remote = window.PuzzaryGroup || window.PuzzarySolo;
   const cells = Array.from(grid.querySelectorAll("button[data-letter]"));
   const cellsByCoord = new Map(cells.map((cell) => [`${cell.dataset.x},${cell.dataset.y}`, cell]));
@@ -27,6 +32,32 @@
   let celebrationReady = false;
   let suppressCelebration = false;
   let soundedFound = new Set(found);
+  let penaltyLocked = false;
+  let initialPenalty = {};
+
+  try {
+    initialPenalty = JSON.parse(grid.dataset.initialPenalty || "{}");
+  } catch (_error) {
+    initialPenalty = {};
+  }
+
+  function renderPenalty(state = {}) {
+    const penalty = state.current_penalty || state.penalty || initialPenalty || {};
+    const feedback = state.last_selection_feedback || "";
+    penaltyLocked = Boolean(penalty.locked);
+    grid.classList.toggle("penalty-locked", penaltyLocked);
+    cells.forEach(cell => cell.setAttribute("aria-disabled", penaltyLocked ? "true" : "false"));
+    if (!penaltyStatus) return;
+    const parts = [];
+    if (penaltyMode === "mistake_counter") parts.push(`Mistakes: ${Number(penalty.mistakes || 0)}`);
+    if (penaltyMode === "score_deduction") parts.push(`Score: ${Number(penalty.score ?? 100)} (-${Number(penalty.score_deduction || 0)})`);
+    if (penaltyMode === "time_penalty") parts.push(`Time penalty: ${Number(penalty.time_penalty_seconds || 0)} seconds`);
+    if (penaltyMode === "limited_attempts") parts.push(`Incorrect attempts remaining: ${Number(penalty.attempts_remaining ?? attemptLimit)}`);
+    if (parts.length && window.PuzzaryGroup) parts.push(penaltyScope === "group" ? "shared by group" : "your count");
+    if (feedback) parts.push(feedback);
+    penaltyStatus.textContent = parts.join(". ");
+    penaltyStatus.classList.toggle("is-hidden", parts.length === 0);
+  }
 
   try {
     placements = JSON.parse(grid.dataset.placements || "[]");
@@ -306,6 +337,16 @@
 
   function finishSelection() {
     if (!selected.length) return;
+    if (penaltyLocked) {
+      clearSelected();
+      if (status) status.textContent = "No incorrect-selection attempts remain.";
+      return;
+    }
+    if (selected.length < minimumSelectionLength) {
+      clearSelected();
+      if (status) status.textContent = "Selection was too short and was ignored without a penalty.";
+      return;
+    }
     if (!autoConfirm || remote) {
       addGuess();
       return;
@@ -417,6 +458,7 @@
   found.forEach(markStoredWord);
   markGimmeCells();
   syncFoundWords();
+  renderPenalty({penalty: initialPenalty});
   celebrationReady = true;
 
   if (checkButton) checkButton.addEventListener("click", checkGuesses);
@@ -453,6 +495,7 @@
       markGimmeCells();
       syncFoundWords();
       if (status && (guesses.length || rejectedGuesses.length)) status.textContent = `${found.size} of ${words.size} words found. ${guesses.length} selections ready to check. ${rejectedGuesses.length} incorrect selections.`;
+      renderPenalty(state);
     }
   });
 })();

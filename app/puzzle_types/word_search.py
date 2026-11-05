@@ -16,6 +16,9 @@ DIRECTION_PRESETS: dict[str, list[tuple[int, int]]] = {
     "all": [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)],
 }
 
+PENALTY_MODES = {"none", "mistake_counter", "score_deduction", "time_penalty", "limited_attempts"}
+PENALTY_SCOPES = {"individual", "group"}
+
 
 def normalize_word(value: str) -> str:
     return "".join(ch for ch in str(value).upper() if ch.isalnum())
@@ -82,6 +85,143 @@ def direction_options(options: dict[str, Any]) -> tuple[str, list[tuple[int, int
     return preset, DIRECTION_PRESETS[preset]
 
 
+def penalty_options(options: dict[str, Any]) -> dict[str, Any]:
+    mode = str(options.get("penalty_mode", "none")).strip().lower()
+    if mode not in PENALTY_MODES:
+        mode = "none"
+    scope = str(options.get("penalty_scope", "individual")).strip().lower()
+    if scope not in PENALTY_SCOPES:
+        scope = "individual"
+    return {
+        "penalty_mode": mode,
+        "penalty_scope": scope,
+        "penalty_value": integer_option(options, "penalty_value", 1, 1, 3600),
+        "attempt_limit": integer_option(options, "attempt_limit", 3, 1, 100),
+    }
+
+
+def parse_optional_words(value: Any) -> list[str]:
+    raw_parts = re.split(r"[\n,;]+", str(value or ""))
+    return list(dict.fromkeys(normalize_word(part) for part in raw_parts if normalize_word(part)))
+
+
+def placement_cells(placement: dict, text_key: str = "word") -> frozenset[tuple[int, int]]:
+    text = str(placement.get(text_key, ""))
+    x, y = map(int, placement.get("start", [0, 0]))
+    dx, dy = map(int, placement.get("direction", [0, 0]))
+    return frozenset((x + index * dx, y + index * dy) for index in range(len(text)))
+
+
+def placement_signature(placement: dict, text_key: str = "word") -> tuple[tuple[int, int], ...]:
+    return tuple(sorted(placement_cells(placement, text_key)))
+
+
+def word_occurrences(grid: list[str] | list[list[str]], word: str) -> list[dict]:
+    rows = ["".join(row) if isinstance(row, list) else str(row) for row in grid]
+    height = len(rows)
+    width = len(rows[0]) if rows else 0
+    directions = DIRECTION_PRESETS["all"]
+    matches: dict[tuple[tuple[int, int], ...], dict] = {}
+    for y in range(height):
+        for x in range(width):
+            for dx, dy in directions:
+                end_x = x + dx * (len(word) - 1)
+                end_y = y + dy * (len(word) - 1)
+                if not (0 <= end_x < width and 0 <= end_y < height):
+                    continue
+                text = "".join(rows[y + dy * index][x + dx * index] for index in range(len(word)))
+                if text != word:
+                    continue
+                placement = {"word": word, "start": [x, y], "direction": [dx, dy]}
+                matches.setdefault(placement_signature(placement), placement)
+    return list(matches.values())
+
+
+def place_text(
+    grid: list[list[str]], text: str, directions: list[tuple[int, int]], rng: random.Random,
+    allow_crossings: bool,
+) -> dict | None:
+    size = len(grid)
+    for _ in range(700):
+        dx, dy = rng.choice(directions)
+        min_x, max_x = coordinate_bounds(len(text), dx, size)
+        min_y, max_y = coordinate_bounds(len(text), dy, size)
+        x = rng.randint(min_x, max_x)
+        y = rng.randint(min_y, max_y)
+        coords = [(x + index * dx, y + index * dy) for index in range(len(text))]
+        if allow_crossings:
+            fits = all(grid[cy][cx] in {"", letter} for (cx, cy), letter in zip(coords, text))
+        else:
+            fits = all(grid[cy][cx] == "" for cx, cy in coords)
+        if not fits:
+            continue
+        for (cx, cy), letter in zip(coords, text):
+            grid[cy][cx] = letter
+        return {"word": text, "start": [x, y], "direction": [dx, dy]}
+    return None
+
+
+def decoy_directions(options: dict[str, Any], target_directions: list[tuple[int, int]]) -> tuple[str, list[tuple[int, int]]]:
+    difficulty = str(options.get("decoy_difficulty", "medium")).strip().lower()
+    if difficulty == "easy":
+        return difficulty, DIRECTION_PRESETS["horizontal_vertical"]
+    if difficulty == "hard":
+        return difficulty, DIRECTION_PRESETS["all"]
+    return "medium", target_directions
+
+
+def near_miss_candidates(words: list[str], difficulty: str) -> list[dict]:
+    candidates = []
+    for target in words:
+        if len(target) < 4:
+            continue
+        indexes = list(range(len(target)))
+        if difficulty == "easy":
+            indexes = [0, len(target) - 1]
+        elif difficulty == "hard":
+            indexes = [index for index in indexes if 0 < index < len(target) - 1] or indexes
+        for index in indexes:
+            text = target[:index] + target[index + 1:]
+            candidates.append({
+                "kind": "near_miss", "text": text, "target_word": target,
+                "omitted_letter": target[index], "omitted_index": index,
+            })
+    unique = {}
+    for candidate in candidates:
+        unique.setdefault(candidate["text"], candidate)
+    return list(unique.values())
+
+
+def parse_manual_near_misses(value: Any, target_words: list[str]) -> list[dict]:
+    result = []
+    seen = set()
+    targets = set(target_words)
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s*(?:->|:)\s*", line, maxsplit=1)
+        if len(parts) != 2:
+            raise ValueError("Near misses must use TARGET -> FAKE, one per line.")
+        target, fake = normalize_word(parts[0]), normalize_word(parts[1])
+        if target not in targets:
+            raise ValueError(f"Near-miss target is not a listed word: {target or parts[0]}")
+        omitted = [index for index in range(len(target)) if target[:index] + target[index + 1:] == fake]
+        if len(fake) != len(target) - 1 or not omitted:
+            raise ValueError(f"Near miss {fake or parts[1]} must omit exactly one character from {target}.")
+        if fake in targets:
+            raise ValueError(f"Near miss {fake} is also a listed target word.")
+        if fake in seen:
+            continue
+        index = omitted[0]
+        result.append({
+            "kind": "near_miss", "text": fake, "target_word": target,
+            "omitted_letter": target[index], "omitted_index": index,
+        })
+        seen.add(fake)
+    return result
+
+
 def coordinate_bounds(length: int, delta: int, size: int) -> tuple[int, int]:
     if delta > 0:
         return 0, size - length
@@ -116,6 +256,70 @@ def count_progress(progress_payload: dict, solution_payload: dict) -> tuple[int,
     return len(expected & found), expected_count
 
 
+def default_penalty_state(settings: dict) -> dict[str, Any]:
+    limit = int(settings.get("attempt_limit", 3))
+    return {
+        "mode": settings.get("penalty_mode", "none"),
+        "scope": settings.get("penalty_scope", "individual"),
+        "mistakes": 0,
+        "score": 100,
+        "score_deduction": 0,
+        "time_penalty_seconds": 0,
+        "attempts_used": 0,
+        "attempts_remaining": limit,
+        "locked": False,
+    }
+
+
+def penalty_state_for(result: dict, action: dict, settings: dict, create: bool = False) -> tuple[dict, str | None]:
+    is_group = "participants" in action
+    scope = settings.get("penalty_scope", "individual")
+    if not is_group or scope == "group":
+        state = dict(result.get("penalty", {}))
+        if create and not state:
+            state = default_penalty_state(settings)
+            result["penalty"] = state
+        return state, "penalty"
+    actor = str(action.get("_actor", ""))
+    player_states = dict(result.get("player_penalties", {}))
+    state = dict(player_states.get(actor, {}))
+    if create and not state:
+        state = default_penalty_state(settings)
+        player_states[actor] = state
+        result["player_penalties"] = player_states
+    return state, actor
+
+
+def save_penalty_state(result: dict, action: dict, settings: dict, state: dict, key: str | None) -> None:
+    if key == "penalty":
+        result["penalty"] = state
+    elif key is not None:
+        player_states = dict(result.get("player_penalties", {}))
+        player_states[key] = state
+        result["player_penalties"] = player_states
+
+
+def apply_selection_penalty(result: dict, action: dict, settings: dict, count: int) -> dict:
+    mode = settings.get("penalty_mode", "none")
+    if mode == "none" or count <= 0:
+        return {}
+    state, key = penalty_state_for(result, action, settings, create=True)
+    state["mistakes"] = int(state.get("mistakes", 0)) + count
+    value = int(settings.get("penalty_value", 1))
+    if mode == "score_deduction":
+        state["score_deduction"] = int(state.get("score_deduction", 0)) + value * count
+        state["score"] = max(0, 100 - state["score_deduction"])
+    elif mode == "time_penalty":
+        state["time_penalty_seconds"] = int(state.get("time_penalty_seconds", 0)) + value * count
+    elif mode == "limited_attempts":
+        limit = int(settings.get("attempt_limit", 3))
+        state["attempts_used"] = int(state.get("attempts_used", 0)) + count
+        state["attempts_remaining"] = max(0, limit - state["attempts_used"])
+        state["locked"] = state["attempts_remaining"] == 0
+    save_penalty_state(result, action, settings, state, key)
+    return state
+
+
 def collaboration(progress, action, solution):
     from copy import deepcopy
     import re
@@ -125,6 +329,16 @@ def collaboration(progress, action, solution):
     width = int(solution.get('settings', {}).get('grid_width', size))
     height = int(solution.get('settings', {}).get('grid_height', size))
 
+    target_placements = list(solution.get('placements', []))
+    decoys = list(solution.get('decoys', []))
+    settings = solution.get('settings', {})
+    penalty_settings = {
+        "penalty_mode": settings.get("penalty_mode", "none"),
+        "penalty_scope": settings.get("penalty_scope", "individual"),
+        "penalty_value": int(settings.get("penalty_value", 1)),
+        "attempt_limit": int(settings.get("attempt_limit", 3)),
+    }
+
     def coordinates(key):
         match = re.fullmatch(r'guess:(\d+),(\d+):(\d+),(\d+)', key)
         if not match: raise ValueError('Invalid selection')
@@ -132,12 +346,17 @@ def collaboration(progress, action, solution):
         if not (0 <= x < width and 0 <= ex < width and 0 <= y < height and 0 <= ey < height):
             raise ValueError('Selection outside the grid')
         dx, dy = ex - x, ey - y
-        if dx and dy and abs(dx) != abs(dy): return {(x, y), (ex, ey)}
+        if dx and dy and abs(dx) != abs(dy): return frozenset({(x, y), (ex, ey)}), False
         count = max(abs(dx), abs(dy)) + 1
-        return {(x + i * ((dx > 0) - (dx < 0)), y + i * ((dy > 0) - (dy < 0))) for i in range(count)}
+        return frozenset((x + i * ((dx > 0) - (dx < 0)), y + i * ((dy > 0) - (dy < 0))) for i in range(count)), True
 
     kind = action['kind']
+    if kind in {'patch', 'check'}:
+        result['last_selection_feedback'] = ''
     if kind == 'patch':
+        existing_penalty, _ = penalty_state_for(result, action, penalty_settings)
+        if existing_penalty.get('locked') and any(value == 'pending' for value in action.get('changes', {}).values()):
+            raise ValueError('No incorrect-selection attempts remain')
         for key, value in action.get('changes', {}).items():
             coordinates(key)
             if value not in ('', 'pending'): raise ValueError('Invalid selection state')
@@ -147,11 +366,17 @@ def collaboration(progress, action, solution):
         raise ValueError('Unsupported action')
     found = set(result.get('found_words', [])) | set(solution.get('gimmes', {}).get('words', []))
     confirmed = set(result.get('confirmed_selections', []))
-    pending = {k: coordinates(k) for k, v in answers.items() if v == 'pending'}
+    pending_info = {k: coordinates(k) for k, v in answers.items() if v == 'pending'}
+    pending = {key: info[0] for key, info in pending_info.items()}
     matched = set()
     auto = solution.get('settings', {}).get('auto_confirm', True)
+    target_cells = [placement_cells(placement) for placement in target_placements]
+    decoy_cells = {placement_cells(decoy, 'text'): decoy for decoy in decoys}
+    minimum_length = min((len(str(placement.get('word', ''))) for placement in target_placements), default=2)
+    penalized = []
+    decoy_hits = []
     if kind == 'check' or (kind == 'patch' and auto):
-        for placement in solution['placements']:
+        for placement in target_placements:
             word = placement['word']
             x, y = placement['start']; dx, dy = placement['direction']
             cells = {(x + i * dx, y + i * dy) for i in range(len(word))}
@@ -166,7 +391,38 @@ def collaboration(progress, action, solution):
             if key in matched:
                 answers.pop(key, None)
                 confirmed.add(key)
-            elif kind == 'check' or auto: answers[key] = 'wrong'
+            elif kind == 'check' or auto:
+                answers[key] = 'wrong'
+                coords = pending[key]
+                decoy = decoy_cells.get(coords)
+                if decoy is not None:
+                    decoy_hits.append(decoy)
+                straight = pending_info[key][1]
+                overlaps_target = any(coords & cells for cells in target_cells)
+                eligible_length = len(coords) >= (2 if decoy is not None else minimum_length)
+                if straight and eligible_length and (decoy is not None or not overlaps_target):
+                    penalized.append(key)
+        penalty = {}
+        if penalized and "participants" in action and penalty_settings.get("penalty_scope") == "individual":
+            owners = result.get('_attribution', {}).get('owners', {})
+            counts: dict[int, int] = {}
+            for key in penalized:
+                actor = int(owners.get(key, {}).get('user_id', action.get('_actor', 0)))
+                counts[actor] = counts.get(actor, 0) + 1
+            for actor, count in counts.items():
+                current = apply_selection_penalty(result, {**action, '_actor': actor}, penalty_settings, count)
+                if actor == action.get('_actor'):
+                    penalty = current
+        else:
+            penalty = apply_selection_penalty(result, action, penalty_settings, len(penalized))
+        if decoy_hits:
+            result['last_selection_feedback'] = 'Decoy selected; it is not a target word.'
+        elif penalized:
+            result['last_selection_feedback'] = 'Incorrect selection.'
+        elif pending:
+            result['last_selection_feedback'] = 'Incomplete or accidental selection; no penalty applied.'
+        if penalty.get('locked'):
+            result['last_selection_feedback'] += ' No attempts remain.'
     if kind == 'reveal':
         found.update(solution['words'])
         for placement in solution['placements']:
@@ -191,7 +447,7 @@ def build_preview(print_payload: dict, play_payload: dict, metadata: dict) -> di
         "kind": "word_search",
         "grid": [str(row)[:10] for row in grid[:10]],
         "words": [str(word).upper() for word in words[:5]],
-        "meta": f"{len(words)} words",
+        "meta": f"{len(words)} words / {int(metadata.get('decoy_count', 0))} decoys",
     }
 
 
@@ -223,23 +479,6 @@ def parse_manual_words(value: Any) -> list[str]:
     return words
 
 
-def find_word_placement(grid: list[str], word: str) -> dict | None:
-    height = len(grid)
-    width = len(grid[0]) if grid else 0
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]
-    for y in range(height):
-        for x in range(width):
-            for dx, dy in directions:
-                end_x = x + dx * (len(word) - 1)
-                end_y = y + dy * (len(word) - 1)
-                if not (0 <= end_x < width and 0 <= end_y < height):
-                    continue
-                letters = "".join(grid[y + dy * index][x + dx * index] for index in range(len(word)))
-                if letters == word:
-                    return {"word": word, "start": [x, y], "direction": [dx, dy]}
-    return None
-
-
 def gimme_cells_for_placements(placements: list[dict], gimme_words: list[str]) -> dict[str, str]:
     wanted = {str(word).upper() for word in gimme_words}
     cells = {}
@@ -264,13 +503,31 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
     placements = []
     missing = []
     for word in words:
-        placement = find_word_placement(grid, word)
-        if placement is None:
+        occurrences = word_occurrences(grid, word)
+        if not occurrences:
             missing.append(word)
+        elif len(occurrences) > 1:
+            raise ValueError(f"Target word appears more than once in the grid: {word}")
         else:
-            placements.append(placement)
+            placements.append(occurrences[0])
     if missing:
         raise ValueError(f"These words were not found in the grid: {', '.join(missing)}")
+    false_words = parse_optional_words(options.get("false_words", ""))
+    target_set = set(words)
+    if target_set & set(false_words):
+        raise ValueError(f"False words cannot also be listed targets: {', '.join(sorted(target_set & set(false_words)))}")
+    near_misses = parse_manual_near_misses(options.get("near_misses", ""), words)
+    decoys = [{"kind": "false_word", "text": word} for word in false_words] + near_misses
+    decoy_texts = [decoy["text"] for decoy in decoys]
+    if len(decoy_texts) != len(set(decoy_texts)):
+        raise ValueError("Each decoy string must be unique.")
+    for decoy in decoys:
+        occurrences = word_occurrences(grid, decoy["text"])
+        if not occurrences:
+            raise ValueError(f"Decoy was not found in the grid: {decoy['text']}")
+        if len(occurrences) > 1:
+            raise ValueError(f"Decoy appears more than once in the grid: {decoy['text']}")
+        decoy.update({"start": occurrences[0]["start"], "direction": occurrences[0]["direction"]})
     auto_confirm = bool_option(options, "auto_confirm", True)
     print_style = str(options.get("print_style", "boxed")).strip().lower()
     if print_style not in {"boxed", "compact"}:
@@ -289,8 +546,12 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
         "word_count_max": len(words),
         "print_style": print_style,
         "manual_grid": True,
+        "decoy_count": len(decoys),
+        "false_word_count": len(false_words),
+        "near_miss_count": len(near_misses),
+        **penalty_options(options),
     }
-    prompt = "Find all listed words."
+    prompt = "Find all listed words." + (" Watch for deliberate decoys." if decoys else "")
     print_payload = {
         "kind": "word_search",
         "grid": grid,
@@ -301,6 +562,7 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
     solution_payload = {
         "words": words,
         "placements": placements,
+        "decoys": decoys,
         "gimmes": {"mode": "found_words", "words": gimme_words},
         "settings": settings,
     }
@@ -319,7 +581,11 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
             "generator": "manual.word_search.v1",
             "manual": True,
             "word_count": len(words),
+            "decoy_count": len(decoys),
+            "false_word_count": len(false_words),
+            "near_miss_count": len(near_misses),
             "gimmes": {"mode": "found_words", "count": len(gimme_words)},
+            "generation_options": settings,
         },
     )
 
@@ -348,16 +614,31 @@ def contains_blocked_word(grid: list[list[str]], blocked_words: set[str]) -> boo
     return False
 
 
-def fill_grid(base_grid: list[list[str]], rng: random.Random, blocked_words: set[str]) -> list[list[str]]:
+def has_expected_occurrences(grid: list[list[str]], placements: list[dict], decoys: list[dict]) -> bool:
+    expected: dict[str, set[tuple[tuple[int, int], ...]]] = {}
+    for placement in placements:
+        expected.setdefault(placement["word"], set()).add(placement_signature(placement))
+    for decoy in decoys:
+        expected.setdefault(decoy["text"], set()).add(placement_signature(decoy, "text"))
+    return all(
+        {placement_signature(item) for item in word_occurrences(grid, text)} == signatures
+        for text, signatures in expected.items()
+    )
+
+
+def fill_grid(
+    base_grid: list[list[str]], rng: random.Random, blocked_words: set[str],
+    placements: list[dict] | None = None, decoys: list[dict] | None = None,
+) -> list[list[str]]:
     for _ in range(250):
         grid = [row[:] for row in base_grid]
         for y, row in enumerate(grid):
             for x, value in enumerate(row):
                 if not value:
                     grid[y][x] = rng.choice(string.ascii_uppercase)
-        if not contains_blocked_word(grid, blocked_words):
+        if not contains_blocked_word(grid, blocked_words) and has_expected_occurrences(grid, placements or [], decoys or []):
             return grid
-    raise ValueError("Unable to fill word search without forming a blocked word.")
+    raise ValueError("Unable to fill word search without forming an unintended target or blocked word.")
 
 
 def generate(
@@ -388,15 +669,16 @@ def generate(
         raise ValueError("Word search generation needs at least one allowed word that fits the selected grid size.")
     default_word_count = {"easy": 5, "medium": 7, "hard": 8}.get(difficulty, 5)
     max_word_count = integer_option(generation_options, "word_count_limit", default_word_count, 1, 30)
+    false_word_count = integer_option(generation_options, "false_word_count", 0, 0, 10)
     if "word_count_min" in generation_options:
         min_word_count = integer_option(generation_options, "word_count_min", min(default_word_count, max_word_count), 1, 30)
     else:
         min_word_count = min(max_word_count, len(candidate_words))
     min_word_count = min(min_word_count, max_word_count)
-    available_max = min(max_word_count, len(candidate_words))
+    available_max = min(max_word_count, len(candidate_words) - false_word_count)
     if available_max < min_word_count:
         raise ValueError(
-            f"Word search generation needs at least {min_word_count} allowed words that fit the selected grid size."
+            f"Word search generation needs at least {min_word_count} target words plus {false_word_count} false words that fit the selected grid size."
         )
     generation_seed = seed or f"{theme}:{difficulty}:{','.join(candidate_words)}"
     rng = random.Random(generation_seed)
@@ -404,9 +686,16 @@ def generate(
     shuffled_words = candidate_words[:]
     rng.shuffle(shuffled_words)
     words = shuffled_words[:word_count]
+    false_words = shuffled_words[word_count:word_count + false_word_count]
+    if len(false_words) != false_word_count:
+        raise ValueError(f"Word search generation needs {false_word_count} unused source words for complete decoys.")
     allow_crossings = bool_option(generation_options, "allow_crossings", True)
     auto_confirm = bool_option(generation_options, "auto_confirm", True)
     direction_preset, directions = direction_options(generation_options)
+    decoy_difficulty, configured_decoy_directions = decoy_directions(generation_options, directions)
+    decoy_placement = str(generation_options.get("decoy_placement", "crossings")).strip().lower()
+    if decoy_placement not in {"crossings", "separate"}:
+        decoy_placement = "crossings"
     print_style = str(generation_options.get("print_style", "boxed")).strip().lower()
     if print_style not in {"boxed", "compact"}:
         print_style = "boxed"
@@ -416,28 +705,31 @@ def generate(
     for word in sorted(words, key=len, reverse=True):
         if len(word) > size:
             raise ValueError(f"Word '{word}' is longer than the selected grid size.")
-        placed = False
-        for _ in range(500):
-            dx, dy = rng.choice(directions)
-            min_x, max_x = coordinate_bounds(len(word), dx, size)
-            min_y, max_y = coordinate_bounds(len(word), dy, size)
-            x = rng.randint(min_x, max_x)
-            y = rng.randint(min_y, max_y)
-            coords = [(x + i * dx, y + i * dy) for i in range(len(word))]
-            if allow_crossings:
-                can_place = all(grid[cy][cx] in {"", letter} for (cx, cy), letter in zip(coords, word))
-            else:
-                can_place = all(grid[cy][cx] == "" for cx, cy in coords)
-            if can_place:
-                for (cx, cy), letter in zip(coords, word):
-                    grid[cy][cx] = letter
-                placements.append({"word": word, "start": [x, y], "direction": [dx, dy]})
-                placed = True
-                break
-        if not placed:
+        placement = place_text(grid, word, directions, rng, allow_crossings)
+        if placement is None:
             raise ValueError(f"Unable to place word: {word}")
+        placements.append(placement)
 
-    grid = fill_grid(grid, rng, blocked_words)
+    near_miss_count = integer_option(generation_options, "near_miss_count", 0, 0, 10)
+    near_candidates = near_miss_candidates(words, decoy_difficulty)
+    rng.shuffle(near_candidates)
+    near_misses = near_candidates[:near_miss_count]
+    if len(near_misses) != near_miss_count:
+        raise ValueError(f"Unable to create {near_miss_count} unique one-character-omission near misses from the selected targets.")
+    decoys = [{"kind": "false_word", "text": word} for word in false_words] + near_misses
+    decoy_texts = {decoy["text"] for decoy in decoys}
+    if decoy_texts & set(words) or len(decoy_texts) != len(decoys):
+        raise ValueError("Generated decoys must be unique and different from target words.")
+    for decoy in sorted(decoys, key=lambda item: len(item["text"]), reverse=True):
+        placement = place_text(
+            grid, decoy["text"], configured_decoy_directions, rng,
+            allow_crossings=decoy_placement == "crossings",
+        )
+        if placement is None:
+            raise ValueError(f"Unable to place decoy: {decoy['text']}")
+        decoy.update({"start": placement["start"], "direction": placement["direction"]})
+
+    grid = fill_grid(grid, rng, blocked_words, placements, decoys)
     default_gimme_count = len(gimme_words_for_difficulty(words, difficulty))
     gimme_count = integer_option(generation_options, "gimme_count", default_gimme_count, 0, max(0, len(words) - 1))
     gimme_words = words[:gimme_count]
@@ -453,9 +745,15 @@ def generate(
         "word_count_limit": max_word_count,
         "word_count_max": max_word_count,
         "print_style": print_style,
+        "decoy_count": len(decoys),
+        "false_word_count": len(false_words),
+        "near_miss_count": len(near_misses),
+        "decoy_difficulty": decoy_difficulty,
+        "decoy_placement": decoy_placement,
+        **penalty_options(generation_options),
     }
 
-    prompt = "Find all listed words."
+    prompt = "Find all listed words." + (" Watch for deliberate decoys." if decoys else "")
     print_payload = {
         "kind": "word_search",
         "grid": ["".join(row) for row in grid],
@@ -466,6 +764,7 @@ def generate(
     solution_payload = {
         "words": words,
         "placements": placements,
+        "decoys": decoys,
         "gimmes": {"mode": "found_words", "words": gimme_words},
         "settings": settings,
     }
@@ -484,6 +783,9 @@ def generate(
             "generator": "local.word_search.v1",
             "grid_size": size,
             "blocked_word_count": len(blocked_words),
+            "decoy_count": len(decoys),
+            "false_word_count": len(false_words),
+            "near_miss_count": len(near_misses),
             "seed": generation_seed,
             "gimmes": {"mode": "found_words", "count": len(gimme_words)},
             "generation_options": settings | {"gimme_count": len(gimme_words)},
@@ -515,6 +817,7 @@ register_puzzle_type(
         supports_gimmes=True,
         gimme_modes=("found_words",),
         manual_builder=build_manual_puzzle,
+        private_metadata_keys=("manual_editor_options",),
         manual_editor_fields=(
             GenerationField(
                 name="grid",
@@ -530,6 +833,20 @@ register_puzzle_type(
                 field_type="textarea",
                 required=True,
                 help_text="One word per line, or separate words with commas.",
+                default="",
+            ),
+            GenerationField(
+                name="false_words",
+                label="Complete false-word decoys",
+                field_type="textarea",
+                help_text="Optional complete strings that appear in the grid but are not listed answers.",
+                default="",
+            ),
+            GenerationField(
+                name="near_misses",
+                label="One-character-omission near misses",
+                field_type="textarea",
+                help_text="Optional, one per line as TARGET -> FAKE. FAKE must remove exactly one character from a listed target.",
                 default="",
             ),
             GenerationField(
@@ -550,6 +867,38 @@ register_puzzle_type(
                 help_text="Number of listed words already marked found.",
                 minimum=0,
                 maximum=30,
+            ),
+            GenerationField(
+                name="penalty_mode",
+                label="Incorrect-selection penalty",
+                field_type="select",
+                default="none",
+                options=(
+                    {"value": "none", "label": "No penalty"},
+                    {"value": "mistake_counter", "label": "Count mistakes"},
+                    {"value": "score_deduction", "label": "Deduct score"},
+                    {"value": "time_penalty", "label": "Add time"},
+                    {"value": "limited_attempts", "label": "Limit attempts"},
+                ),
+            ),
+            GenerationField(
+                name="penalty_scope",
+                label="Group Solve penalty scope",
+                field_type="select",
+                default="individual",
+                help_text="Individual keeps a persistent count per player; Group shares one count.",
+                options=(
+                    {"value": "individual", "label": "Per player"},
+                    {"value": "group", "label": "Shared by the group"},
+                ),
+            ),
+            GenerationField(
+                name="penalty_value", label="Penalty amount", field_type="number", default="1",
+                help_text="Points deducted or seconds added per penalized selection.", minimum=1, maximum=3600,
+            ),
+            GenerationField(
+                name="attempt_limit", label="Incorrect attempt limit", field_type="number", default="3",
+                help_text="Used only by Limited attempts.", minimum=1, maximum=100,
             ),
             GenerationField(
                 name="print_style",
@@ -637,6 +986,45 @@ register_puzzle_type(
                 maximum=30,
             ),
             GenerationField(
+                name="false_word_count",
+                label="Complete false-word decoys",
+                field_type="number",
+                default="0",
+                help_text="Unused source words placed in the grid but omitted from the answer list.",
+                minimum=0,
+                maximum=10,
+            ),
+            GenerationField(
+                name="near_miss_count",
+                label="One-character-omission near misses",
+                field_type="number",
+                default="0",
+                help_text="Target-like strings made by removing exactly one character.",
+                minimum=0,
+                maximum=10,
+            ),
+            GenerationField(
+                name="decoy_difficulty",
+                label="Decoy direction difficulty",
+                field_type="select",
+                default="medium",
+                options=(
+                    {"value": "easy", "label": "Easy: forward horizontal/vertical"},
+                    {"value": "medium", "label": "Medium: match target directions"},
+                    {"value": "hard", "label": "Hard: include reverse directions"},
+                ),
+            ),
+            GenerationField(
+                name="decoy_placement",
+                label="Decoy placement",
+                field_type="select",
+                default="crossings",
+                options=(
+                    {"value": "crossings", "label": "Allow shared letters"},
+                    {"value": "separate", "label": "Keep decoys separate"},
+                ),
+            ),
+            GenerationField(
                 name="gimme_count",
                 label="Gimme words",
                 field_type="number",
@@ -644,6 +1032,38 @@ register_puzzle_type(
                 help_text="Optional. Number of words already marked found.",
                 minimum=0,
                 maximum=30,
+            ),
+            GenerationField(
+                name="penalty_mode",
+                label="Incorrect-selection penalty",
+                field_type="select",
+                default="none",
+                options=(
+                    {"value": "none", "label": "No penalty"},
+                    {"value": "mistake_counter", "label": "Count mistakes"},
+                    {"value": "score_deduction", "label": "Deduct score"},
+                    {"value": "time_penalty", "label": "Add time"},
+                    {"value": "limited_attempts", "label": "Limit attempts"},
+                ),
+            ),
+            GenerationField(
+                name="penalty_scope",
+                label="Group Solve penalty scope",
+                field_type="select",
+                default="individual",
+                help_text="Individual keeps a persistent count per player; Group shares one count.",
+                options=(
+                    {"value": "individual", "label": "Per player"},
+                    {"value": "group", "label": "Shared by the group"},
+                ),
+            ),
+            GenerationField(
+                name="penalty_value", label="Penalty amount", field_type="number", default="1",
+                help_text="Points deducted or seconds added per penalized selection.", minimum=1, maximum=3600,
+            ),
+            GenerationField(
+                name="attempt_limit", label="Incorrect attempt limit", field_type="number", default="3",
+                help_text="Used only by Limited attempts.", minimum=1, maximum=100,
             ),
             GenerationField(
                 name="print_style",
