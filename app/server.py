@@ -2,10 +2,42 @@
 from __future__ import annotations
 
 import logging
+import re
+from copy import deepcopy
 
 import uvicorn
 
 from app.transport import TransportConfigurationError, load_transport_config
+
+
+class FeedTokenLogFilter(logging.Filter):
+    """Keep private feed credentials out of Uvicorn access-log request paths."""
+
+    pattern = re.compile(r"(/feeds/)[A-Za-z0-9_-]{32,128}(\.(?:atom|rss)(?:\?[^ ]*)?)")
+
+    @classmethod
+    def redact(cls, value: str) -> str:
+        return cls.pattern.sub(r"\1[REDACTED]\2", value)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = self.redact(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(self.redact(value) if isinstance(value, str) else value for value in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: self.redact(value) if isinstance(value, str) else value
+                for key, value in record.args.items()
+            }
+        return True
+
+
+def uvicorn_log_config() -> dict:
+    config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    config.setdefault("filters", {})["redact_feed_tokens"] = {"()": FeedTokenLogFilter}
+    access_handler = config.setdefault("handlers", {}).setdefault("access", {})
+    access_handler.setdefault("filters", []).append("redact_feed_tokens")
+    return config
 
 
 def main() -> None:
@@ -32,6 +64,7 @@ def main() -> None:
         ssl_certfile=config.tls_cert_file or None,
         ssl_keyfile=config.tls_key_file or None,
         ssl_keyfile_password=config.tls_key_password or None,
+        log_config=uvicorn_log_config(),
     )
 
 

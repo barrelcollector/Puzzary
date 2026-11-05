@@ -145,6 +145,8 @@ templates.env.globals['can_owned'] = can_owned
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 from app.publishing import router as publishing_router
 app.include_router(publishing_router)
+from app.feeds import router as feeds_router
+app.include_router(feeds_router)
 from app.groups import router as groups_router
 app.include_router(groups_router)
 from app.permission_admin import router as permission_router

@@ -19,6 +19,23 @@
 .account-recent small, .account-recent time { display: block; color: var(--muted); font-size: 12px; margin-top: 6px; }
 .account-security { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line); }
 .account-security form { max-width: 480px; }
+.feed-secret { padding: 18px; }
+.feed-secret h2 { margin-top: 0; }
+.feed-copy-row { display: flex; gap: 8px; align-items: stretch; }
+.feed-copy-row input { min-width: 0; margin: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.feed-copy-row button { width: auto; flex-shrink: 0; }
+.feed-create-form { max-width: 720px !important; }
+.feed-create-form fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 18px 0; padding: 12px 16px; }
+.feed-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px 16px; }
+.feed-options .check-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.feed-options input { width: 18px; height: 18px; margin: 0; flex-shrink: 0; }
+.feed-token-list { list-style: none; padding: 0; }
+.feed-token-card { display: flex; justify-content: space-between; align-items: start; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.feed-token-card h3, .feed-token-card p { margin: 0 0 8px; }
+.feed-token-card small { color: var(--muted); overflow-wrap: anywhere; }
+.feed-token-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.feed-token-actions form { margin: 0; }
+.feed-token-actions button { width: auto; white-space: nowrap; }
 .library-status-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .library-progress-status { display: inline-block; font-size: 12px; font-weight: 650; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; background: #f1f1ef; color: #555; }
 .library-progress-status.status-completed { color: #175f50; background: #e3f2ec; border-color: #9bc7b8; }
@@ -36,6 +53,8 @@
   .account-stats-table tbody td::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
   .account-recent li { flex-direction: column; gap: 8px; }
   .account-recent li > div:last-child { text-align: left; }
+  .feed-copy-row, .feed-token-card, .feed-token-actions { flex-direction: column; }
+  .feed-copy-row button, .feed-token-actions, .feed-token-actions form, .feed-token-actions button { width: 100%; }
 }
 .users-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .users-toolbar h1, .users-toolbar h2 { margin: 0; }

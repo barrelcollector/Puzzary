@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Puzzle feeds - Puzzary{% endblock %}
+{% block content %}
+<section class="account-page feed-account">
+  <header class="account-page-head">
+    <div><h1>Puzzle feeds</h1><p class="muted">Private RSS and Atom subscriptions for {{ current_user.display_name }}</p></div>
+    <a class="ghost-link" href="/account">Back to Account</a>
+  </header>
+
+  {% if error %}<p class="notice danger" role="alert">{{ error }}</p>{% endif %}
+  {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
+  {% if http_warning %}
+    <p class="notice danger" role="alert">The public base URL uses HTTP. Feed URLs are credentials; configure HTTPS before sharing them across a network.</p>
+  {% endif %}
+  {% if created_atom_url %}
+    <section class="feed-secret notice" aria-labelledby="new-feed-title">
+      <h2 id="new-feed-title">Save the new URL for {{ created_name }}</h2>
+      <p>This is the only time the secret URLs will be shown. Copy the format your reader supports.</p>
+      <label>Atom URL
+        <span class="feed-copy-row"><input value="{{ created_atom_url }}" readonly data-feed-url><button type="button" data-copy-feed>Copy</button></span>
+      </label>
+      <label>RSS URL
+        <span class="feed-copy-row"><input value="{{ created_rss_url }}" readonly data-feed-url><button type="button" data-copy-feed>Copy</button></span>
+      </label>
+      <p class="muted" data-copy-status aria-live="polite"></p>
+    </section>
+  {% endif %}
+
+  <section class="account-security">
+    <h2>Create a feed</h2>
+    <p class="muted">Leave filters empty to include every puzzle currently available to your account. Solutions, clues, prompts, and play data are never included.</p>
+    <form method="post" action="/account/feeds" class="feed-create-form">
+      <label>Feed name<input name="name" maxlength="120" value="My puzzle feed" required></label>
+      {% if puzzle_types %}
+      <fieldset><legend>Puzzle types</legend><div class="feed-options">
+        {% for puzzle_type in puzzle_types %}<label class="check-row"><input type="checkbox" name="puzzle_types" value="{{ puzzle_type.slug }}"> {{ puzzle_type.label }}</label>{% endfor %}
+      </div></fieldset>
+      {% endif %}
+      {% if themes %}
+      <fieldset><legend>Themes</legend><div class="feed-options">
+        {% for theme in themes %}<label class="check-row"><input type="checkbox" name="themes" value="{{ theme }}"> {{ theme }}</label>{% endfor %}
+      </div></fieldset>
+      {% endif %}
+      {% if tags %}
+      <fieldset><legend>Tags</legend><div class="feed-options">
+        {% for tag in tags %}<label class="check-row"><input type="checkbox" name="tag_ids" value="{{ tag.id }}"> {{ tag.label }}</label>{% endfor %}
+      </div></fieldset>
+      {% endif %}
+      {% if creators %}
+      <fieldset><legend>Creators</legend><div class="feed-options">
+        {% for creator in creators %}<label class="check-row"><input type="checkbox" name="creator_ids" value="{{ creator.id }}"> {{ creator.display_name }}</label>{% endfor %}
+      </div></fieldset>
+      {% endif %}
+      <label>Maximum entries
+        <select name="entry_limit"><option>10</option><option selected>25</option><option>50</option></select>
+      </label>
+      <button type="submit">Create private feed</button>
+    </form>
+  </section>
+
+  <section class="account-security">
+    <h2>Existing feeds</h2>
+    <p class="muted">Existing secrets cannot be displayed again. Rotate a feed to replace its URL immediately, or revoke it permanently.</p>
+    {% if tokens %}
+      <ul class="feed-token-list">
+      {% for token in tokens %}
+        <li class="feed-token-card">
+          <div>
+            <h3>{{ token.name }}</h3>
+            <p>{{ token_summaries[token.id] }}</p>
+            <small>Token {{ token.token_prefix }}… · Created {{ token.created_at.strftime('%Y-%m-%d') }}{% if token.last_used_at %} · Last used {{ token.last_used_at.strftime('%Y-%m-%d %H:%M') }} UTC{% endif %}</small>
+          </div>
+          {% if token.revoked_at %}
+            <span class="library-progress-status">Revoked</span>
+          {% else %}
+            <div class="feed-token-actions">
+              <form method="post" action="/account/feeds/{{ token.id }}/rotate"><button type="submit" class="ghost-button">Rotate URL</button></form>
+              <form method="post" action="/account/feeds/{{ token.id }}/revoke"><button type="submit" class="danger-button">Revoke</button></form>
+            </div>
+          {% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p>No feeds yet.</p>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/feed-tokens.js?v=1" defer></script>{% endblock %}

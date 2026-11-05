@@ -28,6 +28,7 @@ can use the same API for automation and delivery.
 - Account-based puzzle progress
 - Interactive word-search highlighting
 - Photo submission and administrator review workflow
+- Private, filterable RSS and Atom puzzle feeds with revocable per-user URLs
 - Flexible authenticated API for external clients and automation
 - Printable puzzle payloads and PDFs for publishing integrations
 
@@ -110,6 +111,11 @@ password: admin
 Change that password after first login. Existing installations are migrated in place; the oldest existing user still becomes an admin if no admin exists.
 
 Admins can issue per-account API tokens from the Users page. Tokens are shown once, then stored only as hashes. Use **Rotate API Token** on that account's Security tab to replace the credential; rotation immediately invalidates the previous token.
+
+Users can create private RSS or Atom subscriptions from **Account -> Manage
+puzzle feeds**. Feed URLs are independently revocable credentials and can be
+filtered by puzzle type, theme, tag, or creator. See [Private RSS and Atom
+feeds](docs/rss-atom-feeds.md) for security, contents, and reader setup.
 
 ## API
 
