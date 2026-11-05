@@ -198,6 +198,8 @@ def authorize_request(request, db, user, administrative=False):
         return
     if path == '/api/account/stats':
         require(user, 'library.view'); return
+    if path == '/api/print/manifest':
+        require(user, 'library.view'); require(user, 'puzzles.print'); return
     if path.startswith('/admin/roles') or path.endswith('/permissions') or path.endswith('/permissions/reset'):
         require(user,'roles.manage'); return
     if path.startswith('/admin/audit'):

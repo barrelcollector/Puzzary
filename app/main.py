@@ -101,6 +101,7 @@ from app.schemas import (
     PuzzleImportRequest,
     PuzzleManualWrite,
     PuzzlePrintPreview,
+    PrintManifestRequest,
     PuzzleSummary,
     UserCreate,
     WordBankEntryWrite,
@@ -6366,6 +6367,111 @@ def get_latest_puzzle(request: Request, printable: bool = False, db: Session = D
             continue
         return serialize_puzzle(puzzle, db)
     raise HTTPException(status_code=404, detail="No printable puzzle found" if printable else "No puzzle found")
+
+
+def printable_puzzle_for_automation(
+    puzzle: Puzzle,
+    user: User,
+    request: Request,
+    db: Session,
+) -> dict:
+    if not can_view(user, puzzle):
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    if not puzzle_access_granted(request, puzzle):
+        raise HTTPException(status_code=423, detail="Puzzle password required")
+    require_series_access(db, puzzle, user)
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
+        raise HTTPException(status_code=422, detail=f"{puzzle.title} does not support printing")
+    render_url = authorized_render_url(puzzle, user, request, db)
+    layout = print_layout_context(puzzle, puzzle_type, db)
+    layout["render_url"] = render_url
+    return {
+        "id": puzzle.id,
+        "title": puzzle.title,
+        "puzzle_type": puzzle.puzzle_type,
+        "print_payload": puzzle.print_payload or {},
+        "layout": layout,
+        "url": puzzle_url(puzzle.id, db),
+        "print_url": puzzle_print_url(puzzle.id, db),
+        "render_url": render_url,
+        "pdf_url": f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.pdf",
+    }
+
+
+@app.post("/api/print/manifest")
+def create_print_manifest(
+    payload: PrintManifestRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_api_user(request, db)
+    if not (payload.puzzle_ids or payload.issue_ids or payload.latest_puzzle or payload.latest_issue):
+        raise HTTPException(status_code=422, detail="Select puzzle IDs, issue IDs, or a latest item")
+
+    puzzles: list[Puzzle] = []
+    seen_puzzles: set[str] = set()
+
+    def add_puzzle(puzzle: Puzzle) -> None:
+        if puzzle.id not in seen_puzzles:
+            seen_puzzles.add(puzzle.id)
+            puzzles.append(puzzle)
+
+    for puzzle_id in payload.puzzle_ids:
+        puzzle = db.get(Puzzle, puzzle_id)
+        if puzzle is None:
+            raise HTTPException(status_code=404, detail=f"Puzzle {puzzle_id} not found")
+        add_puzzle(puzzle)
+    if payload.latest_puzzle:
+        candidates = db.scalars(
+            select(Puzzle).where(Puzzle.archived_at.is_(None)).order_by(desc(Puzzle.created_at))
+        ).all()
+        latest = None
+        for puzzle in candidates:
+            plugin = get_puzzle_type(puzzle.puzzle_type)
+            if (
+                not can_discover(user, puzzle)
+                or not puzzle_access_granted(request, puzzle)
+                or plugin is None
+                or not plugin.supports_print
+                or plugin.digital_only
+            ):
+                continue
+            try:
+                require_series_access(db, puzzle, user)
+            except HTTPException as error:
+                if error.status_code == 423:
+                    continue
+                raise
+            latest = puzzle
+            break
+        if latest is None:
+            raise HTTPException(status_code=404, detail="No printable puzzle found")
+        add_puzzle(latest)
+
+    from app.publishing import find_issue, issue_metadata, latest_published_issue, require_issue_access
+    issues: list[PublishedIssue] = []
+    seen_issues: set[str] = set()
+
+    def add_issue(issue: PublishedIssue) -> None:
+        require_issue_access(issue, user)
+        if issue.published_at is None:
+            raise HTTPException(status_code=422, detail=f"Issue {issue.id} must be published before printing")
+        if issue.id not in seen_issues:
+            seen_issues.add(issue.id)
+            issues.append(issue)
+
+    for issue_id in payload.issue_ids:
+        add_issue(find_issue(db, issue_id))
+    if payload.latest_issue:
+        add_issue(latest_published_issue(db))
+
+    return {
+        "schema": "puzzary.print-manifest.v1",
+        "generated_at": utcnow().isoformat(),
+        "puzzles": [printable_puzzle_for_automation(puzzle, user, request, db) for puzzle in puzzles],
+        "issues": [issue_metadata(issue, db) for issue in issues],
+    }
 
 
 @app.get("/api/puzzles/export")

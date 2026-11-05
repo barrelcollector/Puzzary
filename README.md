@@ -310,6 +310,8 @@ and the API supports additional clients and delivery workflows:
 - Other clients can generate, import, export, play, and print content through
   the same authenticated API.
 
+The [Home Assistant and print-system automation guide](docs/automation-integrations.md) documents bearer-token permissions, generation, spoiler-free print manifests, issue bundles, PDF retrieval, and generic Home Assistant examples.
+
 ## Puzzle Types
 
 Puzzle types are auto-discovered modules under `app/puzzle_types`.
@@ -427,6 +429,7 @@ Authenticated API routes:
 - `POST /api/issues`: admin draft creation.
 - `PUT /api/issues/{id}`: admin draft editing; published issues return 409.
 - `POST /api/issues/{id}/publish`: admin publication.
+- `POST /api/print/manifest`: resolve selected/latest printable puzzles and published issues into one spoiler-free print job manifest.
 
 Create a draft with this JSON, using real puzzle IDs from your library:
 

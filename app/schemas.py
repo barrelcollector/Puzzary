@@ -90,6 +90,13 @@ class PuzzlePrintPreview(BaseModel):
     pdf_url: str = ""
 
 
+class PrintManifestRequest(BaseModel):
+    puzzle_ids: list[str] = Field(default_factory=list, max_length=50)
+    issue_ids: list[str] = Field(default_factory=list, max_length=20)
+    latest_puzzle: bool = False
+    latest_issue: bool = False
+
+
 class PuzzleImportRequest(BaseModel):
     source_url: str = ""
     source_text: str = ""
