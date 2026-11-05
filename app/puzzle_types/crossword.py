@@ -4,9 +4,49 @@ import random
 import re
 from typing import Any
 
+from app.clues import definition_clue_tiers, word_clue_tiers
 from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, normalize_answer, register_puzzle_type
 from app.group_actions import cell_collaboration
+
+
+FALLBACK_CLUES = {
+    "MERIDIAN": ["An imaginary north-south line used to measure longitude."],
+    "PUZZLE": ["A problem designed to test ingenuity or knowledge."],
+    "ZEBRA": ["An African animal known for black-and-white stripes."],
+    "PRINT": ["To reproduce words or images on paper."],
+    "CLUE": ["Information that helps someone find an answer."],
+    "PAPER": ["A thin material used for writing, drawing, or printing."],
+    "HINT": ["An indirect suggestion intended to help."],
+    "SOLVE": ["To find the answer to a problem."],
+    "PORCH": ["A covered entrance attached to a building."],
+    "PANTRY": ["A cupboard or room where food is stored."],
+    "LAUNDRY": ["Clothes or linens waiting to be washed or newly cleaned."],
+    "GARAGE": ["A building or room used to store a vehicle."],
+    "KITCHEN": ["A room where food is prepared and cooked."],
+    "GARDEN": ["Ground used for growing flowers, fruit, or vegetables."],
+    "SHELF": ["A flat horizontal surface used for storage or display."],
+    "CLOUD": ["A visible mass of condensed water droplets in the sky."],
+    "RAIN": ["Water falling from clouds in drops."],
+    "SUNNY": ["Bright with direct light from the sun."],
+    "STORM": ["A violent disturbance of the atmosphere."],
+    "BREEZE": ["A light and gentle wind."],
+    "HUMID": ["Containing a high amount of moisture in the air."],
+    "RADAR": ["A system that locates objects using reflected radio waves."],
+    "ORBIT": ["The curved path of an object around a planet or star."],
+    "COMET": ["An icy celestial body that may develop a glowing tail."],
+    "LUNAR": ["Relating to the moon."],
+    "ROCKET": ["A vehicle propelled by rapidly expelled exhaust."],
+    "PLANET": ["A large body that travels around a star."],
+    "STAR": ["A luminous ball of gas held together by gravity."],
+    "ECLIPSE": ["An event in which one celestial body obscures another."],
+    "SERVER": ["A computer or program that provides services to clients."],
+    "DOCKER": ["A platform for packaging applications in containers."],
+    "PYTHON": ["A programming language named after a comedy group."],
+    "ROUTER": ["A device that forwards data between networks."],
+    "SCRIPT": ["A sequence of instructions executed by a computer."],
+    "SENSOR": ["A device that detects or measures a physical property."],
+}
 
 
 def word_allowed(word: Any, excluded_tag_ids: set[int] | None) -> bool:
@@ -28,28 +68,9 @@ def definition_allowed(definition: Any, excluded_tag_ids: set[int] | None) -> bo
     return True
 
 
-def typed_tag_value(tags: list[Any], tag_type: str) -> str:
-    for tag in tags:
-        if getattr(tag, "tag_type", "") == tag_type:
-            return str(getattr(tag, "name", "")).strip()
-    return ""
-
-
-def typed_tag_values(tags: list[Any], tag_type: str) -> list[str]:
-    values = []
-    for tag in tags:
-        if getattr(tag, "tag_type", "") != tag_type:
-            continue
-        value = str(getattr(tag, "name", "")).strip()
-        if value and value not in values:
-            values.append(value)
-    return values
-
-
 def progressive_clues(clues: list[str], word: str) -> tuple[str, list[str]]:
     if not clues:
-        fallback = f"{word.title()} entry."
-        return fallback, [fallback]
+        raise ValueError(f"Crossword answer '{word}' needs at least one clue or definition.")
     primary = clues[0]
     match = re.fullmatch(r"(.+) term starting with ([A-Z0-9]) \((\d+) letters\)\.", primary)
     if not match:
@@ -65,39 +86,20 @@ def progressive_clues(clues: list[str], word: str) -> tuple[str, list[str]]:
 
 def clue_for_word(word: Any, excluded_tag_ids: set[int] | None) -> tuple[str, list[str], int | None] | None:
     definitions = sorted(getattr(word, "definitions", []), key=lambda item: item.position)
-    for definition in definitions:
-        if definition_allowed(definition, excluded_tag_ids):
-            clues = typed_tag_values(getattr(definition, "tags", []), "Clue")
-            definition_text = str(getattr(definition, "definition", "")).strip()
-            definition_clue_text = f"Definition: {definition_text}" if definition_text else ""
-            if definition_clue_text and definition_clue_text not in clues:
-                clues.append(definition_clue_text)
-            if clues:
-                primary, clue_steps = progressive_clues(clues, str(getattr(word, "display_text", "") or getattr(word, "word", "")))
-                return primary, clue_steps, definition.id
-    clue = str(getattr(word, "clue", "") or "").strip()
-    if clue:
-        return clue, [clue], None
-    fallback = f"{word.display_text.title()} entry."
-    return fallback, [fallback], None
+    definitions = [definition for definition in definitions if definition_allowed(definition, excluded_tag_ids)]
+    clues = word_clue_tiers(word, definitions)
+    if not clues:
+        return None
+    primary, clue_steps = progressive_clues(clues, str(getattr(word, "display_text", "") or getattr(word, "word", "")))
+    return primary, clue_steps, getattr(definitions[0], "id", None) if definitions else None
 
 
 def clues_for_definition(definition: Any) -> list[str]:
-    if definition is None:
-        return []
-    clues = typed_tag_values(getattr(definition, "tags", []), "Clue")
-    for clue in (getattr(definition, "properties", {}) or {}).get("clues", []):
-        if isinstance(clue, str) and clue.strip() and clue.strip() not in clues:
-            clues.append(clue.strip())
-    definition_text = str(getattr(definition, "definition", "")).strip()
-    definition_clue = f"Definition: {definition_text}" if definition_text else ""
-    if definition_clue and definition_clue not in clues:
-        clues.append(definition_clue)
-    return clues
+    return definition_clue_tiers(definition)
 
 
 def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] | None = None) -> list[dict] | None:
-    entries = []
+    entries_by_word: dict[int | str, dict] = {}
     for entry in word_entries or []:
         word = entry.get("word") if isinstance(entry, dict) else None
         definition = entry.get("definition") if isinstance(entry, dict) else None
@@ -105,22 +107,28 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
             continue
         if definition is not None and not definition_allowed(definition, excluded_tag_ids):
             continue
-        clues = clues_for_definition(definition)
-        clue_text = clues[0] if clues else ""
-        definition_id = getattr(definition, "id", None) if definition is not None else None
-        if not clue_text:
-            clue = clue_for_word(word, excluded_tag_ids)
-            if clue is None:
-                continue
-            clue_text, clues, definition_id = clue
-        entries.append(
-            {
-                "word": word.word,
-                "clue": clue_text,
-                "clues": clues,
-                "definition_id": definition_id,
-            }
-        )
+        key = getattr(word, "id", None) or str(getattr(word, "word", "")).upper()
+        built = entries_by_word.setdefault(key, {"word": word, "definitions": []})
+        if definition is not None and definition not in built["definitions"]:
+            built["definitions"].append(definition)
+
+    entries = []
+    for built in entries_by_word.values():
+        word = built["word"]
+        selected = built["definitions"] or [
+            definition for definition in sorted(getattr(word, "definitions", []), key=lambda item: item.position)
+            if definition_allowed(definition, excluded_tag_ids)
+        ]
+        clues = word_clue_tiers(word, selected)
+        if not clues:
+            continue
+        clue_text, clues = progressive_clues(clues, str(getattr(word, "display_text", "") or getattr(word, "word", "")))
+        entries.append({
+            "word": word.word,
+            "clue": clue_text,
+            "clues": clues,
+            "definition_id": getattr(selected[0], "id", None) if selected else None,
+        })
     return entries or None
 
 
@@ -315,7 +323,7 @@ def parse_manual_entries(value: Any) -> list[dict[str, Any]]:
         seen.add(word)
         clues = [part for part in parts[1:] if part]
         if not clues:
-            clues = [f"{word.title()} entry."]
+            raise ValueError(f"Crossword answer '{word}' needs at least one clue or definition.")
         entries.append({"word": word, "clue": clues[0], "clues": clues, "definition_id": None})
     if len(entries) < 3:
         raise ValueError("Manual crossword builder needs at least 3 entries.")
@@ -367,7 +375,7 @@ def generate(
 ) -> GeneratedPuzzle:
     generation_options = _generation_options or {}
     raw_entries = source_data if source_data is not None else [
-        {"word": word, "clue": f"Word from {theme.replace('_', ' ')}."}
+        {"word": word, "clues": FALLBACK_CLUES.get(word, [])}
         for word in words_for_theme(theme, difficulty)
     ]
     default_answer_count = {"easy": 5, "medium": 7, "hard": 9}.get(difficulty, 5)
@@ -408,12 +416,11 @@ def generate(
         if len(word) < 3 or len(word) > size or word in seen:
             continue
         seen.add(word)
+        raw_clues = [str(clue).strip() for clue in entry.get("clues", [entry.get("clue")]) if str(clue or "").strip()]
+        if not raw_clues:
+            continue
         primary_clue, clue_steps = styled_clues(
-            [
-                str(clue).strip()
-                for clue in entry.get("clues", [entry.get("clue") or f"{word.title()} entry."])
-                if str(clue).strip()
-            ],
+            raw_clues,
             word,
             clue_style,
             more_clues_depth,

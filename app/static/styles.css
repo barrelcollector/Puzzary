@@ -2109,6 +2109,9 @@ legend {
 
 .clue-list li span {
   display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .clue-list small {

@@ -37,6 +37,7 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
+from app.clues import properties_with_clues, stored_definition_clues
 from app.activity_events import event_summary, record_progress_transition, record_puzzle_event
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
@@ -168,6 +169,7 @@ def tag_lines(tags: list[PuzzleTag], tag_type: str) -> str:
 templates.env.globals["tag_value"] = tag_value
 templates.env.globals["tag_values"] = tag_values
 templates.env.globals["tag_lines"] = tag_lines
+templates.env.globals["definition_clue_lines"] = lambda definition: "\n".join(stored_definition_clues(definition))
 
 
 def app_timezone() -> ZoneInfo:
@@ -892,7 +894,7 @@ def dashboard_review_context(
         for word in dictionary_words
         if word.archived_at is None and word.banned_at is None
         for definition in active_word_definitions(word)
-        if not tag_value(definition.tags, "Clue").strip()
+        if not stored_definition_clues(definition)
     ]
     archived_banks = [bank for bank in all_word_banks if bank.archived_at is not None]
     empty_banks = [
@@ -1643,7 +1645,7 @@ def serialize_definition(definition: DictionaryDefinition) -> dict:
         "id": definition.id,
         "definition": definition.definition,
         "part_of_speech": definition.part_of_speech,
-        "clues": tag_values(definition.tags, "Clue"),
+        "clues": stored_definition_clues(definition),
         "example": definition.example,
         "source": definition.source,
         "position": definition.position,
@@ -1856,6 +1858,7 @@ def import_dictionary_words(
                     **(imported_definition.properties or {}),
                     "import_source": import_label,
                     "imported_at": imported_at,
+                    "clues": [clue.strip() for clue in imported_definition.clues if clue.strip()],
                 },
             )
             definition.tags = definition_tags_from_form(
@@ -1902,7 +1905,8 @@ def word_bank_mode(bank: WordBank | None) -> str:
 def definition_clue(definition: DictionaryDefinition | None) -> str:
     if definition is None:
         return ""
-    return tag_value(definition.tags, "Clue") or definition.definition
+    clues = stored_definition_clues(definition)
+    return clues[0] if clues else definition.definition
 
 
 templates.env.globals["word_bank_mode"] = word_bank_mode
@@ -2881,6 +2885,8 @@ def definition_tags_from_form(
             tags.append(tag)
             existing_ids.add(tag.id)
     for value in [line.strip() for line in clue_tag.splitlines() if line.strip()]:
+        if len(value) > 120:
+            continue
         tag = get_or_create_tag(db, "Clue", value)
         if tag is not None and tag.id not in existing_ids:
             tags.append(tag)
@@ -4915,6 +4921,7 @@ def admin_create_dictionary_definition(
         part_of_speech=(part_of_speech_tag or part_of_speech).strip(),
         example=example.strip(),
         position=next_position,
+        properties=properties_with_clues({}, clue_tag.splitlines()),
     )
     entry.tags = definition_tags_from_form(db, tag_ids, part_of_speech_tag or part_of_speech, clue_tag)
     word.definitions.append(entry)
@@ -4945,6 +4952,7 @@ def admin_update_dictionary_definition(
         entry.part_of_speech = (part_of_speech_tag or part_of_speech).strip()
         entry.example = example.strip()
         entry.position = position
+        entry.properties = properties_with_clues(entry.properties, clue_tag.splitlines())
         entry.tags = definition_tags_from_form(db, tag_ids, part_of_speech_tag or part_of_speech, clue_tag)
         db.commit()
     return RedirectResponse(url=f"/admin/dictionary/{word_id}", status_code=303)
@@ -5526,8 +5534,9 @@ def apply_definition_payload(
         definition.archived_at = datetime.now(timezone.utc) if payload.archived else None
     if payload.tag_ids is not None or payload.clues is not None or payload.part_of_speech is not None:
         tag_ids = payload.tag_ids if payload.tag_ids is not None else [tag.id for tag in definition.tags if tag.tag_type != "Clue"]
-        clues = payload.clues if payload.clues is not None else tag_values(definition.tags, "Clue")
+        clues = payload.clues if payload.clues is not None else stored_definition_clues(definition)
         part_of_speech = payload.part_of_speech if payload.part_of_speech is not None else definition.part_of_speech
+        definition.properties = properties_with_clues(definition.properties, clues)
         definition.tags = definition_tags_from_form(db, tag_ids, part_of_speech, "\n".join(clues))
 
 

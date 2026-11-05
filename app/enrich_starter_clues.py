@@ -59,8 +59,6 @@ def clean_definition(value: str) -> str:
     text = re.sub(r"\([^)]*\)", "", value)
     text = re.sub(r"\s+", " ", text).strip()
     text = text.split(";")[0].strip()
-    if len(text) > 150:
-        text = text[:147].rsplit(" ", 1)[0].rstrip(",") + "..."
     return text
 
 
@@ -68,8 +66,6 @@ def clue_from_definition(definition: str) -> str:
     clue = definition.strip()
     clue = re.sub(r"^(a|an|the)\s+", "", clue, flags=re.IGNORECASE)
     clue = clue[:1].upper() + clue[1:] if clue else clue
-    if len(clue) > 74:
-        clue = clue[:71].rsplit(" ", 1)[0].rstrip(",") + "..."
     return clue
 
 
@@ -84,7 +80,7 @@ def update_definition_tags(db, definition: DictionaryDefinition, clue: str, them
     tags = []
     for tag in (
         get_or_create_tag(db, "Part of Speech", definition.part_of_speech),
-        get_or_create_tag(db, "Clue", clue),
+        get_or_create_tag(db, "Clue", clue) if len(clue) <= 120 else None,
         get_or_create_tag(db, "Theme", theme),
     ):
         if tag is not None:
@@ -140,7 +136,12 @@ def enrich() -> None:
                 db.flush()
             definition.definition = definition_text
             definition.part_of_speech = part_of_speech
-            definition.properties = {**(definition.properties or {}), "clue": clue, "starter_bank": theme}
+            definition.properties = {
+                **(definition.properties or {}),
+                "clue": clue,
+                "clues": [clue],
+                "starter_bank": theme,
+            }
             update_definition_tags(db, definition, clue, theme)
             word.clue = clue
             word.part_of_speech = word.part_of_speech or part_of_speech

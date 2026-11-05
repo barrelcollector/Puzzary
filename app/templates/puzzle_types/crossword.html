@@ -48,12 +48,12 @@
     <ol class="clue-list">
       {% for clue in play_payload.clues if clue.direction == "across" %}
         <li value="{{ clue.number }}">
-          <span>{{ clue.clue }}</span>
+          <span class="crossword-clue-text">{{ clue.clue }}</span>
           {% if clue.clues and clue.clues | length > 1 %}
             <button type="button" class="ghost-button more-clue" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">More clues</button>
             <ul class="clue-steps" hidden>
               {% for extra_clue in clue.clues[1:] %}
-                <li hidden>{{ extra_clue }}</li>
+                <li hidden><strong>Clue {{ loop.index + 1 }}:</strong> <span>{{ extra_clue }}</span></li>
               {% endfor %}
             </ul>
           {% endif %}
@@ -72,12 +72,12 @@
     <ol class="clue-list">
       {% for clue in play_payload.clues if clue.direction == "down" %}
         <li value="{{ clue.number }}">
-          <span>{{ clue.clue }}</span>
+          <span class="crossword-clue-text">{{ clue.clue }}</span>
           {% if clue.clues and clue.clues | length > 1 %}
             <button type="button" class="ghost-button more-clue" data-entry-number="{{ clue.number }}" data-entry-direction="{{ clue.direction }}">More clues</button>
             <ul class="clue-steps" hidden>
               {% for extra_clue in clue.clues[1:] %}
-                <li hidden>{{ extra_clue }}</li>
+                <li hidden><strong>Clue {{ loop.index + 1 }}:</strong> <span>{{ extra_clue }}</span></li>
               {% endfor %}
             </ul>
           {% endif %}

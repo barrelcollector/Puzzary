@@ -4,6 +4,7 @@ import random
 from collections import Counter
 from typing import Any
 
+from app.clues import word_clue_tiers
 from app.content import words_for_theme
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
 from app.group_actions import row_collaboration
@@ -50,45 +51,14 @@ def normalize_word(value: str) -> str:
     return "".join(ch for ch in str(value).upper() if ch.isalnum())
 
 
-def typed_tag_values(tags: list[Any], tag_type: str) -> list[str]:
-    values = []
-    for tag in tags:
-        if getattr(tag, "tag_type", "") != tag_type:
-            continue
-        value = str(getattr(tag, "name", "")).strip()
-        if value and value not in values:
-            values.append(value)
-    return values
-
-
-def definition_clues(definition: Any) -> list[str]:
-    if definition is None:
-        return []
-    clues = typed_tag_values(getattr(definition, "tags", []), "Clue")
-    for clue in (getattr(definition, "properties", {}) or {}).get("clues", []):
-        if isinstance(clue, str) and clue.strip() and clue.strip() not in clues:
-            clues.append(clue.strip())
-    definition_text = str(getattr(definition, "definition", "")).strip()
-    if definition_text:
-        clue = f"Definition: {definition_text}"
-        if clue not in clues:
-            clues.append(clue)
-    return clues
-
-
 def word_clues(word: Any, definition: Any) -> list[str]:
-    clues = definition_clues(definition)
-    fallback = str(getattr(word, "clue", "") or "").strip()
-    if fallback and fallback not in clues:
-        clues.append(fallback)
+    definitions = [definition] if definition is not None else None
+    clues = word_clue_tiers(word, definitions)
     notes = getattr(word, "properties", {}) or {}
     if isinstance(notes, dict):
         note = str(notes.get("notes", "") or "").strip()
         if note and note not in clues:
             clues.append(note)
-    display = str(getattr(word, "display_text", "") or getattr(word, "word", "")).strip()
-    if not clues and display:
-        clues.append(f"{display.title()} entry.")
     return clues
 
 
@@ -104,11 +74,14 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
             continue
         seen.add(normalized)
         definition = entry.get("definition") if isinstance(entry, dict) else None
+        clues = word_clues(word, definition)
+        if not clues:
+            continue
         entries.append(
             {
                 "word": normalized,
                 "display": str(getattr(word, "display_text", "") or normalized),
-                "clues": word_clues(word, definition),
+                "clues": clues,
                 "definition_id": getattr(definition, "id", None) if definition is not None else None,
             }
         )
@@ -117,7 +90,7 @@ def build_source(word_entries: Any, difficulty: str, excluded_tag_ids: set[int] 
 
 def fallback_source(theme: str, difficulty: str) -> list[dict]:
     guaranteed = [word for chain in GUARANTEED_CHAINS for word in chain]
-    themed = words_for_theme(theme, difficulty)
+    themed = [word for word in words_for_theme(theme, difficulty) if normalize_word(word) in FALLBACK_CLUES]
     words = []
     for word in themed + guaranteed:
         normalized = normalize_word(word)
@@ -127,10 +100,7 @@ def fallback_source(theme: str, difficulty: str) -> list[dict]:
         {
             "word": normalize_word(word),
             "display": str(word).title(),
-            "clues": FALLBACK_CLUES.get(
-                normalize_word(word),
-                [f"{str(word).title()} is connected to {theme.replace('_', ' ')}."],
-            ),
+            "clues": FALLBACK_CLUES[normalize_word(word)],
             "definition_id": None,
         }
         for word in words
@@ -339,7 +309,9 @@ def parse_manual_rows(value: Any) -> list[dict[str, Any]]:
         seen.add(answer)
         clues = [part for part in parts[1:] if part]
         if not clues:
-            clues = FALLBACK_CLUES.get(answer, [f"{answer.title()} entry."])
+            clues = FALLBACK_CLUES.get(answer, [])
+        if not clues:
+            raise ValueError(f"Word pyramid answer '{answer}' needs at least one clue or definition.")
         rows.append({"word": answer, "clues": clues, "definition_id": None})
     if len(rows) < 3:
         raise ValueError("Manual word pyramid builder needs at least 3 rows.")
@@ -373,7 +345,9 @@ def build_manual_puzzle(options: dict[str, Any]) -> GeneratedPuzzle:
     solution_rows = []
     for index, entry in enumerate(rows_source):
         answer = entry["word"]
-        clues = entry.get("clues") or [f"{answer.title()} entry."]
+        clues = entry.get("clues") or []
+        if not clues:
+            raise ValueError(f"Word pyramid answer '{answer}' needs at least one clue or definition.")
         row = {
             "index": index,
             "number": index + 1,
@@ -460,14 +434,16 @@ def generate(
     for index, entry in enumerate(chain):
         answer = normalize_word(entry.get("word", ""))
         clues = [str(clue).strip() for clue in entry.get("clues", []) if str(clue).strip()]
-        primary = clues[0] if clues else f"{answer.title()} entry."
+        if not clues:
+            raise ValueError(f"Word pyramid answer '{answer}' needs at least one clue or definition.")
+        primary = clues[0]
         is_gimme = index < gimme_count
         row = {
             "index": index,
             "number": index + 1,
             "length": len(answer),
             "clue": primary,
-            "clues": clues or [primary],
+            "clues": clues,
             "definition_id": entry.get("definition_id"),
             "gimme": is_gimme,
         }

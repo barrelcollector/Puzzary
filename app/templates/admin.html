@@ -1107,7 +1107,7 @@
                 {% if definition.archived_at %}<small class="chip muted-chip">Archived</small>{% endif %}
                 <label>Definition <textarea name="definition" rows="3" required>{{ definition.definition }}</textarea></label>
                 <label>Part of Speech tag <input name="part_of_speech_tag" value="{{ tag_value(definition.tags, 'Part of Speech') or definition.part_of_speech }}" placeholder="Noun"></label>
-                <label>Clues <textarea name="clue_tag" rows="3" placeholder="One clue per line">{{ tag_lines(definition.tags, 'Clue') }}</textarea></label>
+                <label>Clues <textarea name="clue_tag" rows="4" placeholder="One full clue per line">{{ definition_clue_lines(definition) }}</textarea><small>Full-length clues are preserved; short clues are also indexed as tags.</small></label>
                 <label>Example <textarea name="example" rows="2">{{ definition.example }}</textarea></label>
                 <label>Order <input name="position" type="number" value="{{ definition.position }}"></label>
                 <fieldset>
