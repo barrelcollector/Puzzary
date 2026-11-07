@@ -25,6 +25,7 @@ with sync_playwright() as playwright:
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.set_content(f"<style>{(static / 'styles.css').read_text(encoding='utf-8')}</style>" + html + '<button id="reveal-solution">Reveal solution</button>')
+    page.evaluate("document.documentElement.dataset.theme='dark'")
     page.evaluate("""
       window.actions=[]; window.wins=0; window.resets=0;
       window.PuzzaryCelebrate={complete:()=>window.wins++,reset:()=>window.resets++};
@@ -45,6 +46,12 @@ with sync_playwright() as playwright:
     page.add_script_tag(content=(static / "minesweeper.js").read_text(encoding="utf-8"))
     cells = page.locator(".minesweeper-cell")
     assert cells.count() == 25
+    assert page.evaluate("""[...document.querySelectorAll('.minesweeper-cell')].every(cell => {
+      const style=getComputedStyle(cell);
+      return style.borderRightWidth==='1px' && style.borderRightStyle==='solid'
+        && style.borderBottomWidth==='1px' && style.borderBottomStyle==='solid'
+        && style.borderRightColor!=='rgba(0, 0, 0, 0)';
+    })""")
     cells.nth(0).click()
     assert page.evaluate("actions.at(-1)") == ["reveal_cell", "0,0"]
     assert cells.nth(0).inner_text() == "1"
@@ -74,8 +81,13 @@ with sync_playwright() as playwright:
         puzzle=SimpleNamespace(solution_payload=solution),
     )
     page.set_content(f"<style>{(static / 'styles.css').read_text(encoding='utf-8')}</style>" + solution_html)
+    page.evaluate("document.documentElement.dataset.theme='dark'")
     assert page.locator(".minesweeper-cell.is-mine").count() == 3
     assert "3 mines" in page.locator("body").inner_text()
+    assert page.evaluate("""[...document.querySelectorAll('.minesweeper-cell')].every(cell => {
+      const style=getComputedStyle(cell);
+      return style.borderRightWidth==='1px' && style.borderBottomWidth==='1px';
+    })""")
     assert not errors, errors
     browser.close()
 
