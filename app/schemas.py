@@ -88,6 +88,7 @@ class PuzzlePrintPreview(BaseModel):
     print_url: str
     render_url: str
     pdf_url: str = ""
+    png_url: str = ""
 
 
 class PrintManifestRequest(BaseModel):

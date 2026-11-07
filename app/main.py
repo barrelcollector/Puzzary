@@ -44,7 +44,7 @@ from app.activity_events import event_summary, record_progress_transition, recor
 from app.database import SessionLocal, ensure_schema, get_db, init_db
 from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
 from app.dictionary_queries import dictionary_statement, tag_usage_counts, word_bank_entry_counts
-from app.print_pdf import render_pdf
+from app.print_pdf import render_pdf, render_png
 from app.models import (
     AppSetting,
     AppearanceTheme,
@@ -4343,7 +4343,7 @@ def admin_unarchive_puzzle(puzzle_id: str, request: Request, db: Session = Depen
     puzzle = db.get(Puzzle, puzzle_id)
     if puzzle is not None:
         puzzle.archived_at = None
-        if puzzle.auto_archive_at is not None and puzzle.auto_archive_at <= utcnow():
+        if puzzle.auto_archive_at is not None and normalize_publish_at(puzzle.auto_archive_at) <= utcnow():
             puzzle.auto_archive_at = None
         db.commit()
     return RedirectResponse(url="/admin/puzzles", status_code=303)
@@ -5505,6 +5505,26 @@ def api_puzzle_pdf(puzzle_id: str, request: Request, db: Session = Depends(get_d
     return puzzle_pdf_response(puzzle_id, request, db, user)
 
 
+@app.get("/api/puzzles/{puzzle_id}/print.png")
+def api_puzzle_png(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return a printable puzzle as an image for automation consumers."""
+    user = require_api_user(request, db)
+    rendered = render_puzzle_print_page(puzzle_id, request, db, user, show_toolbar=False, pdf_mode=True)
+    layout = rendered.context["print_layout"]
+    try:
+        image = render_png(rendered.body.decode("utf-8"), layout)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "10"}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PlaywrightError as exc:
+        raise HTTPException(status_code=503, detail="Image rendering failed. Please retry.") from exc
+    return Response(image, media_type="image/png", headers={
+        "Content-Disposition": f'inline; filename="puzzary-{puzzle_id}.png"',
+        "Cache-Control": "private, no-store",
+    })
+
+
 def puzzle_pdf_response(puzzle_id: str, request: Request, db: Session, user: User) -> Response:
     rendered = render_puzzle_print_page(puzzle_id, request, db, user, show_toolbar=False, pdf_mode=True)
     layout = rendered.context["print_layout"]
@@ -6476,6 +6496,7 @@ def printable_puzzle_for_automation(
         "print_url": puzzle_print_url(puzzle.id, db),
         "render_url": render_url,
         "pdf_url": f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.pdf",
+        "png_url": f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.png",
     }
 
 
@@ -6627,6 +6648,58 @@ def api_update_manual_puzzle(
     return serialize_puzzle(puzzle, db)
 
 
+@app.post("/api/puzzles/{puzzle_id}/publish", response_model=PuzzleSummary)
+def api_publish_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
+    """Publish a puzzle immediately through an administrative API client."""
+    user = require_admin_api(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    require_owned(user, "puzzles", "publish", puzzle.created_by_id)
+    error = manual_puzzle_publish_error(db, puzzle)
+    if error:
+        raise HTTPException(status_code=422, detail=error)
+    publish_puzzle_now(db, user, puzzle)
+    db.commit()
+    db.refresh(puzzle)
+    return serialize_puzzle(puzzle, db)
+
+
+@app.post("/api/puzzles/{puzzle_id}/archive", response_model=PuzzleSummary)
+def api_archive_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
+    """Archive a puzzle through an administrative API client."""
+    user = require_admin_api(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    require_owned(user, "puzzles", "archive", puzzle.created_by_id)
+    before = {"state": puzzle_publication_state(puzzle)}
+    puzzle.archived_at = utcnow()
+    audit(db, user, "puzzle", puzzle.id, "puzzle.archived", before, {"state": "archived"})
+    db.commit()
+    db.refresh(puzzle)
+    return serialize_puzzle(puzzle, db)
+
+
+@app.post("/api/puzzles/{puzzle_id}/unarchive", response_model=PuzzleSummary)
+def api_unarchive_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> PuzzleSummary:
+    """Restore an archived puzzle through an administrative API client."""
+    user = require_admin_api(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    require_owned(user, "puzzles", "archive", puzzle.created_by_id)
+    before = {"state": puzzle_publication_state(puzzle)}
+    puzzle.archived_at = None
+    if puzzle.auto_archive_at is not None and normalize_publish_at(puzzle.auto_archive_at) <= utcnow():
+        puzzle.auto_archive_at = None
+    after = {"state": puzzle_publication_state(puzzle)}
+    audit(db, user, "puzzle", puzzle.id, "puzzle.restored", before, after)
+    db.commit()
+    db.refresh(puzzle)
+    return serialize_puzzle(puzzle, db)
+
+
 @app.get("/api/puzzles/{puzzle_id}/export")
 def api_export_puzzle(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
     require_admin_api(request, db)
@@ -6668,6 +6741,7 @@ def get_puzzle_print_preview(puzzle_id: str, request: Request, db: Session = Dep
         print_url=puzzle_print_url(puzzle.id, db),
         render_url=render_url,
         pdf_url=f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.pdf",
+        png_url=f"{app_base_url(db)}/api/puzzles/{puzzle.id}/print.png",
     )
 
 

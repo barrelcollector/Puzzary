@@ -116,6 +116,7 @@ try:
         assert job["layout"]["render_url"] == job["render_url"]
         assert job["url"].startswith("https://puzzary.example.test/")
         assert job["pdf_url"].startswith("https://puzzary.example.test/api/")
+        assert job["png_url"].startswith("https://puzzary.example.test/api/")
         bundle = manifest["issues"][0]
         assert bundle["id"] == issue_id and bundle["modules"][0]["print_payload"]
         serialized = manifest_response.text()

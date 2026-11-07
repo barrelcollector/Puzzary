@@ -55,11 +55,17 @@ Or resolve the latest available printable puzzle and latest published issue:
 }
 ```
 
-The manifest has schema `puzzary.print-manifest.v1`. Each puzzle job contains its `print_payload`, layout metadata, canonical page, browser-print URL, short-lived authenticated render URL, and API PDF URL. Each issue job contains its immutable ordered module snapshot and combined PDF URL. Duplicate selectors are collapsed while preserving requested order. Draft issues are rejected because they do not have immutable bundle snapshots.
+The manifest has schema `puzzary.print-manifest.v1`. Each puzzle job contains its `print_payload`, layout metadata, canonical page, browser-print URL, short-lived authenticated render URL, API PDF URL, and API PNG URL. Each issue job contains its immutable ordered module snapshot and combined PDF URL. Duplicate selectors are collapsed while preserving requested order. Draft issues are rejected because they do not have immutable bundle snapshots.
 
 Fetch `pdf_url` with the same bearer header. A `render_url` carries a puzzle-specific token that expires after 15 minutes and should be treated as sensitive; request a new manifest instead of storing it. Print feeding, cutter commands, queues, retries, and physical-printer status remain the print service's responsibility.
 
 ## Home Assistant example
+
+For new installations, prefer the bundled custom integration described in the
+[Home Assistant integration guide](home-assistant.md). It provides native
+sensors, an image entity, and response-capable actions without hand-written REST
+configuration. The generic REST examples below remain useful for older
+installations and specialized workflows.
 
 These examples follow Home Assistant's official [RESTful Command](https://www.home-assistant.io/integrations/rest_command/) and [RESTful Sensor](https://www.home-assistant.io/integrations/sensor.rest/) configuration contracts.
 
@@ -116,8 +122,9 @@ Reload or restart Home Assistant as required for the configuration section you c
 
 - `GET /api/puzzles/latest?printable=true` returns the newest accessible printable puzzle.
 - `GET /api/puzzles/{id}` returns one puzzle's safe print payload.
-- `GET /api/puzzles/{id}/print-preview` returns layout and print/render/PDF URLs.
+- `GET /api/puzzles/{id}/print-preview` returns layout and print/render/PDF/PNG URLs.
 - `GET /api/puzzles/{id}/print.pdf` downloads one rendered PDF.
+- `GET /api/puzzles/{id}/print.png` downloads the spoiler-free print sheet as an image.
 - `GET /api/issues/latest` returns the latest published issue and ordered module payloads.
 - `GET /api/issues/{id}` returns a selected issue.
 - `GET /api/issues/{id}/print.pdf` downloads the combined issue PDF.
