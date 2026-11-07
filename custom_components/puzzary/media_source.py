@@ -64,7 +64,7 @@ class PuzzaryMediaSource(MediaSource):
 
     async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
         """Browse servers, status folders, puzzle types, and puzzle images."""
-        parts = [part for part in item.identifier.strip("/").split("/") if part]
+        parts = [part for part in (item.identifier or "").strip("/").split("/") if part]
         if not parts:
             entries = self._loaded_entries()
             if len(entries) == 1:
@@ -95,7 +95,7 @@ class PuzzaryMediaSource(MediaSource):
 
     async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
         """Resolve one puzzle to a short-lived authenticated Home Assistant URL."""
-        parts = [part for part in item.identifier.strip("/").split("/") if part]
+        parts = [part for part in (item.identifier or "").strip("/").split("/") if part]
         if len(parts) != 5 or parts[2] != "type":
             raise Unresolvable("Select a puzzle image")
         entry_id, puzzle_id = parts[0], parts[4]
