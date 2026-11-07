@@ -1,5 +1,6 @@
 """Generation, privacy, rule, and progress checks for Minesweeper."""
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 import unittest
 
@@ -39,9 +40,32 @@ class MinesweeperTests(unittest.TestCase):
             {"width": 4}, {"width": 31}, {"height": 4}, {"height": 25},
             {"mine_count": 0}, {"width": 5, "height": 5, "mine_count": 25},
             {"width": 5.5}, {"height": True}, {"mine_count": "many"},
+            {"open_connected_safe_spaces": "sometimes"},
         ):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 generate("", "easy", generation_options=options)
+
+    def test_connected_safe_space_setting(self):
+        solution = {
+            "kind": "minesweeper", "width": 3, "height": 3, "mine_count": 1,
+            "mines": ["2,2"], "counts": counts_for(3, 3, {"2,2"}),
+        }
+        action = {"kind": "reveal_cell", "target": "0,0", "changes": {}}
+        default_state = collaboration({}, action, solution)
+        self.assertEqual(default_state["status"], "won")
+        self.assertEqual(len(default_state["answers"]), 8)
+
+        single_space = deepcopy(solution)
+        single_space["settings"] = {"open_connected_safe_spaces": False}
+        single_state = collaboration({}, action, single_space)
+        self.assertEqual(single_state["status"], "playing")
+        self.assertEqual(single_state["answers"], {"0,0": "0"})
+
+        generated = generate("", "easy", seed="connected-setting", generation_options={
+            "width": 5, "height": 5, "mine_count": 3, "open_connected_safe_spaces": "no",
+        })
+        self.assertFalse(generated.play_payload["settings"]["open_connected_safe_spaces"])
+        self.assertFalse(generated.solution_payload["settings"]["open_connected_safe_spaces"])
 
     def test_flag_reveal_chord_and_reset(self):
         state = self.action({}, "reveal_cell", "0,0")

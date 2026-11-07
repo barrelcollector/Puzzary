@@ -17,6 +17,17 @@ def whole_number(value, label):
     return result
 
 
+def yes_no(value, label):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in ("yes", "true", "1", "on"):
+        return True
+    if normalized in ("no", "false", "0", "off"):
+        return False
+    raise ValueError(f"{label} must be yes or no.")
+
+
 def key(x, y):
     return f"{x},{y}"
 
@@ -81,7 +92,7 @@ def clean_state(state, solution):
     return {"answers": answers, "status": status, "exploded": exploded}
 
 
-def reveal_from(answers, start, width, height, mines, counts):
+def reveal_from(answers, start, width, height, mines, counts, open_connected=True):
     if start in mines:
         return False
     pending = [start]
@@ -92,7 +103,7 @@ def reveal_from(answers, start, width, height, mines, counts):
             continue
         seen.add(cell)
         answers[cell] = counts[cell]
-        if counts[cell] == "0":
+        if open_connected and counts[cell] == "0":
             pending.extend(neighbors(cell, width, height))
     return True
 
@@ -101,6 +112,8 @@ def collaboration(state, action, solution):
     result = clean_state(deepcopy(state), solution)
     width, height, mines, valid = board(solution)
     counts = counts_for(width, height, mines)
+    settings = solution.get("settings", {}) if isinstance(solution.get("settings", {}), dict) else {}
+    open_connected = settings.get("open_connected_safe_spaces", True) is not False
     kind = action.get("kind")
     if kind == "reset":
         return {"answers": {}, "status": "playing", "exploded": ""}
@@ -130,16 +143,17 @@ def collaboration(state, action, solution):
                 adjacent = neighbors(target, width, height)
                 if sum(answers.get(cell) == "F" for cell in adjacent) == int(counts[target]):
                     for cell in adjacent:
-                        if cell not in answers and not reveal_from(answers, cell, width, height, mines, counts):
+                        if cell not in answers and not reveal_from(
+                                answers, cell, width, height, mines, counts, open_connected):
                             result["status"], result["exploded"] = "lost", cell
                             answers.update({mine: "M" for mine in mines})
                             break
             else:
-                reveal_from(answers, target, width, height, mines, counts)
+                reveal_from(answers, target, width, height, mines, counts, open_connected)
     elif kind == "hint":
         target = next((cell for cell in sorted(counts) if cell not in answers), "")
         if target:
-            reveal_from(answers, target, width, height, mines, counts)
+            reveal_from(answers, target, width, height, mines, counts, open_connected)
             result["hints_used"] = int(result.get("hints_used", 0)) + 1
     elif kind == "reveal":
         result.update({"answers": {**counts, **{cell: "M" for cell in mines}}, "status": "revealed", "exploded": ""})
@@ -181,6 +195,7 @@ def generate(_theme, _difficulty, source_data=None, seed=None, generation_option
     width = whole_number(options.get("width", 9), "Width")
     height = whole_number(options.get("height", 9), "Height")
     mine_count = whole_number(options.get("mine_count", 10), "Mine count")
+    open_connected = yes_no(options.get("open_connected_safe_spaces", "yes"), "Open connected safe spaces")
     if not 5 <= width <= 30:
         raise ValueError("Width must be from 5 to 30.")
     if not 5 <= height <= 24:
@@ -190,7 +205,8 @@ def generate(_theme, _difficulty, source_data=None, seed=None, generation_option
     seed = str(seed or uuid.uuid4().hex)
     cells = [key(x, y) for y in range(height) for x in range(width)]
     mines = sorted(random.Random(seed).sample(cells, mine_count))
-    public = {"kind": "minesweeper", "width": width, "height": height, "mine_count": mine_count}
+    public = {"kind": "minesweeper", "width": width, "height": height, "mine_count": mine_count,
+              "settings": {"open_connected_safe_spaces": open_connected}}
     solution = {**public, "mines": mines, "counts": counts_for(width, height, set(mines))}
     return GeneratedPuzzle(
         title=f"{width}x{height} Minesweeper",
@@ -202,7 +218,8 @@ def generate(_theme, _difficulty, source_data=None, seed=None, generation_option
                "When a number already touches that many flags, its other hidden neighbors are safe.",
                "When a number has exactly that many hidden neighbors left, those neighbors must be mines."],
         metadata={"generator": "local.minesweeper.v1", "seed": seed,
-                  "generation_options": {"width": width, "height": height, "mine_count": mine_count}},
+                  "generation_options": {"width": width, "height": height, "mine_count": mine_count,
+                                         "open_connected_safe_spaces": open_connected}},
     )
 
 
@@ -216,6 +233,9 @@ register_puzzle_type(PuzzleType(
         GenerationField("width", "Width", "number", 9, minimum=5, maximum=30),
         GenerationField("height", "Height", "number", 9, minimum=5, maximum=24),
         GenerationField("mine_count", "Mines", "number", 10, minimum=1, maximum=719),
+        GenerationField("open_connected_safe_spaces", "Open connected safe spaces", "select", "yes",
+                        help_text="When a revealed space has no adjacent mines, open its connected clear area and numbered boundary.",
+                        options=({"value": "yes", "label": "On"}, {"value": "no", "label": "Off"})),
     ),
     play_script="minesweeper.js?v=1",
 ))
