@@ -36,6 +36,19 @@ the same spoiler-free print sheet used by its print preview as a PNG. Home
 Assistant fetches that image only when the entity is viewed or an image action
 requests it; the image is cached until the latest puzzle changes.
 
+## Media folders
+
+Puzzary also appears in Home Assistant's Media browser. Printable puzzles are
+organized into **Active puzzles**, **In-progress puzzles**, **Completed
+puzzles**, and **Archived puzzles**, followed by a folder for each puzzle type.
+Non-printable digital games, locked password-protected puzzles, and currently
+locked sequential-series stages are not offered as printable media.
+
+The integration proxies a selected PNG through Home Assistant and gives media
+players a short-lived signed URL. The Puzzary API token is never placed in the
+media item or its URL. Puzzle images are rendered only when selected rather
+than eagerly rendering every puzzle while a folder is opened.
+
 ## Actions
 
 Each action requires the Puzzary configuration entry so automations remain

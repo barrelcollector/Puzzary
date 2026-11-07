@@ -1169,6 +1169,7 @@ def library_filter_state(request: Request, current_user: User) -> dict:
         "created_by": params.get("created_by", "any"),
         "availability": availability,
         "sort": sort,
+        "printable": params.get("printable", "false").lower() in {"1", "true", "yes"},
         "limit": max(12, min(200, int(params.get("limit", "60") or 60))) if str(params.get("limit", "60")).isdigit() else 60,
         "current_user_id": current_user.id,
     }
@@ -1316,11 +1317,16 @@ def filtered_library(
     current_user: User,
     include_archived_for_admin: bool = True,
 ) -> dict:
+    def discoverable(puzzle: Puzzle) -> bool:
+        if puzzle.archived_at is not None:
+            return include_archived_for_admin and can_view(current_user, puzzle)
+        return can_discover(current_user, puzzle)
+
     all_puzzles = db.scalars(select(Puzzle).options(
         selectinload(Puzzle.tags), selectinload(Puzzle.category), selectinload(Puzzle.word_bank),
         selectinload(Puzzle.creator),
     ).order_by(desc(Puzzle.created_at))).all()
-    all_puzzles = [puzzle for puzzle in all_puzzles if can_discover(current_user, puzzle)]
+    all_puzzles = [puzzle for puzzle in all_puzzles if discoverable(puzzle)]
     filters = library_filter_state(request, current_user)
     options = library_options(db, all_puzzles, current_user)
     progress_by_puzzle = progress_map_for_user(db, current_user, all_puzzles)
@@ -1333,7 +1339,7 @@ def filtered_library(
     selected_tags = {int(tag_id) for tag_id in filters["tags"] if str(tag_id).isdigit()}
 
     def matches(puzzle: Puzzle) -> bool:
-        if not can_discover(current_user, puzzle):
+        if not discoverable(puzzle):
             return False
         if filters["availability"] == "active" and puzzle.archived_at is not None:
             return False
@@ -1341,6 +1347,18 @@ def filtered_library(
             return False
         if filters["availability"] == "scheduled" and puzzle.auto_archive_at is None:
             return False
+        if filters["printable"]:
+            puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+            if puzzle_type is None or not puzzle_type.supports_print or puzzle_type.digital_only:
+                return False
+            if not puzzle_access_granted(request, puzzle):
+                return False
+            try:
+                require_series_access(db, puzzle, current_user)
+            except HTTPException as error:
+                if error.status_code == 423:
+                    return False
+                raise
         if not include_archived_for_admin and puzzle.archived_at is not None:
             return False
         if filters["types"] and puzzle.puzzle_type not in filters["types"]:

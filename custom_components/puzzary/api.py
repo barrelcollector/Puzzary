@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlencode
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
@@ -69,6 +70,24 @@ class PuzzaryApiClient:
 
     async def async_puzzle_image(self, puzzle_id: str) -> bytes:
         return await self._request("GET", f"/api/puzzles/{puzzle_id}/print.png", binary=True)
+
+    async def async_puzzles(
+        self,
+        *,
+        availability: str = "active",
+        status: str = "any",
+        puzzle_type: str | None = None,
+    ) -> dict[str, Any]:
+        params: list[tuple[str, str]] = [
+            ("availability", availability),
+            ("status", status),
+            ("printable", "true"),
+            ("limit", "200"),
+            ("sort", "created_desc"),
+        ]
+        if puzzle_type:
+            params.append(("type", puzzle_type))
+        return await self._request("GET", f"/api/puzzles?{urlencode(params)}")
 
     async def async_generate_puzzle(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/api/puzzles/generate", json=payload)

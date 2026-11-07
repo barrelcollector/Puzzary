@@ -29,7 +29,7 @@ from sqlalchemy import select
 
 from app.database import Base, SessionLocal, engine
 from app.main import hash_secret
-from app.models import PermissionRole, User
+from app.models import PermissionRole, Puzzle, User
 from app.permissions import initialize_permissions
 
 
@@ -98,6 +98,33 @@ try:
 
         latest = player.get(BASE + "/api/puzzles/latest?printable=true")
         assert latest.ok and latest.json()["id"] == puzzle_id
+        protected = admin.post(BASE + "/api/puzzles/generate", data={
+            "puzzle_type": "takuzu",
+            "difficulty": "easy",
+            "seed": "home-assistant-protected-media-qa",
+            "generation_options": {"grid_size": 4, "given_count": 6},
+            "access_password": "Media-Test-Password1!",
+        })
+        assert protected.ok and protected.json()["password_protected"] is True, protected.text()
+        with SessionLocal() as db:
+            db.add(Puzzle(
+                id="digital-only-media-fixture",
+                puzzle_type="unknown_digital",
+                title="Digital-only fixture",
+                theme="test",
+                difficulty="easy",
+                prompt="",
+                print_payload={},
+                play_payload={},
+                solution_payload={},
+                puzzle_metadata={},
+                source="test",
+            ))
+            db.commit()
+        media_list = player.get(BASE + "/api/puzzles?availability=active&printable=true&limit=200")
+        assert media_list.ok, media_list.text()
+        assert [item["id"] for item in media_list.json()["items"]] == [puzzle_id]
+        assert media_list.json()["filters"]["printable"] is True
         image = player.get(BASE + f"/api/puzzles/{puzzle_id}/print.png")
         assert image.ok, image.text()
         assert image.headers["content-type"].startswith("image/png")
@@ -110,6 +137,9 @@ try:
         assert denied_archive.status == 403, f"{denied_archive.status}: {denied_archive.text()}"
         archived = admin.post(BASE + f"/api/puzzles/{puzzle_id}/archive")
         assert archived.ok and archived.json()["publication_state"] == "archived"
+        archived_media = admin.get(BASE + "/api/puzzles?availability=archived&printable=true&limit=200")
+        assert archived_media.ok and archived_media.json()["items"] and archived_media.json()["items"][0]["id"] == puzzle_id, archived_media.text()
+        assert not player.get(BASE + "/api/puzzles?availability=archived&printable=true&limit=200").json()["items"]
         restored = admin.post(BASE + f"/api/puzzles/{puzzle_id}/unarchive")
         assert restored.ok and restored.json()["publication_state"] == "published", restored.text()
         republished = admin.post(BASE + f"/api/puzzles/{puzzle_id}/publish")
@@ -124,13 +154,14 @@ try:
     translations = json.loads((component / "translations" / "en.json").read_text(encoding="utf-8"))
     services = yaml.safe_load((component / "services.yaml").read_text(encoding="utf-8"))
     assert manifest["domain"] == "puzzary" and manifest["config_flow"] is True
-    for filename in ("__init__.py", "api.py", "config_flow.py", "coordinator.py", "sensor.py", "image.py", "services.yaml"):
+    for filename in ("__init__.py", "api.py", "config_flow.py", "coordinator.py", "sensor.py", "image.py", "media_source.py", "services.yaml"):
         assert (component / filename).is_file(), filename
+    assert manifest["dependencies"] == ["http", "media_source"]
     for service in ("refresh", "generate_puzzle", "publish_puzzle", "archive_puzzle", "unarchive_puzzle"):
         assert service in strings["services"]
         assert service in translations["services"] and service in services
         assert set(services[service]["fields"]) == set(translations["services"][service]["fields"])
-    print("Home Assistant stats, latest selection, PNG rendering, permissions, admin actions, and bundle structure passed.")
+    print("Home Assistant stats, media folders, printable filtering, PNG/PDF rendering, permissions, admin actions, and bundle structure passed.")
 finally:
     server.terminate()
     try:

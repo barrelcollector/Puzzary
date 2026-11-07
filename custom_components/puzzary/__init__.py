@@ -24,6 +24,7 @@ from .const import (
     SERVICE_UNARCHIVE_PUZZLE,
 )
 from .coordinator import PuzzaryCoordinator
+from .media_source import PuzzaryMediaView
 
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 ATTR_PUZZLE_ID = "puzzle_id"
@@ -31,6 +32,8 @@ ATTR_PUZZLE_ID = "puzzle_id"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register actions even before a config entry is loaded."""
+
+    hass.http.register_view(PuzzaryMediaView())
 
     async def async_handle_service(call: ServiceCall) -> ServiceResponse | None:
         coordinator = _coordinator_for_call(hass, call)

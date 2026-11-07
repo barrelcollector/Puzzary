@@ -118,9 +118,11 @@ Admins can issue per-account API tokens from the Users page. Tokens are shown on
 ## Home Assistant
 
 Puzzary includes an installable custom integration in
-`custom_components/puzzary`. It creates account-statistics sensors and an image
-entity containing the latest printable puzzle. Its actions can refresh data,
-generate puzzles, publish drafts, archive puzzles, and restore archived puzzles.
+`custom_components/puzzary`. It creates account-statistics sensors, an image
+entity containing the latest printable puzzle, and a Puzzary media source with
+active, in-progress, completed, and archived folders organized by puzzle type.
+Its actions can refresh data, generate puzzles, publish drafts, archive puzzles,
+and restore archived puzzles.
 
 Copy that folder to Home Assistant's `config/custom_components/puzzary`, restart
 Home Assistant, then add **Puzzary** from **Settings -> Devices & services**.
