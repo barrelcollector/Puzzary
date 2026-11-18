@@ -15,6 +15,7 @@ LOGGER = logging.getLogger(__name__)
 PLUGIN_SCHEMA = "puzzary.plugin.v1"
 PLUGIN_API_VERSION = "1"
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+OFFICIAL_CATALOG_PATH = Path(__file__).with_name("official_plugins.json")
 
 
 @dataclass(frozen=True)
@@ -161,11 +162,68 @@ def plugin_static_directories() -> dict[str, Path]:
     }
 
 
+def official_plugin_catalog() -> dict[str, Any]:
+    catalog = json.loads(OFFICIAL_CATALOG_PATH.read_text(encoding="utf-8"))
+    if catalog.get("schema") != "puzzary.plugin.catalog.v1":
+        raise ValueError("official plugin catalog schema is invalid")
+    plugins = catalog.get("plugins")
+    if not isinstance(plugins, list):
+        raise ValueError("official plugin catalog must contain a plugins list")
+    for plugin in plugins:
+        if not isinstance(plugin, dict) or not SLUG_PATTERN.fullmatch(str(plugin.get("slug", ""))):
+            raise ValueError("official plugin catalog contains an invalid slug")
+        digest = str(plugin.get("sha256", ""))
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest.lower()):
+            raise ValueError(f"official plugin {plugin['slug']} has an invalid digest")
+    return catalog
+
+
+def installed_plugin_packages() -> tuple[list[dict[str, Any]], dict[str, str]]:
+    installed: list[dict[str, Any]] = []
+    errors: dict[str, str] = {}
+    root = plugin_root()
+    if not root.is_dir():
+        return installed, errors
+    for package_dir in sorted(path for path in root.iterdir() if path.is_dir() and not path.name.startswith(".")):
+        try:
+            package = read_manifest(package_dir)
+            data = package.as_dict()
+            loaded = LOADED_PACKAGES.get(package.slug)
+            data["loaded"] = loaded is not None and loaded.version == package.version
+            data["loaded_version"] = loaded.version if loaded is not None else None
+            data["restart_required"] = loaded is None or loaded.version != package.version
+            installed.append(data)
+        except Exception as exc:
+            errors[package_dir.name] = str(exc)
+    return installed, errors
+
+
+def rollback_plugin_packages() -> tuple[list[dict[str, Any]], dict[str, str]]:
+    rollbacks: list[dict[str, Any]] = []
+    errors: dict[str, str] = {}
+    root = plugin_root()
+    if not root.is_dir():
+        return rollbacks, errors
+    for package_dir in sorted(path for path in root.glob(".*.rollback") if path.is_dir()):
+        try:
+            rollbacks.append(read_manifest(package_dir).as_dict())
+        except Exception as exc:
+            errors[package_dir.name] = str(exc)
+    return rollbacks, errors
+
+
 def package_status() -> dict[str, Any]:
+    installed, installed_errors = installed_plugin_packages()
+    rollbacks, rollback_errors = rollback_plugin_packages()
     return {
         "schema": PLUGIN_SCHEMA,
         "api_version": PLUGIN_API_VERSION,
         "directory": str(plugin_root()),
         "packages": [package.as_dict() for package in LOADED_PACKAGES.values()],
-        "errors": dict(PLUGIN_LOAD_ERRORS),
+        "installed": installed,
+        "rollbacks": rollbacks,
+        "official_catalog": official_plugin_catalog(),
+        "github_access_configured": bool(os.getenv("PUZZARY_PLUGIN_GITHUB_TOKEN", "").strip()),
+        "restart_required": any(package["restart_required"] for package in installed),
+        "errors": dict(PLUGIN_LOAD_ERRORS) | installed_errors | rollback_errors,
     }

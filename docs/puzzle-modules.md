@@ -30,13 +30,23 @@ served at `/plugins/{slug}/static/`; `play_script` may use an absolute path belo
 that URL.
 
 Packages execute trusted server-side Python. Install only reviewed, versioned
-release archives, pin their published SHA-256 digest, and restart Puzzary after
-an install or upgrade. `scripts/install_plugin.py` validates the digest, rejects
-unsafe archive paths, stages the package, and retains the previous package as a
-rollback directory. Docker persists packages within the existing `./data`
-volume. Admin API clients can inspect loaded packages and startup errors at
-`GET /api/plugin-packages`. An account with `plugins.manage` can install or
-upgrade one through `POST /api/plugin-packages/install`:
+release archives and pin their published SHA-256 digest. **Admin -> Plugins** is
+the primary management surface. It shows whether each module is running from an
+official GitHub package or the bundled startup fallback, installs one or all
+official modules, accepts a custom GitHub release URL and digest, reports load
+errors, and manages generation availability. A restart activates newly installed
+code; running requests are never hot-swapped.
+
+The same operations are available for automation through
+`GET /api/plugin-packages`, `GET /api/plugin-packages/catalog`,
+`POST /api/plugin-packages/install`, `POST /api/plugin-packages/install-official`,
+`PATCH /api/plugin-packages/{slug}`, and
+`POST /api/plugin-packages/{slug}/rollback`. The web and API paths share the same
+validation, audit, permission, staging, and rollback behavior. The optional
+`scripts/install_plugin.py` command uses that installer for recovery or scripted
+deployment. Docker persists packages within the existing `./data` volume.
+
+An account with `plugins.manage` can install or upgrade one through the API:
 
 ```json
 {
@@ -46,14 +56,17 @@ upgrade one through `POST /api/plugin-packages/install`:
 ```
 
 The response identifies the installed version and sets `restart_required` to
-`true`; running code is never hot-swapped during a request.
+`true`.
 
 For a private GitHub repository, set `PUZZARY_PLUGIN_GITHUB_TOKEN` only in the
 installer process environment. The token is sent as an authorization header and
 is never stored in the installed package or passed on the command line.
 
 Independently installable releases for all ten official puzzle types are
-maintained at https://github.com/barrelcollector/puzzary-official-plugins.
+maintained at https://github.com/barrelcollector/puzzary-official-plugins. Core
+retains compatible copies only so a new or damaged installation can reach the
+web management page; normal deployments should install and load the official
+packages from the catalog.
 
 ## Contributor workflow
 
@@ -259,7 +272,11 @@ Authorized API clients can inspect the current module contract:
 GET /api/puzzle-types
 GET /api/puzzle-types?include_disabled=true
 GET /api/plugin-packages
+GET /api/plugin-packages/catalog
 POST /api/plugin-packages/install
+POST /api/plugin-packages/install-official
+PATCH /api/plugin-packages/{slug}
+POST /api/plugin-packages/{slug}/rollback
 ```
 
 The response includes each module's label, enabled state, source requirements, generation fields, manual editor fields, print layout, gimme support, and declared templates.

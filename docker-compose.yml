@@ -23,6 +23,7 @@ services:
       PUZZARY_VAPID_SUBJECT: "${PUZZARY_VAPID_SUBJECT:-mailto:notifications@puzzary.local}"
       PUZZARY_PUSH_LOOP_SECONDS: "${PUZZARY_PUSH_LOOP_SECONDS:-10}"
       PUZZARY_PLUGIN_DIR: "${PUZZARY_PLUGIN_DIR:-/data/plugins}"
+      PUZZARY_PLUGIN_GITHUB_TOKEN: "${PUZZARY_PLUGIN_GITHUB_TOKEN:-}"
     volumes:
       - ./data:/data
     depends_on:

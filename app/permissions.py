@@ -220,6 +220,8 @@ def authorize_request(request, db, user, administrative=False):
         if not (user.can('settings.manage') or user.can('plugins.manage')):
             raise HTTPException(403,'Server or plugin management permission required')
         return
+    if path.startswith('/admin/plugins'):
+        require(user, 'plugins.manage'); return
     if path.startswith('/api/plugin-packages'):
         require(user, 'plugins.manage'); return
     if path.startswith('/admin/themes'):
