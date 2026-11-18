@@ -1,16 +1,12 @@
-"""Isolated Puzzary API and bundled Home Assistant integration checks."""
+"""Isolated Puzzary API checks used by the Home Assistant integration."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-
-import yaml
-
 
 ROOT = Path(__file__).resolve().parents[1]
 QA_ROOT = Path(tempfile.gettempdir()) / "puzzary-home-assistant-qa"
@@ -148,20 +144,7 @@ try:
         for context in (anonymous, admin, player):
             context.dispose()
 
-    component = ROOT / "custom_components" / "puzzary"
-    manifest = json.loads((component / "manifest.json").read_text(encoding="utf-8"))
-    strings = json.loads((component / "strings.json").read_text(encoding="utf-8"))
-    translations = json.loads((component / "translations" / "en.json").read_text(encoding="utf-8"))
-    services = yaml.safe_load((component / "services.yaml").read_text(encoding="utf-8"))
-    assert manifest["domain"] == "puzzary" and manifest["config_flow"] is True
-    for filename in ("__init__.py", "api.py", "config_flow.py", "coordinator.py", "sensor.py", "image.py", "media_source.py", "services.yaml"):
-        assert (component / filename).is_file(), filename
-    assert manifest["dependencies"] == ["http", "media_source"]
-    for service in ("refresh", "generate_puzzle", "publish_puzzle", "archive_puzzle", "unarchive_puzzle"):
-        assert service in strings["services"]
-        assert service in translations["services"] and service in services
-        assert set(services[service]["fields"]) == set(translations["services"][service]["fields"])
-    print("Home Assistant stats, media folders, printable filtering, PNG/PDF rendering, permissions, admin actions, and bundle structure passed.")
+    print("Home Assistant stats, media folders, printable filtering, PNG/PDF rendering, permissions, and admin API actions passed.")
 finally:
     server.terminate()
     try:

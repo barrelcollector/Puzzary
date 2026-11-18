@@ -185,5 +185,5 @@
 <script src="/static/sudoku.js?v=9"></script>
 <script src="/static/cross-equations.js?v=8"></script>
 <script src="/static/maze.js?v=5"></script>
-{% if puzzle_type_definition and puzzle_type_definition.play_script %}<script src="/static/{{ puzzle_type_definition.play_script }}"></script>{% endif %}
+{% if puzzle_type_definition and puzzle_type_definition.play_script %}<script src="{{ puzzle_type_definition.play_script if puzzle_type_definition.play_script.startswith('/') else '/static/' ~ puzzle_type_definition.play_script }}"></script>{% endif %}
 {% endblock %}

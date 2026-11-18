@@ -1,15 +1,21 @@
 # Home Assistant integration
 
-The bundled `custom_components/puzzary` integration connects one Home Assistant
+The Home Assistant integration is released independently at
+https://github.com/barrelcollector/puzzary-home-assistant. Use that repository's
+README for current HACS and manual installation instructions. This page records
+the Puzzary-side behavior and API expectations.
+
+The `puzzary-home-assistant` custom integration connects one Home Assistant
 configuration entry to one Puzzary account. It uses Puzzary's authenticated API;
 the API token is stored in Home Assistant's config entry and is never placed in
 entity attributes.
 
 ## Install
 
-1. Copy `custom_components/puzzary` into Home Assistant's
-   `config/custom_components/puzzary` directory.
-2. Restart Home Assistant.
+1. Add `https://github.com/barrelcollector/puzzary-home-assistant` as a HACS
+   custom Integration repository and install Puzzary, or copy its
+   `custom_components/puzzary` folder manually.
+2. Restart Home Assistant after installation or upgrade.
 3. Open **Settings -> Devices & services -> Add integration** and select
    **Puzzary**.
 4. Enter a complete Puzzary base URL and an API token issued from Puzzary's user
@@ -86,7 +92,7 @@ statistics, latest-puzzle sensor, image entity, and refresh action.
 
 ## Upgrade or remove
 
-To upgrade, replace the installed `config/custom_components/puzzary` folder
-with the newer bundled version and restart Home Assistant. To remove it, delete
+To upgrade, use HACS or replace the installed `config/custom_components/puzzary`
+folder from the integration repository and restart Home Assistant. To remove it, delete
 the Puzzary entry from **Settings -> Devices & services**, remove the folder,
 and restart Home Assistant.

@@ -22,6 +22,7 @@ services:
       PUZZARY_VAPID_PRIVATE_KEY: "${PUZZARY_VAPID_PRIVATE_KEY:-}"
       PUZZARY_VAPID_SUBJECT: "${PUZZARY_VAPID_SUBJECT:-mailto:notifications@puzzary.local}"
       PUZZARY_PUSH_LOOP_SECONDS: "${PUZZARY_PUSH_LOOP_SECONDS:-10}"
+      PUZZARY_PLUGIN_DIR: "${PUZZARY_PLUGIN_DIR:-/data/plugins}"
     volumes:
       - ./data:/data
     depends_on:
