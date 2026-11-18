@@ -41,8 +41,8 @@ For a private GitHub repository, set `PUZZARY_PLUGIN_GITHUB_TOKEN` only in the
 installer process environment. The token is sent as an authorization header and
 is never stored in the installed package or passed on the command line.
 
-The official packages and reference Maze package are maintained at
-https://github.com/barrelcollector/puzzary-official-plugins.
+Independently installable releases for all ten official puzzle types are
+maintained at https://github.com/barrelcollector/puzzary-official-plugins.
 
 ## Contributor workflow
 

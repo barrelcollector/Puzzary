@@ -528,6 +528,7 @@ register_puzzle_type(
         ),
         preview_builder=build_preview,
         description="A printable maze with a start, finish, and admin-visible solution path.",
+        play_script="maze.js?v=5",
         supports_print=True,
         supports_web_play=True,
         theme_mode="none",

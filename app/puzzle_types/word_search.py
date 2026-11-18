@@ -805,6 +805,7 @@ register_puzzle_type(
         collaboration=collaboration,
         preview_builder=build_preview,
         description="A printable and interactive word-search grid.",
+        play_script="word-search.js?v=16",
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank",),
