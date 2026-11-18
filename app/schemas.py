@@ -9,6 +9,11 @@ class UserCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=80)
 
 
+class PluginInstallRequest(BaseModel):
+    url: str = Field(..., min_length=1, max_length=2048)
+    sha256: str = Field(..., min_length=64, max_length=64)
+
+
 class PuzzleGenerateRequest(BaseModel):
     puzzle_type: str = "word_search"
     theme: str = "general"

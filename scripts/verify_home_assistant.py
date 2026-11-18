@@ -1,16 +1,12 @@
-"""Isolated Puzzary API and bundled Home Assistant integration checks."""
+"""Isolated Puzzary API checks used by the Home Assistant integration."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-
-import yaml
-
 
 ROOT = Path(__file__).resolve().parents[1]
 QA_ROOT = Path(tempfile.gettempdir()) / "puzzary-home-assistant-qa"
@@ -23,6 +19,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{QA_DB.as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-home-assistant-secret"
 os.environ["UPLOAD_DIR"] = str(QA_ROOT / "uploads")
 os.environ["APP_BASE_URL"] = "https://puzzary.example.test"
+os.environ["PUZZARY_PLUGIN_DIR"] = str(QA_ROOT / "plugins")
 
 from playwright.sync_api import sync_playwright
 from sqlalchemy import select
@@ -85,6 +82,9 @@ try:
         assert anonymous.get(BASE + "/api/account/stats").status == 401
         stats = player.get(BASE + "/api/account/stats")
         assert stats.ok and stats.json()["totals"]["played"] == 0
+        packages = admin.get(BASE + "/api/plugin-packages")
+        assert packages.ok and packages.json()["packages"] == []
+        assert player.get(BASE + "/api/plugin-packages").status == 403
 
         generated = admin.post(BASE + "/api/puzzles/generate", data={
             "puzzle_type": "takuzu",
@@ -148,20 +148,7 @@ try:
         for context in (anonymous, admin, player):
             context.dispose()
 
-    component = ROOT / "custom_components" / "puzzary"
-    manifest = json.loads((component / "manifest.json").read_text(encoding="utf-8"))
-    strings = json.loads((component / "strings.json").read_text(encoding="utf-8"))
-    translations = json.loads((component / "translations" / "en.json").read_text(encoding="utf-8"))
-    services = yaml.safe_load((component / "services.yaml").read_text(encoding="utf-8"))
-    assert manifest["domain"] == "puzzary" and manifest["config_flow"] is True
-    for filename in ("__init__.py", "api.py", "config_flow.py", "coordinator.py", "sensor.py", "image.py", "media_source.py", "services.yaml"):
-        assert (component / filename).is_file(), filename
-    assert manifest["dependencies"] == ["http", "media_source"]
-    for service in ("refresh", "generate_puzzle", "publish_puzzle", "archive_puzzle", "unarchive_puzzle"):
-        assert service in strings["services"]
-        assert service in translations["services"] and service in services
-        assert set(services[service]["fields"]) == set(translations["services"][service]["fields"])
-    print("Home Assistant stats, media folders, printable filtering, PNG/PDF rendering, permissions, admin actions, and bundle structure passed.")
+    print("Home Assistant stats, media folders, printable filtering, PNG/PDF rendering, permissions, and admin API actions passed.")
 finally:
     server.terminate()
     try:

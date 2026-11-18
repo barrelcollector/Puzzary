@@ -501,6 +501,7 @@ register_puzzle_type(
         collaboration_value_limit=80,
         preview_builder=build_preview,
         description="A clue-driven chain where each answer grows by one letter.",
+        play_script="word-pyramid.js?v=5",
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),

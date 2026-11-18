@@ -675,6 +675,7 @@ register_puzzle_type(
         progress_counter=count_progress,
         preview_builder=build_preview,
         description="A clue-driven crossword built from dictionary definitions.",
+        play_script="crossword.js?v=16",
         supports_print=True,
         supports_web_play=True,
         source_requirements=("word_bank", "definitions"),

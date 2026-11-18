@@ -117,19 +117,21 @@ Admins can issue per-account API tokens from the Users page. Tokens are shown on
 
 ## Home Assistant
 
-Puzzary includes an installable custom integration in
-`custom_components/puzzary`. It creates account-statistics sensors, an image
+The separately released
+[Puzzary Home Assistant integration](https://github.com/barrelcollector/puzzary-home-assistant)
+creates account-statistics sensors, an image
 entity containing the latest printable puzzle, and a Puzzary media source with
 active, in-progress, completed, and archived folders organized by puzzle type.
 Its actions can refresh data, generate puzzles, publish drafts, archive puzzles,
 and restore archived puzzles.
 
-Copy that folder to Home Assistant's `config/custom_components/puzzary`, restart
-Home Assistant, then add **Puzzary** from **Settings -> Devices & services**.
+Install it as a HACS custom repository or copy its `custom_components/puzzary`
+folder into Home Assistant, restart Home Assistant, then add **Puzzary** from
+**Settings -> Devices & services**.
 Enter the URL Home Assistant uses to reach Puzzary and a Puzzary API token.
 Management actions require a token whose account has the corresponding puzzle
-permissions; an administrator token has all of them. See [Home Assistant integration](docs/home-assistant.md) for entities,
-actions, permissions, upgrades, and examples.
+permissions; an administrator token has all of them. See the integration
+repository for installation, entities, actions, permissions, and upgrades.
 
 Users can create private RSS or Atom subscriptions from **Account -> Manage
 puzzle feeds**. Feed URLs are independently revocable credentials and can be

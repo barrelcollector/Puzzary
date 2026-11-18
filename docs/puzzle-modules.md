@@ -1,6 +1,59 @@
 # Puzzle Module Contract
 
-Puzzary puzzle types are small Python modules under `app/puzzle_types/`. A module is discovered at startup when it calls `register_puzzle_type(...)`.
+Puzzary puzzle types are small Python modules that call
+`register_puzzle_type(...)` at startup. Core modules live under
+`app/puzzle_types/`; independently released packages live in
+`PUZZARY_PLUGIN_DIR` (default `/data/plugins`).
+
+## External Packages
+
+An installed package is one directory containing `puzzary-plugin.json`:
+
+```json
+{
+  "schema": "puzzary.plugin.v1",
+  "api_version": "1",
+  "slug": "example",
+  "name": "Example",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py",
+  "templates": "templates",
+  "static": "static",
+  "replaces_builtin": false
+}
+```
+
+The entrypoint registers exactly one puzzle type matching `slug`. Templates use
+`puzzle_types/{slug}.html`, `puzzle_solutions/{slug}.html`, and
+`puzzle_print/{slug}.html` inside the declared template folder. Static files are
+served at `/plugins/{slug}/static/`; `play_script` may use an absolute path below
+that URL.
+
+Packages execute trusted server-side Python. Install only reviewed, versioned
+release archives, pin their published SHA-256 digest, and restart Puzzary after
+an install or upgrade. `scripts/install_plugin.py` validates the digest, rejects
+unsafe archive paths, stages the package, and retains the previous package as a
+rollback directory. Docker persists packages within the existing `./data`
+volume. Admin API clients can inspect loaded packages and startup errors at
+`GET /api/plugin-packages`. An account with `plugins.manage` can install or
+upgrade one through `POST /api/plugin-packages/install`:
+
+```json
+{
+  "url": "https://github.com/owner/repository/releases/download/v1.0.0/puzzary-example-1.0.0.zip",
+  "sha256": "<published 64-character digest>"
+}
+```
+
+The response identifies the installed version and sets `restart_required` to
+`true`; running code is never hot-swapped during a request.
+
+For a private GitHub repository, set `PUZZARY_PLUGIN_GITHUB_TOKEN` only in the
+installer process environment. The token is sent as an authorization header and
+is never stored in the installed package or passed on the command line.
+
+Independently installable releases for all ten official puzzle types are
+maintained at https://github.com/barrelcollector/puzzary-official-plugins.
 
 ## Contributor workflow
 
@@ -124,13 +177,15 @@ register_puzzle_type(
 ## Lifecycle
 
 1. Puzzary imports every non-private file in `app/puzzle_types/`.
-2. The module registers a `PuzzleType`.
-3. The generation wizard reads `generation_fields`, `source_requirements`, and `theme_mode`.
-4. Puzzary validates submitted generation options against the declared fields.
-5. The module's `source_builder` receives already-filtered source data.
-6. The module's `generator` returns a `GeneratedPuzzle`.
-7. Puzzary stores the generated play, print, solution, hints, and metadata payloads.
-8. Web play, print rendering, answer checking, progress counting, reveals, and admin solution views use the registered contract.
+2. It validates and imports packages from `PUZZARY_PLUGIN_DIR`. A package may
+   explicitly replace a built-in type while keeping the same saved-data slug.
+3. The module registers a `PuzzleType`.
+4. The generation wizard reads `generation_fields`, `source_requirements`, and `theme_mode`.
+5. Puzzary validates submitted generation options against the declared fields.
+6. The module's `source_builder` receives already-filtered source data.
+7. The module's `generator` returns a `GeneratedPuzzle`.
+8. Puzzary stores the generated play, print, solution, hints, and metadata payloads.
+9. Web play, print rendering, answer checking, progress counting, reveals, and admin solution views use the registered contract.
 
 ## Enabling and Disabling
 
@@ -203,6 +258,8 @@ Authorized API clients can inspect the current module contract:
 ```text
 GET /api/puzzle-types
 GET /api/puzzle-types?include_disabled=true
+GET /api/plugin-packages
+POST /api/plugin-packages/install
 ```
 
 The response includes each module's label, enabled state, source requirements, generation fields, manual editor fields, print layout, gimme support, and declared templates.

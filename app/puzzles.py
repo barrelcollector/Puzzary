@@ -134,6 +134,9 @@ def load_puzzle_types(package_name: str = "app.puzzle_types") -> None:
         if module_name.startswith("_"):
             continue
         importlib.import_module(module_info.name)
+    from app.plugin_packages import load_external_plugin_packages
+
+    load_external_plugin_packages(PUZZLE_TYPES)
     _PUZZLE_TYPES_LOADED = True
 
 

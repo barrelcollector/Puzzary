@@ -724,6 +724,7 @@ register_puzzle_type(
         progress_counter=count_progress,
         preview_builder=build_preview,
         description="A classic 9x9 number-placement puzzle.",
+        play_script="sudoku.js?v=9",
         supports_print=True,
         supports_web_play=True,
         theme_mode="none",

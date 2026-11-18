@@ -1499,7 +1499,7 @@
 {% block scripts %}
   <script src="/static/generation-form.js?v=12"></script>
   <script src="/static/publication-schedule.js?v=1"></script>
-  {% for puzzle_type in puzzle_types %}{% if puzzle_type.manual_editor_script %}<script src="/static/{{ puzzle_type.manual_editor_script }}"></script>{% endif %}{% endfor %}
+  {% for puzzle_type in puzzle_types %}{% if puzzle_type.manual_editor_script %}<script src="{{ puzzle_type.manual_editor_script if puzzle_type.manual_editor_script.startswith('/') else '/static/' ~ puzzle_type.manual_editor_script }}"></script>{% endif %}{% endfor %}
   <script src="/static/manual-builder.js?v=3"></script>
   <script src="/static/completion-message.js?v=1"></script>
   {% if section == "word_bank_detail" %}<script src="/static/word-bank-picker.js?v=1"></script>{% endif %}

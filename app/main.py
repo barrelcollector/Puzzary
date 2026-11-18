@@ -29,7 +29,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from jinja2 import TemplateNotFound
+from jinja2 import ChoiceLoader, FileSystemLoader, TemplateNotFound
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
@@ -78,6 +78,8 @@ from app.appearance import (
     template_context as appearance_template_context,
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
+from app.plugin_packages import package_status, plugin_root, plugin_static_directories, plugin_template_directories
+from app.plugin_installer import install_plugin_release
 from app.user_activity import account_activity, progress_states
 from app.permissions import (
     authorize_request, initialize_permissions, require as require_permission,
@@ -102,6 +104,7 @@ from app.schemas import (
     PuzzleProgressUpdate,
     PuzzlePlayAction,
     PuzzleImportRequest,
+    PluginInstallRequest,
     PuzzleManualWrite,
     PuzzlePrintPreview,
     PrintManifestRequest,
@@ -141,8 +144,13 @@ app.add_middleware(
 if TRANSPORT_CONFIG.https_redirect:
     app.add_middleware(HTTPSRedirectMiddleware)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[appearance_template_context])
+templates.env.loader = ChoiceLoader([
+    FileSystemLoader(str(path)) for path in plugin_template_directories()
+] + [templates.env.loader])
 templates.env.globals['can_owned'] = can_owned
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+for plugin_slug, static_dir in plugin_static_directories().items():
+    app.mount(f"/plugins/{plugin_slug}/static", StaticFiles(directory=str(static_dir)), name=f"plugin-{plugin_slug}-static")
 from app.publishing import router as publishing_router
 app.include_router(publishing_router)
 from app.feeds import router as feeds_router
@@ -6442,6 +6450,37 @@ def list_puzzle_type_contracts(
 ) -> dict:
     require_admin_api(request, db)
     return {"puzzle_types": list(puzzle_type_generation_schemas(db, include_disabled=include_disabled).values())}
+
+
+@app.get("/api/plugin-packages")
+def list_plugin_packages(request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    return package_status()
+
+
+@app.post("/api/plugin-packages/install")
+def install_plugin_package(
+    payload: PluginInstallRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "plugins.manage")
+    try:
+        _target, manifest = install_plugin_release(payload.url, payload.sha256, plugin_root())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit(db, user, "plugin", str(manifest["slug"]), "plugin.installed", {}, {
+        "version": str(manifest.get("version", "")),
+        "restart_required": True,
+    })
+    db.commit()
+    return {
+        "slug": manifest["slug"],
+        "name": manifest.get("name", manifest["slug"]),
+        "version": manifest.get("version", ""),
+        "restart_required": True,
+    }
 
 
 @app.get("/api/puzzles")

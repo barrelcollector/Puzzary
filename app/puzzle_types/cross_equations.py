@@ -746,6 +746,7 @@ register_puzzle_type(
         progress_counter=count_progress,
         preview_builder=build_preview,
         description="A crossing arithmetic grid where rows and columns share number cells.",
+        play_script="cross-equations.js?v=8",
         supports_print=True,
         supports_web_play=True,
         theme_mode="none",
