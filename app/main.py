@@ -78,7 +78,8 @@ from app.appearance import (
     template_context as appearance_template_context,
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
-from app.plugin_packages import package_status, plugin_static_directories, plugin_template_directories
+from app.plugin_packages import package_status, plugin_root, plugin_static_directories, plugin_template_directories
+from app.plugin_installer import install_plugin_release
 from app.user_activity import account_activity, progress_states
 from app.permissions import (
     authorize_request, initialize_permissions, require as require_permission,
@@ -103,6 +104,7 @@ from app.schemas import (
     PuzzleProgressUpdate,
     PuzzlePlayAction,
     PuzzleImportRequest,
+    PluginInstallRequest,
     PuzzleManualWrite,
     PuzzlePrintPreview,
     PrintManifestRequest,
@@ -6454,6 +6456,31 @@ def list_puzzle_type_contracts(
 def list_plugin_packages(request: Request, db: Session = Depends(get_db)) -> dict:
     require_admin_api(request, db)
     return package_status()
+
+
+@app.post("/api/plugin-packages/install")
+def install_plugin_package(
+    payload: PluginInstallRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "plugins.manage")
+    try:
+        _target, manifest = install_plugin_release(payload.url, payload.sha256, plugin_root())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit(db, user, "plugin", str(manifest["slug"]), "plugin.installed", {}, {
+        "version": str(manifest.get("version", "")),
+        "restart_required": True,
+    })
+    db.commit()
+    return {
+        "slug": manifest["slug"],
+        "name": manifest.get("name", manifest["slug"]),
+        "version": manifest.get("version", ""),
+        "restart_required": True,
+    }
 
 
 @app.get("/api/puzzles")

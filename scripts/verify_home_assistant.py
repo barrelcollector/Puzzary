@@ -19,6 +19,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{QA_DB.as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-home-assistant-secret"
 os.environ["UPLOAD_DIR"] = str(QA_ROOT / "uploads")
 os.environ["APP_BASE_URL"] = "https://puzzary.example.test"
+os.environ["PUZZARY_PLUGIN_DIR"] = str(QA_ROOT / "plugins")
 
 from playwright.sync_api import sync_playwright
 from sqlalchemy import select
@@ -81,6 +82,9 @@ try:
         assert anonymous.get(BASE + "/api/account/stats").status == 401
         stats = player.get(BASE + "/api/account/stats")
         assert stats.ok and stats.json()["totals"]["played"] == 0
+        packages = admin.get(BASE + "/api/plugin-packages")
+        assert packages.ok and packages.json()["packages"] == []
+        assert player.get(BASE + "/api/plugin-packages").status == 403
 
         generated = admin.post(BASE + "/api/puzzles/generate", data={
             "puzzle_type": "takuzu",

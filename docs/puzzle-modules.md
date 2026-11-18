@@ -35,7 +35,18 @@ an install or upgrade. `scripts/install_plugin.py` validates the digest, rejects
 unsafe archive paths, stages the package, and retains the previous package as a
 rollback directory. Docker persists packages within the existing `./data`
 volume. Admin API clients can inspect loaded packages and startup errors at
-`GET /api/plugin-packages`.
+`GET /api/plugin-packages`. An account with `plugins.manage` can install or
+upgrade one through `POST /api/plugin-packages/install`:
+
+```json
+{
+  "url": "https://github.com/owner/repository/releases/download/v1.0.0/puzzary-example-1.0.0.zip",
+  "sha256": "<published 64-character digest>"
+}
+```
+
+The response identifies the installed version and sets `restart_required` to
+`true`; running code is never hot-swapped during a request.
 
 For a private GitHub repository, set `PUZZARY_PLUGIN_GITHUB_TOKEN` only in the
 installer process environment. The token is sent as an authorization header and
@@ -248,6 +259,7 @@ Authorized API clients can inspect the current module contract:
 GET /api/puzzle-types
 GET /api/puzzle-types?include_disabled=true
 GET /api/plugin-packages
+POST /api/plugin-packages/install
 ```
 
 The response includes each module's label, enabled state, source requirements, generation fields, manual editor fields, print layout, gimme support, and declared templates.

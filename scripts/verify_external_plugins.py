@@ -69,6 +69,8 @@ try:
     assert templates.get_template("puzzle_types/example_clock.html")
     assert any(getattr(route, "path", None) == "/plugins/example_clock/static" for route in app.routes)
     assert any(getattr(route, "path", None) == "/api/plugin-packages" for route in app.routes)
+    install_route = next(route for route in app.routes if getattr(route, "path", None) == "/api/plugin-packages/install")
+    assert "POST" in install_route.methods
     print("External plugin manifest, registration, templates, static assets, and status passed.")
 finally:
     shutil.rmtree(ROOT, ignore_errors=True)
