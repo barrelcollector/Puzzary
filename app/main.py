@@ -78,8 +78,15 @@ from app.appearance import (
     template_context as appearance_template_context,
 )
 from app.puzzles import fallback_preview, get_puzzle_type, list_puzzle_types
-from app.plugin_packages import package_status, plugin_root, plugin_static_directories, plugin_template_directories
-from app.plugin_installer import install_plugin_release
+from app.plugin_packages import (
+    LOADED_PACKAGES,
+    official_plugin_catalog,
+    package_status,
+    plugin_root,
+    plugin_static_directories,
+    plugin_template_directories,
+)
+from app.plugin_installer import install_plugin_release, restore_plugin_rollback
 from app.user_activity import account_activity, progress_states
 from app.permissions import (
     authorize_request, initialize_permissions, require as require_permission,
@@ -105,6 +112,8 @@ from app.schemas import (
     PuzzlePlayAction,
     PuzzleImportRequest,
     PluginInstallRequest,
+    OfficialPluginInstallRequest,
+    PluginEnabledRequest,
     PuzzleManualWrite,
     PuzzlePrintPreview,
     PrintManifestRequest,
@@ -3476,6 +3485,40 @@ def web_create_user(request: Request, db: Session = Depends(get_db)):
     return RedirectResponse(url="/admin/users", status_code=303)
 
 
+def plugin_management_context(db: Session) -> dict:
+    status = package_status()
+    installed_by_slug = {package["slug"]: package for package in status["installed"]}
+    rollback_by_slug = {package["slug"]: package for package in status["rollbacks"]}
+    official_slugs = {plugin["slug"] for plugin in status["official_catalog"]["plugins"]}
+    disabled = disabled_puzzle_type_slugs(db)
+    official = []
+    for catalog_plugin in status["official_catalog"]["plugins"]:
+        slug = catalog_plugin["slug"]
+        installed = installed_by_slug.get(slug)
+        loaded = LOADED_PACKAGES.get(slug)
+        registered = get_puzzle_type(slug)
+        official.append({
+            **catalog_plugin,
+            "installed": installed,
+            "rollback": rollback_by_slug.get(slug),
+            "loaded_version": loaded.version if loaded else None,
+            "registered": registered is not None,
+            "enabled": slug not in disabled,
+            "source": "GitHub package" if loaded else "Bundled fallback" if registered else "Unavailable",
+            "restart_required": bool(installed and installed.get("restart_required")),
+            "update_available": bool(installed and installed.get("version") != catalog_plugin["version"]),
+        })
+    return {
+        **status,
+        "official": official,
+        "custom_installed": [package for package in status["installed"] if package["slug"] not in official_slugs],
+        "rollback_by_slug": rollback_by_slug,
+        "registered_count": len(list_puzzle_types()),
+        "external_count": len(LOADED_PACKAGES),
+        "external_slugs": sorted(LOADED_PACKAGES),
+    }
+
+
 def admin_context(
     request: Request,
     db: Session,
@@ -3640,6 +3683,7 @@ def admin_context(
         "puzzle_types": list_enabled_puzzle_types(db),
         "all_puzzle_types": list_puzzle_types(),
         "generation_schemas": puzzle_type_generation_schemas(db),
+        "plugin_management": plugin_management_context(db) if section == "plugins" else {},
     }
 
 
@@ -3946,6 +3990,124 @@ def admin_settings_page(request: Request, db: Session = Depends(get_db)):
     return render_admin(request, db, "settings")
 
 
+@app.get("/admin/plugins", response_class=HTMLResponse)
+def admin_plugins_page(request: Request, db: Session = Depends(get_db)):
+    return render_admin(request, db, "plugins")
+
+
+def install_plugin_for_user(db: Session, user: User, url: str, sha256: str) -> dict:
+    require_permission(user, "plugins.manage")
+    _target, manifest = install_plugin_release(url, sha256, plugin_root())
+    audit(db, user, "plugin", str(manifest["slug"]), "plugin.installed", {}, {
+        "version": str(manifest.get("version", "")),
+        "restart_required": True,
+    })
+    db.commit()
+    return manifest
+
+
+def restore_plugin_for_user(db: Session, user: User, slug: str) -> dict:
+    require_permission(user, "plugins.manage")
+    _target, manifest = restore_plugin_rollback(slug, plugin_root())
+    audit(db, user, "plugin", slug, "plugin.rollback_restored", {}, {
+        "version": str(manifest.get("version", "")),
+        "restart_required": True,
+    })
+    db.commit()
+    return manifest
+
+
+def official_plugin_entry(slug: str) -> dict:
+    entry = next((plugin for plugin in official_plugin_catalog()["plugins"] if plugin["slug"] == slug), None)
+    if entry is None:
+        raise ValueError(f"Unknown official plugin: {slug}")
+    return entry
+
+
+@app.post("/admin/plugins/install")
+def admin_install_plugin(
+    request: Request,
+    url: str = Form(""),
+    sha256: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        manifest = install_plugin_for_user(db, user, url.strip(), sha256.strip())
+    except (ValueError, OSError) as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    message = f"{manifest.get('name', manifest['slug'])} {manifest.get('version', '')} installed. Restart Puzzary to activate it."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
+@app.post("/admin/plugins/install-official")
+def admin_install_official_plugins(
+    request: Request,
+    slug: str = Form("all"),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    installed = []
+    try:
+        catalog = official_plugin_catalog()["plugins"]
+        selected = catalog if slug == "all" else [official_plugin_entry(slug)]
+        for plugin in selected:
+            installed.append(install_plugin_for_user(db, user, plugin["url"], plugin["sha256"]))
+    except (ValueError, OSError) as error:
+        detail = f"Installed {len(installed)} module(s), then stopped: {error}" if installed else str(error)
+        return RedirectResponse(url=f"/admin/plugins?error={quote(detail)}", status_code=303)
+    message = f"Installed {len(installed)} official module(s). Restart Puzzary to activate them."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
+@app.post("/admin/plugins/status")
+def admin_update_plugin_status(
+    request: Request,
+    disabled_puzzle_types: list[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "plugins.manage")
+    registered = {puzzle_type.slug for puzzle_type in list_puzzle_types()}
+    requested_disabled = set(disabled_puzzle_types)
+    if not requested_disabled <= registered:
+        return RedirectResponse(url="/admin/plugins?error=Unknown%20module%20selection.", status_code=303)
+    previous_disabled = disabled_puzzle_type_slugs(db)
+    set_disabled_puzzle_type_slugs(db, sorted(requested_disabled))
+    for slug in sorted(previous_disabled ^ requested_disabled):
+        enabled = slug not in requested_disabled
+        audit(
+            db,
+            user,
+            "plugin",
+            slug,
+            "plugin.enabled" if enabled else "plugin.disabled",
+            {"enabled": not enabled},
+            {"enabled": enabled},
+        )
+    db.commit()
+    return RedirectResponse(url="/admin/plugins?message=Module%20status%20saved.", status_code=303)
+
+
+@app.post("/admin/plugins/{slug}/rollback")
+def admin_restore_plugin_rollback(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        manifest = restore_plugin_for_user(db, user, slug)
+    except (ValueError, OSError) as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    message = f"Restored {manifest.get('name', slug)} {manifest.get('version', '')}. Restart Puzzary to activate it."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
 @app.get("/admin/themes", response_class=HTMLResponse)
 def admin_themes_page(request: Request, edit: str = "", db: Session = Depends(get_db)):
     user = require_admin_user(request, db)
@@ -4077,7 +4239,6 @@ def admin_delete_theme(slug: str, request: Request, db: Session = Depends(get_db
 def admin_update_settings(
     request: Request,
     public_base_url: str | None = Form(None),
-    disabled_puzzle_types: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -4088,11 +4249,7 @@ def admin_update_settings(
     except ValueError as error:
         return RedirectResponse(url=f"/admin/settings?error={quote(str(error))}", status_code=303)
     if base_url != app_base_url(db): require_permission(user, 'settings.manage')
-    form_disabled = set(disabled_puzzle_types) if user.can('plugins.manage') or disabled_puzzle_types else disabled_puzzle_type_slugs(db)
-    if form_disabled != disabled_puzzle_type_slugs(db):
-        require_permission(user, 'plugins.manage')
     set_app_setting(db, "public_base_url", base_url)
-    set_disabled_puzzle_type_slugs(db, list(form_disabled))
     db.commit()
     return RedirectResponse(url="/admin/settings?message=Settings%20saved.", status_code=303)
 
@@ -6455,7 +6612,13 @@ def list_puzzle_type_contracts(
 @app.get("/api/plugin-packages")
 def list_plugin_packages(request: Request, db: Session = Depends(get_db)) -> dict:
     require_admin_api(request, db)
-    return package_status()
+    return plugin_management_context(db)
+
+
+@app.get("/api/plugin-packages/catalog")
+def get_plugin_catalog(request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    return official_plugin_catalog()
 
 
 @app.post("/api/plugin-packages/install")
@@ -6465,19 +6628,78 @@ def install_plugin_package(
     db: Session = Depends(get_db),
 ) -> dict:
     user = require_admin_api(request, db)
-    require_permission(user, "plugins.manage")
     try:
-        _target, manifest = install_plugin_release(payload.url, payload.sha256, plugin_root())
+        manifest = install_plugin_for_user(db, user, payload.url, payload.sha256)
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    audit(db, user, "plugin", str(manifest["slug"]), "plugin.installed", {}, {
-        "version": str(manifest.get("version", "")),
-        "restart_required": True,
-    })
-    db.commit()
     return {
         "slug": manifest["slug"],
         "name": manifest.get("name", manifest["slug"]),
+        "version": manifest.get("version", ""),
+        "restart_required": True,
+    }
+
+
+@app.post("/api/plugin-packages/install-official")
+def install_official_plugin_packages(
+    payload: OfficialPluginInstallRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    catalog = official_plugin_catalog()["plugins"]
+    requested = set(payload.slugs)
+    known = {plugin["slug"] for plugin in catalog}
+    if requested - known:
+        raise HTTPException(status_code=422, detail=f"Unknown official plugins: {sorted(requested - known)}")
+    selected = catalog if not requested else [plugin for plugin in catalog if plugin["slug"] in requested]
+    installed = []
+    try:
+        for plugin in selected:
+            manifest = install_plugin_for_user(db, user, plugin["url"], plugin["sha256"])
+            installed.append({"slug": manifest["slug"], "version": manifest.get("version", "")})
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc), "installed": installed}) from exc
+    return {"installed": installed, "restart_required": True}
+
+
+@app.patch("/api/plugin-packages/{slug}")
+def update_plugin_package_status(
+    slug: str,
+    payload: PluginEnabledRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    status = package_status()
+    known = (
+        {plugin.slug for plugin in list_puzzle_types()}
+        | {plugin["slug"] for plugin in status["installed"]}
+        | {plugin["slug"] for plugin in status["official_catalog"]["plugins"]}
+    )
+    if slug not in known:
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    disabled = disabled_puzzle_type_slugs(db)
+    before = slug not in disabled
+    if payload.enabled:
+        disabled.discard(slug)
+    else:
+        disabled.add(slug)
+    set_disabled_puzzle_type_slugs(db, sorted(disabled))
+    audit(db, user, "plugin", slug, "plugin.enabled" if payload.enabled else "plugin.disabled", {"enabled": before}, {"enabled": payload.enabled})
+    db.commit()
+    return {"slug": slug, "enabled": payload.enabled}
+
+
+@app.post("/api/plugin-packages/{slug}/rollback")
+def restore_plugin_package_rollback(slug: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    try:
+        manifest = restore_plugin_for_user(db, user, slug)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "slug": slug,
         "version": manifest.get("version", ""),
         "restart_required": True,
     }

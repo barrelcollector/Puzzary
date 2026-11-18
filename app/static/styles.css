@@ -1373,6 +1373,26 @@ button {
   gap: 14px;
 }
 
+.plugin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.plugin-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.plugin-card h3 {
+  margin: 0;
+}
+
 .review-count-grid,
 .dashboard-actions {
   display: grid;

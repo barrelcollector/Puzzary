@@ -9,6 +9,7 @@
   {% if current_user.can('activity.view') %}<a href="/admin/activity">Activity</a>{% endif %}
   {% if current_user.can('users.view') %}<a href="/admin/users">Users</a>{% endif %}
   {% if current_user.can('roles.manage') %}<a href="/admin/roles">Roles</a>{% endif %}
+  {% if current_user.can('plugins.manage') %}<a href="/admin/plugins">Plugins</a>{% endif %}
   {% if current_user.can('settings.manage') or current_user.can('plugins.manage') %}<a href="/admin/settings">Settings</a>{% endif %}
   {% if current_user.can('themes.manage') or current_user.can('settings.manage') %}<a href="/admin/themes">Themes</a>{% endif %}
   {% if current_user.can('issues.edit.own') or current_user.can('issues.edit.any') %}<a href="/admin/publishing">Publishing</a>{% endif %}

@@ -268,6 +268,10 @@ try:
         assert admin.request.get(base+'/admin/roles').ok
         assert admin.request.get(base+'/admin/audit').ok
         assert manager.request.get(base+'/admin/audit').status==403
+        assert admin.request.get(base+'/admin/plugins').ok
+        assert admin.request.get(base+'/api/plugin-packages/catalog').ok
+        assert manager.request.get(base+'/admin/plugins').status==403
+        assert manager.request.get(base+'/api/plugin-packages').status==403
         from app.main import templates
         for template in templates.env.list_templates(): templates.env.get_template(template)
         browser.close()

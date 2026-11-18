@@ -127,3 +127,34 @@ def install_plugin_release(url: str, expected_sha256: str, plugin_dir: Path) -> 
                 os.replace(rollback, target)
             raise
         return target, manifest
+
+
+def restore_plugin_rollback(slug: str, plugin_dir: Path) -> tuple[Path, dict]:
+    if not SLUG_PATTERN.fullmatch(slug):
+        raise ValueError("plugin slug is invalid")
+    target = plugin_dir / slug
+    rollback = plugin_dir / f".{slug}.rollback"
+    swap = plugin_dir / f".{slug}.swap"
+    if not rollback.is_dir():
+        raise ValueError(f"no rollback package is available for {slug}")
+    if swap.exists():
+        raise ValueError(f"unfinished rollback swap exists for {slug}; inspect it before retrying")
+    manifest = json.loads((rollback / "puzzary-plugin.json").read_text(encoding="utf-8"))
+    if manifest.get("schema") != "puzzary.plugin.v1" or manifest.get("slug") != slug:
+        raise ValueError("rollback manifest does not match the requested plugin")
+    if target.exists():
+        os.replace(target, swap)
+    try:
+        os.replace(rollback, target)
+    except Exception:
+        if swap.exists() and not target.exists():
+            os.replace(swap, target)
+        raise
+    if swap.exists():
+        try:
+            os.replace(swap, rollback)
+        except Exception:
+            os.replace(target, rollback)
+            os.replace(swap, target)
+            raise
+    return target, manifest

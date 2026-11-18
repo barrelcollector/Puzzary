@@ -14,6 +14,14 @@ class PluginInstallRequest(BaseModel):
     sha256: str = Field(..., min_length=64, max_length=64)
 
 
+class OfficialPluginInstallRequest(BaseModel):
+    slugs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class PluginEnabledRequest(BaseModel):
+    enabled: bool
+
+
 class PuzzleGenerateRequest(BaseModel):
     puzzle_type: str = "word_search"
     theme: str = "general"

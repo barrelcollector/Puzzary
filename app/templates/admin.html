@@ -1438,6 +1438,114 @@
       {% include "publishing.html" %}
     {% endif %}
 
+    {% if section == "plugins" %}
+      <section class="puzzle-head">
+        <div>
+          <h1>Puzzle Plugins</h1>
+          <p class="muted">Install and manage puzzle modules. The official modules are versioned packages from GitHub; bundled copies are only a startup fallback.</p>
+        </div>
+        <form method="post" action="/admin/plugins/install-official">
+          <input type="hidden" name="slug" value="all">
+          <button type="submit">Install / Update All Official Modules</button>
+        </form>
+      </section>
+
+      {% if request.query_params.get("error") %}<p class="notice danger" role="alert">{{ request.query_params.get("error") }}</p>{% endif %}
+      {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
+      {% if plugin_management.restart_required %}<p class="notice danger"><strong>Restart required.</strong> One or more packages on disk differ from the currently loaded version. Existing requests continue using the loaded version until Puzzary restarts.</p>{% endif %}
+
+      <div class="metric-grid">
+        <div class="metric-card"><strong>{{ plugin_management.registered_count }}</strong><span>Registered modules</span></div>
+        <div class="metric-card"><strong>{{ plugin_management.external_count }}</strong><span>GitHub packages loaded</span></div>
+        <div class="metric-card"><strong>{{ plugin_management.installed | length }}</strong><span>Packages installed</span></div>
+        <div class="metric-card"><strong>{{ plugin_management.errors | length }}</strong><span>Load errors</span></div>
+      </div>
+
+      <section class="panel admin-section">
+        <div class="section-heading">
+          <div>
+            <h2>Official Modules</h2>
+            <p class="muted">Catalog release {{ plugin_management.official_catalog.release }} from <a href="{{ plugin_management.official_catalog.repository }}" target="_blank" rel="noopener">puzzary-official-plugins</a>.</p>
+          </div>
+          <span class="status-pill">Private GitHub access {{ "configured" if plugin_management.github_access_configured else "not configured" }}</span>
+        </div>
+        <div class="plugin-card-grid">
+          {% for plugin in plugin_management.official %}
+            <article class="plugin-card">
+              <div class="section-heading">
+                <div>
+                  <h3>{{ plugin.name }}</h3>
+                  <small>{{ plugin.slug }} &middot; catalog {{ plugin.version }}</small>
+                </div>
+                <span class="status-pill">{{ plugin.source }}</span>
+              </div>
+              <div class="list compact">
+                <div class="row"><span>Loaded version</span><strong>{{ plugin.loaded_version or "Fallback" if plugin.registered else "Not loaded" }}</strong></div>
+                <div class="row"><span>Installed package</span><strong>{{ plugin.installed.version if plugin.installed else "Not installed" }}</strong></div>
+                <div class="row"><span>Generation</span><strong>{{ "Enabled" if plugin.enabled else "Disabled" }}</strong></div>
+              </div>
+              {% if plugin.restart_required %}<p class="muted">Installed and waiting for restart.</p>{% endif %}
+              <form method="post" action="/admin/plugins/install-official">
+                <input type="hidden" name="slug" value="{{ plugin.slug }}">
+                <button type="submit" class="ghost-button">{% if plugin.installed %}Reinstall {{ plugin.version }}{% else %}Install from GitHub{% endif %}</button>
+              </form>
+              {% if plugin.rollback %}
+              <form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback">
+                <button type="submit" class="ghost-button">Restore {{ plugin.rollback.version }} rollback</button>
+              </form>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="admin-grid two admin-section">
+        <form class="panel" method="post" action="/admin/plugins/status">
+          <h2>Enabled Modules</h2>
+          <p class="muted">Disabled modules remain available for saved puzzles but disappear from generation screens and generation APIs.</p>
+          <div class="check-list module-list">
+            {% for puzzle_type in all_puzzle_types %}
+              <label>
+                <input type="checkbox" name="disabled_puzzle_types" value="{{ puzzle_type.slug }}" {% if puzzle_type.slug in app_settings.disabled_puzzle_types %}checked{% endif %}>
+                Disable {{ puzzle_type.label }}
+                <small class="muted">{{ puzzle_type.slug }}{% if puzzle_type.slug in plugin_management.external_slugs %} / GitHub package{% else %} / bundled fallback{% endif %}</small>
+              </label>
+            {% endfor %}
+          </div>
+          <button type="submit">Save Module Status</button>
+        </form>
+
+        <form class="panel" method="post" action="/admin/plugins/install">
+          <h2>Add From GitHub</h2>
+          <p class="muted">Use a pinned GitHub release ZIP and its published SHA-256 digest. Plugin packages execute server-side code; install only reviewed sources.</p>
+          <label>Release ZIP URL <input type="url" name="url" required placeholder="https://github.com/owner/repository/releases/download/v1.0.0/puzzary-example-1.0.0.zip"></label>
+          <label>SHA-256 digest <input name="sha256" required minlength="64" maxlength="64" pattern="[0-9a-fA-F]{64}" placeholder="64 hexadecimal characters"></label>
+          <button type="submit">Install Package</button>
+          <small class="muted">Private repositories require <code>PUZZARY_PLUGIN_GITHUB_TOKEN</code> in the server environment. The token is never displayed or stored in the package.</small>
+        </form>
+      </section>
+
+      {% if plugin_management.custom_installed %}
+      <section class="panel admin-section">
+        <h2>Additional Installed Modules</h2>
+        <div class="list compact">
+          {% for plugin in plugin_management.custom_installed %}
+            <div class="row"><span><strong>{{ plugin.name }}</strong><small>{{ plugin.slug }} &middot; {{ plugin.path }}</small></span><span><strong>{{ plugin.version }}{% if plugin.restart_required %} / restart required{% endif %}</strong>{% if plugin.slug in plugin_management.rollback_by_slug %}<form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback"><button type="submit" class="ghost-button compact-button">Restore {{ plugin_management.rollback_by_slug[plugin.slug].version }}</button></form>{% endif %}</span></div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if plugin_management.errors %}
+      <section class="panel admin-section">
+        <h2>Plugin Load Errors</h2>
+        <div class="list compact">
+          {% for slug, error in plugin_management.errors.items() %}<div class="row"><strong>{{ slug }}</strong><span>{{ error }}</span></div>{% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    {% endif %}
+
     {% if section == "settings" %}
       <section class="puzzle-head">
         <div>
@@ -1471,23 +1579,7 @@
         </div>
         <p class="muted">Transport settings come from environment variables and require an application restart. Certificate paths and secrets are never displayed here.</p>
 
-        <h2>Puzzle Modules</h2>
-        <p class="muted">Disable a module to remove it from generation screens and API generation while keeping existing puzzles playable.</p>
-        <div class="check-list module-list">
-          {% for puzzle_type in all_puzzle_types %}
-            <label>
-              <input
-                type="checkbox"
-                name="disabled_puzzle_types"
-                value="{{ puzzle_type.slug }}"
-                {% if puzzle_type.slug in app_settings.disabled_puzzle_types %}checked{% endif %}
-                {% if not current_user.can('plugins.manage') %}disabled{% endif %}
-              >
-              Disable {{ puzzle_type.label }}
-              <small class="muted">{{ puzzle_type.slug }}{% if puzzle_type.digital_only %} / digital only{% endif %}{% if puzzle_type.supports_print %} / printable{% endif %}</small>
-            </label>
-          {% endfor %}
-        </div>
+        {% if current_user.can('plugins.manage') %}<p class="muted">Puzzle modules are installed and enabled from <a href="/admin/plugins">Plugins</a>.</p>{% endif %}
         <button type="submit">Save Settings</button>
       </form>
     {% endif %}
