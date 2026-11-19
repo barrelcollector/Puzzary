@@ -113,7 +113,15 @@ def fetch_json(
     if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise OIDCError("The identity provider advertised an insecure endpoint.")
     encoded = urlencode(data).encode("utf-8") if data is not None else None
-    request = Request(url, data=encoded, headers={"Accept": "application/json", **(headers or {})})
+    request = Request(
+        url,
+        data=encoded,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "Puzzary/0.1 OIDC client",
+            **(headers or {}),
+        },
+    )
     if data is not None:
         request.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
