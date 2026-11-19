@@ -1446,7 +1446,7 @@
         </div>
         <form method="post" action="/admin/plugins/install-official">
           <input type="hidden" name="slug" value="all">
-          <button type="submit">Install / Update All Official Modules</button>
+          <button type="submit">Update All Modules</button>
         </form>
       </section>
 
@@ -1460,43 +1460,6 @@
         <div class="metric-card"><strong>{{ plugin_management.installed | length }}</strong><span>Packages installed</span></div>
         <div class="metric-card"><strong>{{ plugin_management.errors | length }}</strong><span>Load errors</span></div>
       </div>
-
-      <section class="panel admin-section">
-        <div class="section-heading">
-          <div>
-            <h2>Private GitHub Access</h2>
-            <p class="muted">Used only when Puzzary downloads puzzle modules from private GitHub repositories.</p>
-          </div>
-          <span class="status-pill">
-            {% if plugin_management.github_access.source == "saved" %}Saved in Puzzary
-            {% elif plugin_management.github_access.source == "environment" %}Server environment fallback
-            {% else %}Not configured{% endif %}
-          </span>
-        </div>
-        <form method="post" action="/admin/plugins/github-access" class="stacked-form">
-          <label>
-            New GitHub credential
-            <input type="password" name="github_token" required maxlength="2000" autocomplete="new-password" placeholder="Paste a fine-grained access token">
-            <small class="muted">The credential is encrypted when saved and is never returned or displayed again. Entering a new value replaces the saved value.</small>
-          </label>
-          <button type="submit">{{ "Replace Saved Credential" if plugin_management.github_access.stored else "Save Credential" }}</button>
-        </form>
-        {% if plugin_management.github_access.configured %}
-        <div class="button-row">
-          <form method="post" action="/admin/plugins/github-access/test">
-            <button type="submit" class="ghost-button">Test Access</button>
-          </form>
-          {% if plugin_management.github_access.stored %}
-          <form method="post" action="/admin/plugins/github-access/remove">
-            <button type="submit" class="danger-button" onclick="return confirm('Remove the saved private GitHub credential?')">Remove Saved Credential</button>
-          </form>
-          {% endif %}
-        </div>
-        {% endif %}
-        {% if plugin_management.github_access.environment_fallback %}
-        <small class="muted">A server environment fallback is also present. It remains available if the saved credential is removed.</small>
-        {% endif %}
-      </section>
 
       <section class="panel admin-section">
         <div class="section-heading">
@@ -1522,10 +1485,16 @@
                 <div class="row"><span>Generation</span><strong>{{ "Enabled" if plugin.enabled else "Disabled" }}</strong></div>
               </div>
               {% if plugin.restart_required %}<p class="muted">Installed and waiting for restart.</p>{% endif %}
-              <form method="post" action="/admin/plugins/install-official">
-                <input type="hidden" name="slug" value="{{ plugin.slug }}">
-                <button type="submit" class="ghost-button">{% if plugin.installed %}Reinstall {{ plugin.version }}{% else %}Install from GitHub{% endif %}</button>
-              </form>
+              <div class="button-row">
+                <form method="post" action="/admin/plugins/install-official">
+                  <input type="hidden" name="slug" value="{{ plugin.slug }}">
+                  <button type="submit" class="ghost-button">Update Module</button>
+                </form>
+                <form method="post" action="/admin/plugins/{{ plugin.slug }}/status">
+                  <input type="hidden" name="enabled" value="{{ 'false' if plugin.enabled else 'true' }}">
+                  <button type="submit" class="ghost-button">{{ "Disable" if plugin.enabled else "Enable" }}</button>
+                </form>
+              </div>
               {% if plugin.rollback %}
               <form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback">
                 <button type="submit" class="ghost-button">Restore {{ plugin.rollback.version }} rollback</button>
@@ -1536,42 +1505,74 @@
         </div>
       </section>
 
-      <section class="admin-grid two admin-section">
-        <form class="panel" method="post" action="/admin/plugins/status">
-          <h2>Enabled Modules</h2>
-          <p class="muted">Disabled modules remain available for saved puzzles but disappear from generation screens and generation APIs.</p>
-          <div class="check-list module-list">
-            {% for puzzle_type in all_puzzle_types %}
-              <label>
-                <input type="checkbox" name="disabled_puzzle_types" value="{{ puzzle_type.slug }}" {% if puzzle_type.slug in app_settings.disabled_puzzle_types %}checked{% endif %}>
-                Disable {{ puzzle_type.label }}
-                <small class="muted">{{ puzzle_type.slug }}{% if puzzle_type.slug in plugin_management.external_slugs %} / GitHub package{% else %} / bundled fallback{% endif %}</small>
-              </label>
-            {% endfor %}
-          </div>
-          <button type="submit">Save Module Status</button>
-        </form>
+      {% if plugin_management.custom_installed %}
+      <section class="panel admin-section">
+        <h2>Additional Installed Modules</h2>
+        <div class="list compact">
+          {% for plugin in plugin_management.custom_installed %}
+            <div class="row">
+              <span><strong>{{ plugin.name }}</strong><small>{{ plugin.slug }} &middot; {{ plugin.path }} &middot; {{ "Enabled" if plugin.enabled else "Disabled" }}</small></span>
+              <span>
+                <strong>{{ plugin.version }}{% if plugin.restart_required %} / restart required{% endif %}</strong>
+                <form method="post" action="/admin/plugins/{{ plugin.slug }}/status">
+                  <input type="hidden" name="enabled" value="{{ 'false' if plugin.enabled else 'true' }}">
+                  <button type="submit" class="ghost-button compact-button">{{ "Disable" if plugin.enabled else "Enable" }}</button>
+                </form>
+                {% if plugin.slug in plugin_management.rollback_by_slug %}<form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback"><button type="submit" class="ghost-button compact-button">Restore {{ plugin_management.rollback_by_slug[plugin.slug].version }}</button></form>{% endif %}
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
 
+      <section class="admin-grid two admin-section">
         <form class="panel" method="post" action="/admin/plugins/install">
           <h2>Add From GitHub</h2>
           <p class="muted">Use a pinned GitHub release ZIP and its published SHA-256 digest. Plugin packages execute server-side code; install only reviewed sources.</p>
           <label>Release ZIP URL <input type="url" name="url" required placeholder="https://github.com/owner/repository/releases/download/v1.0.0/puzzary-example-1.0.0.zip"></label>
           <label>SHA-256 digest <input name="sha256" required minlength="64" maxlength="64" pattern="[0-9a-fA-F]{64}" placeholder="64 hexadecimal characters"></label>
           <button type="submit">Install Package</button>
-          <small class="muted">Private repositories use the write-only credential configured above. It is never stored in an installed package.</small>
+          <small class="muted">Private repositories use the write-only credential configured beside this form. It is never stored in an installed package.</small>
         </form>
-      </section>
 
-      {% if plugin_management.custom_installed %}
-      <section class="panel admin-section">
-        <h2>Additional Installed Modules</h2>
-        <div class="list compact">
-          {% for plugin in plugin_management.custom_installed %}
-            <div class="row"><span><strong>{{ plugin.name }}</strong><small>{{ plugin.slug }} &middot; {{ plugin.path }}</small></span><span><strong>{{ plugin.version }}{% if plugin.restart_required %} / restart required{% endif %}</strong>{% if plugin.slug in plugin_management.rollback_by_slug %}<form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback"><button type="submit" class="ghost-button compact-button">Restore {{ plugin_management.rollback_by_slug[plugin.slug].version }}</button></form>{% endif %}</span></div>
-          {% endfor %}
-        </div>
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <h2>Private GitHub Access</h2>
+              <p class="muted">Used only when Puzzary downloads puzzle modules from private GitHub repositories.</p>
+            </div>
+            <span class="status-pill">
+              {% if plugin_management.github_access.source == "saved" %}Saved in Puzzary
+              {% elif plugin_management.github_access.source == "environment" %}Server environment fallback
+              {% else %}Not configured{% endif %}
+            </span>
+          </div>
+          <form method="post" action="/admin/plugins/github-access" class="stacked-form">
+            <label>
+              New GitHub credential
+              <input type="password" name="github_token" required maxlength="2000" autocomplete="new-password" placeholder="Paste a fine-grained access token">
+              <small class="muted">The credential is encrypted when saved and is never returned or displayed again. Entering a new value replaces the saved value.</small>
+            </label>
+            <button type="submit">{{ "Replace Saved Credential" if plugin_management.github_access.stored else "Save Credential" }}</button>
+          </form>
+          {% if plugin_management.github_access.configured %}
+          <div class="button-row">
+            <form method="post" action="/admin/plugins/github-access/test">
+              <button type="submit" class="ghost-button">Test Access</button>
+            </form>
+            {% if plugin_management.github_access.stored %}
+            <form method="post" action="/admin/plugins/github-access/remove">
+              <button type="submit" class="danger-button" onclick="return confirm('Remove the saved private GitHub credential?')">Remove Saved Credential</button>
+            </form>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if plugin_management.github_access.environment_fallback %}
+          <small class="muted">A server environment fallback is also present. It remains available if the saved credential is removed.</small>
+          {% endif %}
+        </section>
       </section>
-      {% endif %}
 
       {% if plugin_management.errors %}
       <section class="panel admin-section">

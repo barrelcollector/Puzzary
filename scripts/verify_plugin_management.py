@@ -112,12 +112,16 @@ try:
         assert page.ok, page.text()
         html = page.text()
         for phrase in (
-            "Puzzle Plugins", "Install / Update All Official Modules", "Official Modules",
+            "Puzzle Plugins", "Update All Modules", "Official Modules", "Update Module",
             "Add From GitHub", "Example Clock", "Additional Installed Modules",
             "GitHub packages loaded", "Bundled fallback", "Restore 0.9.0",
         ):
             assert phrase in html, phrase
         assert html.count('action="/admin/plugins/install-official"') == 11
+        assert len(re.findall(r'action="/admin/plugins/[^\"]+/status"', html)) == 11
+        assert "Enabled Modules" not in html
+        assert html.index("Additional Installed Modules") < html.index("Add From GitHub")
+        assert html.index("Add From GitHub") < html.index("Private GitHub Access")
 
         settings = request.get(BASE + "/admin/settings")
         assert settings.ok and 'href="/admin/plugins"' in settings.text()
@@ -177,10 +181,10 @@ try:
         })
         assert bad_api_install.status == 400
 
-        disabled = request.post(BASE + "/admin/plugins/status", form={"disabled_puzzle_types": "maze"}, max_redirects=0)
+        disabled = request.post(BASE + "/admin/plugins/maze/status", form={"enabled": "false"}, max_redirects=0)
         assert disabled.status == 303
         disabled_page = request.get(BASE + "/admin/plugins").text()
-        assert re.search(r'name="disabled_puzzle_types"\s+value="maze"\s+checked', disabled_page)
+        assert re.search(r'action="/admin/plugins/maze/status">\s*<input type="hidden" name="enabled" value="true">', disabled_page)
         enabled = request.patch(BASE + "/api/plugin-packages/maze", data={"enabled": True})
         assert enabled.ok and enabled.json() == {"slug": "maze", "enabled": True}
         web_rollback = request.post(BASE + "/admin/plugins/example_clock/rollback", max_redirects=0)
@@ -200,6 +204,8 @@ try:
             page = context.new_page()
             page.goto(BASE + "/admin/plugins")
             assert page.locator(".plugin-card").count() == 10
+            assert page.locator('.plugin-card form[action$="/status"]').count() == 10
+            assert page.get_by_role("button", name="Update Module").count() == 10
             assert page.locator('form[action="/admin/plugins/install"]').is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             context.close()
