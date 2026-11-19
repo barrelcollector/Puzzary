@@ -22,6 +22,10 @@ class PluginEnabledRequest(BaseModel):
     enabled: bool
 
 
+class PluginGitHubAccessWrite(BaseModel):
+    token: str = Field(..., min_length=1, max_length=2000)
+
+
 class PuzzleGenerateRequest(BaseModel):
     puzzle_type: str = "word_search"
     theme: str = "general"

@@ -5,13 +5,17 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
+
+from app.plugin_installer import test_github_access
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +64,28 @@ scripts_path = str(ROOT / ".venv" / "Scripts")
 environment["PATH"] = scripts_path + os.pathsep + environment.get("PATH", "")
 
 BASE = "http://127.0.0.1:8818"
+
+
+class GitHubResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, *_args):
+        return json.dumps({
+            "full_name": "barrelcollector/puzzary-official-plugins",
+            "private": True,
+        }).encode("utf-8")
+
+
+with patch("app.plugin_installer.urllib.request.urlopen", return_value=GitHubResponse()) as github_request:
+    checked = test_github_access("write-only-test-token")
+    assert checked == {"repository": "barrelcollector/puzzary-official-plugins", "private": True}
+    sent_request = github_request.call_args.args[0]
+    assert sent_request.headers["Authorization"] == "Bearer write-only-test-token"
+
 server = subprocess.Popen(
     [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8818"],
     cwd=ROOT,
@@ -102,6 +128,37 @@ try:
         status = request.get(BASE + "/api/plugin-packages")
         assert status.ok and status.json()["external_count"] == 1
         assert status.json()["custom_installed"][0]["slug"] == "example_clock"
+        github_status = request.get(BASE + "/api/plugin-packages/github-access")
+        assert github_status.ok and github_status.json() == {
+            "configured": False,
+            "source": "none",
+            "stored": False,
+            "environment_fallback": False,
+        }
+        saved_access = request.put(BASE + "/api/plugin-packages/github-access", data={
+            "token": "write-only-test-token",
+        })
+        assert saved_access.ok and saved_access.json()["source"] == "saved"
+        saved_page = request.get(BASE + "/admin/plugins").text()
+        assert "Saved in Puzzary" in saved_page
+        assert 'type="password"' in saved_page
+        assert "write-only-test-token" not in saved_page
+        with sqlite3.connect(QA_ROOT / "plugins.sqlite") as database:
+            encrypted = database.execute(
+                "SELECT value FROM app_settings WHERE key = 'plugin_github_token_encrypted'"
+            ).fetchone()[0]
+        assert encrypted and encrypted != "write-only-test-token"
+        removed_access = request.delete(BASE + "/api/plugin-packages/github-access")
+        assert removed_access.ok and removed_access.json()["configured"] is False
+        missing_test = request.post(BASE + "/admin/plugins/github-access/test", max_redirects=0)
+        assert missing_test.status == 303 and "error=" in missing_test.headers["location"]
+        web_saved = request.post(BASE + "/admin/plugins/github-access", form={
+            "github_token": "second-write-only-token",
+        }, max_redirects=0)
+        assert web_saved.status == 303 and "message=" in web_saved.headers["location"]
+        assert "second-write-only-token" not in request.get(BASE + "/api/plugin-packages").text()
+        web_removed = request.post(BASE + "/admin/plugins/github-access/remove", max_redirects=0)
+        assert web_removed.status == 303
 
         bad_web_install = request.post(BASE + "/admin/plugins/install", form={
             "url": "https://example.invalid/plugin.zip",
@@ -147,7 +204,7 @@ try:
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             context.close()
         browser.close()
-    print("Plugin web UI, official catalog, custom install validation, source status, enable/disable controls, and supporting APIs passed.")
+    print("Plugin web UI, encrypted write-only GitHub access, official catalog, custom install validation, source status, enable/disable controls, and supporting APIs passed.")
 finally:
     server.terminate()
     try:
