@@ -1,6 +1,11 @@
-# Home Assistant and print-system automation
+# API clients and print automation
 
-Puzzary exposes one authenticated API for Home Assistant, print services, and other automation clients. Examples below use the reserved documentation host `https://puzzary.example.test` and placeholder identifiers. Replace them at deployment time; never commit an API token or a real private hostname.
+Puzzary exposes one authenticated API for external applications, print services,
+and automation clients. Core owns the API contract and puzzle data; clients own
+their presentation, configuration, polling, actions, and lifecycle. Examples
+below use the reserved documentation host `https://puzzary.example.test` and
+placeholder identifiers. Replace them at deployment time; never commit an API
+token or a real private hostname.
 
 ## Authentication and permissions
 
@@ -59,67 +64,25 @@ The manifest has schema `puzzary.print-manifest.v1`. Each puzzle job contains it
 
 Fetch `pdf_url` with the same bearer header. A `render_url` carries a puzzle-specific token that expires after 15 minutes and should be treated as sensitive; request a new manifest instead of storing it. Print feeding, cutter commands, queues, retries, and physical-printer status remain the print service's responsibility.
 
-## Home Assistant example
+## Client responsibilities
 
-For new installations, prefer the bundled custom integration described in the
-[Home Assistant integration guide](home-assistant.md). It provides native
-sensors, an image entity, and response-capable actions without hand-written REST
-configuration. The generic REST examples below remain useful for older
-installations and specialized workflows.
+External clients should discover supported puzzle types through
+`GET /api/puzzle-types`, retrieve data only through authenticated API routes,
+and enforce no independent copy of Puzzary permissions or publication rules.
+Use separate least-privilege accounts for read-only display, generation, and
+administration when those responsibilities differ. Clients must keep bearer
+tokens out of URLs, user-visible state, notifications, analytics, and logs.
 
-These examples follow Home Assistant's official [RESTful Command](https://www.home-assistant.io/integrations/rest_command/) and [RESTful Sensor](https://www.home-assistant.io/integrations/sensor.rest/) configuration contracts.
-
-Store the complete bearer value in `secrets.yaml`:
-
-```yaml
-puzzary_authorization: "Bearer YOUR_ACCOUNT_API_TOKEN"
-```
-
-Define REST commands with the public or LAN base URL appropriate for your installation:
-
-```yaml
-rest_command:
-  puzzary_generate_easy_takuzu:
-    url: "https://puzzary.example.test/api/puzzles/generate"
-    method: POST
-    headers:
-      Authorization: !secret puzzary_authorization
-      Content-Type: "application/json"
-    payload: '{"puzzle_type":"takuzu","difficulty":"easy"}'
-
-  puzzary_latest_print_manifest:
-    url: "https://puzzary.example.test/api/print/manifest"
-    method: POST
-    headers:
-      Authorization: !secret puzzary_authorization
-      Content-Type: "application/json"
-    payload: '{"latest_puzzle":true}'
-```
-
-These commands can be called from a Home Assistant script or automation. Use a `response_variable` when later actions need the returned puzzle ID, manifest, or PDF URL. Do not place bearer tokens in URLs, notification text, entity state, or logs.
-
-For a read-only latest-puzzle sensor, use the REST integration:
-
-```yaml
-rest:
-  - resource: "https://puzzary.example.test/api/puzzles/latest?printable=true"
-    headers:
-      Authorization: !secret puzzary_authorization
-    scan_interval: 300
-    sensor:
-      - name: "Puzzary latest printable puzzle"
-        value_template: "{{ value_json.title }}"
-        json_attributes:
-          - id
-          - puzzle_type
-          - difficulty
-          - url
-```
-
-Reload or restart Home Assistant as required for the configuration section you changed, then exercise the script manually before attaching it to a schedule or physical printer.
+Puzzary does not install, configure, update, restart, or remove external client
+software. Client-specific entities, media browsers, dashboards, actions,
+services, and release processes belong to their respective projects.
 
 ## Existing issue and print endpoints
 
+- `GET /api/account/stats` returns statistics scoped to the authenticated account.
+- `GET /api/puzzle-types` returns the currently available module contracts.
+- `GET /api/puzzles` returns permission-filtered puzzle metadata and supports
+  availability, completion status, printable-only, and puzzle-type filters.
 - `GET /api/puzzles/latest?printable=true` returns the newest accessible printable puzzle.
 - `GET /api/puzzles/{id}` returns one puzzle's safe print payload.
 - `GET /api/puzzles/{id}/print-preview` returns layout and print/render/PDF/PNG URLs.

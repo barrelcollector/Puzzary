@@ -21,8 +21,8 @@ can use the same API for automation and delivery.
 - Canonical dictionary words with reusable properties and tags
 - Word banks that reference canonical dictionary words without duplicating them
 - Auto-discovered puzzle and game plugin system
-- Built-in Word Search, Crossword, Word Pyramid, Sudoku, Nonogram, Maze,
-  Cross Equations, Takuzu, Minesweeper, and Spell It modules
+- Official installable Word Search, Crossword, Word Pyramid, Sudoku, Nonogram,
+  Maze, Cross Equations, Takuzu, Minesweeper, and Spell It modules
 - Puzzle hints
 - Answer checking
 - Account-based puzzle progress
@@ -32,8 +32,6 @@ can use the same API for automation and delivery.
 - Opt-in in-app and background browser notifications for newly available puzzles
 - Flexible authenticated API for external clients and automation
 - Printable puzzle payloads and PDFs for publishing integrations
-- Home Assistant integration with statistics, a printable puzzle image, and
-  generation and puzzle-administration actions
 
 ## Dictionary Content Pack
 
@@ -114,24 +112,6 @@ password: admin
 Change that password after first login. Existing installations are migrated in place; the oldest existing user still becomes an admin if no admin exists.
 
 Admins can issue per-account API tokens from the Users page. Tokens are shown once, then stored only as hashes. Use **Rotate API Token** on that account's Security tab to replace the credential; rotation immediately invalidates the previous token.
-
-## Home Assistant
-
-The separately released
-[Puzzary Home Assistant integration](https://github.com/barrelcollector/puzzary-home-assistant)
-creates account-statistics sensors, an image
-entity containing the latest printable puzzle, and a Puzzary media source with
-active, in-progress, completed, and archived folders organized by puzzle type.
-Its actions can refresh data, generate puzzles, publish drafts, archive puzzles,
-and restore archived puzzles.
-
-Install it as a HACS custom repository or copy its `custom_components/puzzary`
-folder into Home Assistant, restart Home Assistant, then add **Puzzary** from
-**Settings -> Devices & services**.
-Enter the URL Home Assistant uses to reach Puzzary and a Puzzary API token.
-Management actions require a token whose account has the corresponding puzzle
-permissions; an administrator token has all of them. See the integration
-repository for installation, entities, actions, permissions, and upgrades.
 
 Users can create private RSS or Atom subscriptions from **Account -> Manage
 puzzle feeds**. Feed URLs are independently revocable credentials and can be
@@ -340,13 +320,13 @@ attempts, progress, and printable output. Its web portal is a complete client,
 and the API supports additional clients and delivery workflows:
 
 - Puzzle modules extend the platform without changing the core application.
-- Home Assistant can trigger workflows and display state through the API.
+- External clients can trigger workflows and display state through the API.
 - Daily Stripe can render and print Puzzary issues as a supported publishing
   integration.
 - Other clients can generate, import, export, play, and print content through
   the same authenticated API.
 
-The [Home Assistant and print-system automation guide](docs/automation-integrations.md) documents bearer-token permissions, generation, spoiler-free print manifests, issue bundles, PDF retrieval, and generic Home Assistant examples.
+The [API client and print automation guide](docs/api-clients.md) documents bearer-token permissions, generation, spoiler-free print manifests, issue bundles, and PDF retrieval for any external client.
 
 ## Puzzle Types
 
@@ -434,7 +414,7 @@ Print support:
 - `GET /puzzles/{id}/print.pdf` downloads a PDF for signed-in users. `GET /api/puzzles/{id}/print.pdf` uses the account API token (Bearer authentication).
 - PDF and HTML print routes accept `size=receipt|zebra|4x6|letter|a4|custom`, `width_mm`, `height_mm`, and `margin_mm`. Receipt/Zebra PDFs calculate their length from the content; fixed page sizes paginate as needed. Widths support 25-1000mm; explicit heights support 25-5000mm. Match the physical paper size and use 100% scaling when printing the PDF.
 - `print-preview` includes `pdf_url` for clients that want to download the rendered PDF. This does not change printer feeding or cutter commands.
-- `GET /api/puzzles/{id}/print-preview` returns the module layout metadata and print/render/PDF/PNG URLs for Home Assistant or other clients.
+- `GET /api/puzzles/{id}/print-preview` returns the module layout metadata and print/render/PDF/PNG URLs for external clients.
 - Printed layouts include a QR code by default. The QR points to `/q/{id}`, records a lightweight scan count, and redirects to the matching puzzle page.
 - If the user is not logged in after scanning, the login flow preserves the puzzle URL and returns them there after sign-in.
 - Set **Admin -> Settings -> Public base URL** so printed QR codes use your public HTTPS address instead of a LAN URL.
