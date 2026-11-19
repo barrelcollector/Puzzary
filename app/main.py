@@ -34,7 +34,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
@@ -65,6 +65,9 @@ from app.models import (
     PuzzleProgress,
     PublishedIssue,
     PuzzleTag,
+    OIDCAuthAttempt,
+    OIDCIdentity,
+    OIDCProvider,
     User,
     WordBank,
     WordBankWord,
@@ -93,6 +96,7 @@ from app.permissions import (
     can_view, can_discover, puzzle_is_unlisted, puzzle_is_published,
     puzzle_is_scheduled, puzzle_publication_state, require_owned, can_owned,
     audit, lock_permissions, protect_last_admin,
+    register_route_permission,
 )
 from app.schemas import (
     DictionaryDefinitionPatch,
@@ -118,10 +122,24 @@ from app.schemas import (
     PuzzlePrintPreview,
     PrintManifestRequest,
     PuzzleSummary,
+    OIDCLoginSettingsWrite,
+    OIDCProviderPatch,
+    OIDCProviderWrite,
     UserCreate,
     WordBankEntryWrite,
     WordBankPatch,
     WordBankWrite,
+)
+from app.oidc import (
+    OIDCError,
+    complete_authorization,
+    decrypt_secret,
+    encrypt_secret,
+    new_authorization_request,
+    normalize_issuer,
+    normalize_scopes,
+    provider_metadata,
+    provider_summary,
 )
 
 
@@ -160,6 +178,16 @@ templates.env.globals['can_owned'] = can_owned
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 for plugin_slug, static_dir in plugin_static_directories().items():
     app.mount(f"/plugins/{plugin_slug}/static", StaticFiles(directory=str(static_dir)), name=f"plugin-{plugin_slug}-static")
+
+for endpoint_name in (
+    "api_list_oidc_providers",
+    "api_create_oidc_provider",
+    "api_update_oidc_provider",
+    "api_delete_oidc_provider",
+    "api_update_oidc_settings",
+    "api_test_oidc_provider",
+):
+    register_route_permission(endpoint_name, "settings.manage")
 from app.publishing import router as publishing_router
 app.include_router(publishing_router)
 from app.feeds import router as feeds_router
@@ -373,6 +401,108 @@ def app_base_url(db: Session | None = None) -> str:
     if db is None:
         return DEFAULT_APP_BASE_URL
     return app_setting(db, "public_base_url", DEFAULT_APP_BASE_URL).rstrip("/")
+
+
+OIDC_LOGIN_MODES = {"local", "mixed", "oidc"}
+OIDC_PROVISIONING_MODES = {"link_only", "jit"}
+OIDC_ATTEMPT_TTL_MINUTES = 10
+
+
+def oidc_login_mode(db: Session) -> str:
+    mode = app_setting(db, "oidc_login_mode", "local")
+    return mode if mode in OIDC_LOGIN_MODES else "local"
+
+
+def oidc_callback_url(db: Session) -> str:
+    return f"{app_base_url(db)}/auth/oidc/callback"
+
+
+def oidc_enabled_providers(db: Session) -> list[OIDCProvider]:
+    return list(
+        db.scalars(
+            select(OIDCProvider)
+            .where(OIDCProvider.enabled == True)  # noqa: E712
+            .order_by(OIDCProvider.display_name, OIDCProvider.id)
+        )
+    )
+
+
+def restore_local_login_if_no_oidc_provider(db: Session) -> None:
+    db.flush()
+    if oidc_login_mode(db) != "local" and not oidc_enabled_providers(db):
+        set_app_setting(db, "oidc_login_mode", "local")
+
+
+def oidc_provider_payload(provider: OIDCProvider, db: Session) -> dict:
+    return provider_summary(provider, oidc_callback_url(db))
+
+
+def validate_oidc_provider_values(
+    display_name: str,
+    issuer_url: str,
+    client_id: str,
+    scopes: str,
+    provisioning_mode: str,
+) -> tuple[str, str, str, str, str]:
+    name = display_name.strip()
+    client = client_id.strip()
+    if not name:
+        raise OIDCError("Provider display name is required.")
+    if not client:
+        raise OIDCError("OIDC client ID is required.")
+    provisioning = provisioning_mode.strip().lower()
+    if provisioning not in OIDC_PROVISIONING_MODES:
+        raise OIDCError("Provisioning mode must be explicit linking or player-only automatic creation.")
+    return name[:120], normalize_issuer(issuer_url), client[:255], normalize_scopes(scopes), provisioning
+
+
+def update_oidc_provider(
+    provider: OIDCProvider,
+    *,
+    display_name: str,
+    issuer_url: str,
+    client_id: str,
+    client_secret: str | None,
+    scopes: str,
+    provisioning_mode: str,
+    enabled: bool,
+) -> None:
+    name, issuer, client, clean_scopes, provisioning = validate_oidc_provider_values(
+        display_name, issuer_url, client_id, scopes, provisioning_mode
+    )
+    changed_protocol = (
+        provider.issuer_url != issuer
+        or provider.client_id != client
+        or bool(client_secret)
+        or provider.scopes != clean_scopes
+    )
+    provider.display_name = name
+    provider.issuer_url = issuer
+    provider.client_id = client
+    provider.scopes = clean_scopes
+    provider.provisioning_mode = provisioning
+    if client_secret:
+        provider.client_secret_encrypted = encrypt_secret(client_secret, SESSION_SECRET)
+    if not provider.client_secret_encrypted:
+        raise OIDCError("OIDC client secret is required.")
+    if changed_protocol:
+        provider.last_tested_at = None
+        provider.last_test_status = ""
+        provider.last_test_message = "Configuration changed; test it again before enabling."
+    if enabled and not (provider.last_tested_at and provider.last_test_status == "ok"):
+        raise OIDCError("Test this provider successfully before enabling it.")
+    provider.enabled = enabled
+
+
+def unique_oidc_display_name(db: Session, value: str) -> str:
+    base = re.sub(r"\s+", " ", value).strip()[:70] or "OIDC user"
+    candidate = base
+    number = 2
+    while db.scalar(select(User.id).where(User.display_name == candidate)) is not None:
+        suffix = f" {number}"
+        candidate = f"{base[:80 - len(suffix)]}{suffix}"
+        number += 1
+    return candidate
 
 
 def puzzle_url(puzzle_id: str, db: Session | None = None) -> str:
@@ -3205,9 +3335,261 @@ def activate_guest_share(
     return RedirectResponse(f"/puzzles/{puzzle.id}", status_code=303)
 
 
+def begin_oidc_authorization(
+    db: Session,
+    provider: OIDCProvider,
+    *,
+    intent: str,
+    user_id: int | None,
+    return_to: str,
+) -> str:
+    now = utcnow()
+    db.execute(
+        delete(OIDCAuthAttempt).where(
+            (OIDCAuthAttempt.expires_at < now)
+            | (OIDCAuthAttempt.used_at < now - timedelta(days=1))
+        )
+    )
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(64)
+    authorization_url = new_authorization_request(
+        provider,
+        oidc_callback_url(db),
+        state,
+        nonce,
+        code_verifier,
+    )
+    db.add(
+        OIDCAuthAttempt(
+            state_hash=hash_secret(state),
+            provider_id=provider.id,
+            intent=intent,
+            user_id=user_id,
+            code_verifier_encrypted=encrypt_secret(code_verifier, SESSION_SECRET),
+            nonce=nonce,
+            return_to=safe_return_to(return_to),
+            expires_at=utcnow() + timedelta(minutes=OIDC_ATTEMPT_TTL_MINUTES),
+        )
+    )
+    db.commit()
+    return authorization_url
+
+
+def oidc_failure_redirect(intent: str, message: str) -> RedirectResponse:
+    target = "/admin/settings" if intent == "test" else "/account" if intent == "link" else "/login"
+    return RedirectResponse(url=f"{target}?error={quote(message[:240])}", status_code=303)
+
+
+@app.get("/auth/oidc/{provider_id}/start")
+def oidc_login_start(
+    provider_id: int,
+    request: Request,
+    return_to: str = "/library",
+    db: Session = Depends(get_db),
+):
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None or not provider.enabled or oidc_login_mode(db) == "local":
+        return RedirectResponse(url="/login?error=That%20single%20sign-on%20provider%20is%20not%20available.", status_code=303)
+    try:
+        url = begin_oidc_authorization(
+            db, provider, intent="login", user_id=None, return_to=return_to
+        )
+    except OIDCError as error:
+        return oidc_failure_redirect("login", str(error))
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.post("/account/oidc/{provider_id}/link")
+def oidc_link_start(provider_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None or not provider.enabled:
+        return RedirectResponse(url="/account?error=That%20single%20sign-on%20provider%20is%20not%20available.", status_code=303)
+    try:
+        url = begin_oidc_authorization(
+            db, provider, intent="link", user_id=user.id, return_to="/account"
+        )
+    except OIDCError as error:
+        return oidc_failure_redirect("link", str(error))
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.post("/admin/settings/oidc/{provider_id}/test")
+def oidc_test_start(provider_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "settings.manage")
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None:
+        raise HTTPException(404, "OIDC provider not found")
+    try:
+        url = begin_oidc_authorization(
+            db, provider, intent="test", user_id=user.id, return_to="/admin/settings"
+        )
+    except OIDCError as error:
+        provider.last_test_status = "error"
+        provider.last_test_message = str(error)[:300]
+        db.commit()
+        return oidc_failure_redirect("test", str(error))
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.get("/auth/oidc/callback")
+def oidc_callback(
+    request: Request,
+    state: str = "",
+    code: str = "",
+    error: str = "",
+    error_description: str = "",
+    db: Session = Depends(get_db),
+):
+    attempt = db.scalar(
+        select(OIDCAuthAttempt).where(
+            OIDCAuthAttempt.state_hash == hash_secret(state),
+            OIDCAuthAttempt.used_at.is_(None),
+            OIDCAuthAttempt.expires_at > utcnow(),
+        )
+    ) if state else None
+    if attempt is None:
+        return RedirectResponse(url="/login?error=That%20single%20sign-on%20request%20is%20invalid%20or%20expired.", status_code=303)
+    attempt.used_at = utcnow()
+    db.commit()
+    provider = db.get(OIDCProvider, attempt.provider_id)
+    if provider is None:
+        return oidc_failure_redirect(attempt.intent, "The single sign-on provider no longer exists.")
+    if error:
+        message = error_description.strip() or "The identity provider denied the sign-in request."
+        if attempt.intent == "test":
+            provider.last_test_status = "error"
+            provider.last_test_message = message[:300]
+            db.commit()
+        return oidc_failure_redirect(attempt.intent, message)
+    if not code:
+        return oidc_failure_redirect(attempt.intent, "The identity provider did not return an authorization code.")
+    try:
+        result = complete_authorization(
+            provider,
+            decrypt_secret(provider.client_secret_encrypted, SESSION_SECRET),
+            oidc_callback_url(db),
+            code,
+            decrypt_secret(attempt.code_verifier_encrypted, SESSION_SECRET),
+            attempt.nonce,
+        )
+    except OIDCError as oidc_error:
+        if attempt.intent == "test":
+            provider.last_test_status = "error"
+            provider.last_test_message = str(oidc_error)[:300]
+            db.commit()
+        return oidc_failure_redirect(attempt.intent, str(oidc_error))
+
+    if attempt.intent == "test":
+        admin = current_user(request, db)
+        if admin is None or admin.id != attempt.user_id or not admin.can("settings.manage"):
+            return oidc_failure_redirect("test", "The administrator session used to start this test is no longer active.")
+        provider.last_tested_at = utcnow()
+        provider.last_test_status = "ok"
+        provider.last_test_message = f"Validated issuer and signed ID token for {result.display_name}."[:300]
+        audit(db, admin, "oidc_provider", provider.id, "oidc.tested", {}, {"issuer": result.issuer})
+        db.commit()
+        return RedirectResponse(url="/admin/settings?message=Single%20sign-on%20test%20passed.", status_code=303)
+
+    identity = db.scalar(
+        select(OIDCIdentity).where(
+            OIDCIdentity.issuer == result.issuer,
+            OIDCIdentity.subject == result.subject,
+        )
+    )
+    if attempt.intent == "link":
+        user = current_user(request, db)
+        if user is None or user.id != attempt.user_id:
+            return oidc_failure_redirect("link", "Sign in locally again before linking an identity.")
+        if identity is not None and identity.user_id != user.id:
+            return oidc_failure_redirect("link", "That external identity is already linked to another account.")
+        existing_for_provider = db.scalar(
+            select(OIDCIdentity).where(
+                OIDCIdentity.provider_id == provider.id,
+                OIDCIdentity.user_id == user.id,
+            )
+        )
+        if existing_for_provider is not None and existing_for_provider.subject != result.subject:
+            return oidc_failure_redirect("link", "This account is already linked to a different identity from that provider.")
+        identity = identity or existing_for_provider or OIDCIdentity(
+            provider_id=provider.id,
+            user_id=user.id,
+            issuer=result.issuer,
+            subject=result.subject,
+        )
+        identity.email = result.email if result.email_verified else None
+        identity.display_name = result.display_name
+        identity.claims = result.claims
+        identity.last_login_at = utcnow()
+        db.add(identity)
+        audit(db, user, "user", user.id, "oidc.linked", {}, {"provider_id": provider.id, "issuer": result.issuer})
+        db.commit()
+        return RedirectResponse(url="/account?message=Single%20sign-on%20identity%20linked.", status_code=303)
+
+    if identity is None:
+        if provider.provisioning_mode != "jit":
+            return oidc_failure_redirect(
+                "login",
+                "This identity is not linked to a Puzzary account. Sign in locally and link it from Account settings.",
+            )
+        from app.models import PermissionRole
+        role = db.scalar(select(PermissionRole).where(PermissionRole.name == "Player"))
+        if role is None:
+            initialize_permissions(db)
+            role = db.scalar(select(PermissionRole).where(PermissionRole.name == "Player"))
+        verified_email = result.email if result.email_verified else None
+        if verified_email and db.scalar(select(User.id).where(User.email == verified_email)) is not None:
+            verified_email = None
+        user = User(
+            display_name=unique_oidc_display_name(db, result.display_name),
+            email=verified_email,
+            is_admin=False,
+            is_active=True,
+            permissions_initialized=True,
+            permission_overrides={},
+            roles=[role],
+        )
+        db.add(user)
+        db.flush()
+        identity = OIDCIdentity(
+            provider_id=provider.id,
+            user_id=user.id,
+            issuer=result.issuer,
+            subject=result.subject,
+            email=verified_email,
+            display_name=result.display_name,
+            claims=result.claims,
+            last_login_at=utcnow(),
+        )
+        db.add(identity)
+        audit(db, user, "user", user.id, "oidc.provisioned", {}, {"provider_id": provider.id})
+    user = db.get(User, identity.user_id)
+    if user is None or not user.is_active:
+        return oidc_failure_redirect("login", "That Puzzary account is disabled or unavailable.")
+    identity.email = result.email if result.email_verified else identity.email
+    identity.display_name = result.display_name
+    identity.claims = result.claims
+    identity.last_login_at = utcnow()
+    user.last_login_at = utcnow()
+    db.commit()
+    request.session.clear()
+    request.session["user_id"] = user.id
+    request.session["session_version"] = user.session_version or 1
+    request.session["auth_method"] = "oidc"
+    request.session["oidc_provider_id"] = provider.id
+    return RedirectResponse(url=safe_return_to(attempt.return_to), status_code=303)
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)):
     return_to = safe_return_to(request.query_params.get("return_to", ""))
+    mode = oidc_login_mode(db)
     return templates.TemplateResponse(
         "login.html",
         {
@@ -3216,6 +3598,9 @@ def login_page(request: Request, db: Session = Depends(get_db)):
             "error": request.query_params.get("error", ""),
             "message": request.query_params.get("message", ""),
             "return_to": return_to,
+            "login_mode": mode,
+            "oidc_providers": oidc_enabled_providers(db) if mode != "local" else [],
+            "show_local_login": mode != "oidc" or request.query_params.get("local") == "1",
         },
     )
 
@@ -3236,7 +3621,11 @@ def login(
     if user is None or not user.is_active or not verify_password(password, user.password_hash):
         record_login_failure(request, username)
         return RedirectResponse(url=f"/login?error=Invalid%20username%20or%20password.{login_error_suffix}", status_code=303)
+    if oidc_login_mode(db) == "oidc" and not user.is_admin:
+        record_login_failure(request, username)
+        return RedirectResponse(url=f"/login?error=Local%20login%20is%20reserved%20for%20administrator%20recovery.{login_error_suffix}", status_code=303)
 
+    request.session.clear()
     request.session["user_id"] = user.id
     request.session["session_version"] = user.session_version or 1
     user.last_login_at = utcnow()
@@ -3317,6 +3706,22 @@ def account_password_page(request: Request, db: Session = Depends(get_db)):
             "appearance_options": appearance_options(db),
             "appearance_preference": user.appearance_theme or "server",
             "appearance_default": appearance_default_slug(db),
+            "oidc_identities": [
+                {
+                    "identity": identity,
+                    "provider": db.get(OIDCProvider, identity.provider_id),
+                }
+                for identity in db.scalars(
+                    select(OIDCIdentity)
+                    .where(OIDCIdentity.user_id == user.id)
+                    .order_by(OIDCIdentity.created_at)
+                )
+            ],
+            "oidc_link_providers": oidc_enabled_providers(db),
+            "oidc_linked_provider_ids": {
+                identity.provider_id
+                for identity in db.scalars(select(OIDCIdentity).where(OIDCIdentity.user_id == user.id))
+            },
         },
     )
 
@@ -3350,6 +3755,29 @@ def account_password_update(
     db.commit()
     request.session["session_version"] = user.session_version
     return RedirectResponse(url="/account/password?message=Password%20updated.", status_code=303)
+
+
+@app.post("/account/oidc/{identity_id}/unlink")
+def account_oidc_unlink(identity_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    identity = db.get(OIDCIdentity, identity_id)
+    if identity is None or identity.user_id != user.id:
+        raise HTTPException(404, "Linked identity not found")
+    identity_count = db.scalar(
+        select(func.count()).select_from(OIDCIdentity).where(OIDCIdentity.user_id == user.id)
+    ) or 0
+    local_login_available = bool(user.password_hash) and (oidc_login_mode(db) != "oidc" or user.is_admin)
+    if not local_login_available and identity_count <= 1:
+        return RedirectResponse(
+            url="/account?error=Add%20another%20sign-in%20method%20before%20removing%20your%20only%20single%20sign-on%20identity.",
+            status_code=303,
+        )
+    audit(db, user, "user", user.id, "oidc.unlinked", {"provider_id": identity.provider_id}, {})
+    db.delete(identity)
+    db.commit()
+    return RedirectResponse(url="/account?message=Single%20sign-on%20identity%20removed.", status_code=303)
 
 
 @app.post("/account/appearance")
@@ -3633,6 +4061,12 @@ def admin_context(
         "app_settings": {
             "public_base_url": effective_base_url,
             "default_base_url": DEFAULT_APP_BASE_URL,
+            "oidc_login_mode": oidc_login_mode(db),
+            "oidc_callback_url": oidc_callback_url(db),
+            "oidc_providers": [
+                oidc_provider_payload(provider, db)
+                for provider in db.scalars(select(OIDCProvider).order_by(OIDCProvider.display_name, OIDCProvider.id))
+            ],
             "disabled_puzzle_types": sorted(disabled_puzzle_type_slugs(db)),
             "transport": {
                 "native_tls": TRANSPORT_CONFIG.native_tls,
@@ -4239,6 +4673,7 @@ def admin_delete_theme(slug: str, request: Request, db: Session = Depends(get_db
 def admin_update_settings(
     request: Request,
     public_base_url: str | None = Form(None),
+    oidc_login_mode_value: str | None = Form(None, alias="oidc_login_mode"),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -4248,10 +4683,142 @@ def admin_update_settings(
         base_url = app_base_url(db) if public_base_url is None else normalize_base_url(public_base_url) or DEFAULT_APP_BASE_URL
     except ValueError as error:
         return RedirectResponse(url=f"/admin/settings?error={quote(str(error))}", status_code=303)
-    if base_url != app_base_url(db): require_permission(user, 'settings.manage')
+    base_url_changed = base_url != app_base_url(db)
+    if base_url_changed:
+        require_permission(user, 'settings.manage')
+        for provider in db.scalars(select(OIDCProvider)):
+            provider.enabled = False
+            provider.last_tested_at = None
+            provider.last_test_status = "untested"
+            provider.last_test_message = "Public URL changed; test this provider again with the new callback URL."
+        set_app_setting(db, "oidc_login_mode", "local")
     set_app_setting(db, "public_base_url", base_url)
+    if oidc_login_mode_value is not None and not base_url_changed:
+        require_permission(user, "settings.manage")
+        login_mode = oidc_login_mode_value.strip().lower()
+        if login_mode not in OIDC_LOGIN_MODES:
+            return RedirectResponse(url="/admin/settings?error=Unknown%20login%20mode.", status_code=303)
+        if login_mode != "local" and not oidc_enabled_providers(db):
+            return RedirectResponse(
+                url="/admin/settings?error=Enable%20a%20successfully%20tested%20OIDC%20provider%20before%20turning%20on%20single%20sign-on.",
+                status_code=303,
+            )
+        set_app_setting(db, "oidc_login_mode", login_mode)
+        audit(db, user, "settings", "oidc_login_mode", "oidc.login_mode", {}, {"mode": login_mode})
     db.commit()
     return RedirectResponse(url="/admin/settings?message=Settings%20saved.", status_code=303)
+
+
+@app.post("/admin/settings/oidc")
+def admin_create_oidc_provider(
+    request: Request,
+    display_name: str = Form(""),
+    issuer_url: str = Form(""),
+    client_id: str = Form(""),
+    client_secret: str = Form(""),
+    scopes: str = Form("openid profile email"),
+    provisioning_mode: str = Form("link_only"),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "settings.manage")
+    provider = OIDCProvider(created_by_id=user.id)
+    try:
+        update_oidc_provider(
+            provider,
+            display_name=display_name,
+            issuer_url=issuer_url,
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=scopes,
+            provisioning_mode=provisioning_mode,
+            enabled=False,
+        )
+        duplicate = db.scalar(select(OIDCProvider.id).where(OIDCProvider.issuer_url == provider.issuer_url))
+        if duplicate is not None:
+            raise OIDCError("A provider with that issuer already exists.")
+    except OIDCError as oidc_error:
+        return RedirectResponse(url=f"/admin/settings?error={quote(str(oidc_error))}", status_code=303)
+    db.add(provider)
+    db.flush()
+    audit(db, user, "oidc_provider", provider.id, "oidc.created", {}, {"issuer": provider.issuer_url})
+    db.commit()
+    return RedirectResponse(url="/admin/settings?message=Provider%20saved.%20Test%20it%20before%20enabling.", status_code=303)
+
+
+@app.post("/admin/settings/oidc/{provider_id}")
+def admin_update_oidc_provider(
+    provider_id: int,
+    request: Request,
+    display_name: str = Form(""),
+    issuer_url: str = Form(""),
+    client_id: str = Form(""),
+    client_secret: str = Form(""),
+    scopes: str = Form("openid profile email"),
+    provisioning_mode: str = Form("link_only"),
+    enabled: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "settings.manage")
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None:
+        raise HTTPException(404, "OIDC provider not found")
+    before = oidc_provider_payload(provider, db)
+    try:
+        update_oidc_provider(
+            provider,
+            display_name=display_name,
+            issuer_url=issuer_url,
+            client_id=client_id,
+            client_secret=client_secret or None,
+            scopes=scopes,
+            provisioning_mode=provisioning_mode,
+            enabled=enabled == "on",
+        )
+        duplicate = db.scalar(
+            select(OIDCProvider.id).where(
+                OIDCProvider.issuer_url == provider.issuer_url,
+                OIDCProvider.id != provider.id,
+            )
+        )
+        if duplicate is not None:
+            raise OIDCError("A provider with that issuer already exists.")
+    except OIDCError as oidc_error:
+        db.rollback()
+        return RedirectResponse(url=f"/admin/settings?error={quote(str(oidc_error))}", status_code=303)
+    restore_local_login_if_no_oidc_provider(db)
+    audit(db, user, "oidc_provider", provider.id, "oidc.updated", before, oidc_provider_payload(provider, db))
+    db.commit()
+    return RedirectResponse(url="/admin/settings?message=Single%20sign-on%20provider%20updated.", status_code=303)
+
+
+@app.post("/admin/settings/oidc/{provider_id}/delete")
+def admin_delete_oidc_provider(provider_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "settings.manage")
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None:
+        raise HTTPException(404, "OIDC provider not found")
+    identity_count = db.scalar(
+        select(func.count()).select_from(OIDCIdentity).where(OIDCIdentity.provider_id == provider.id)
+    ) or 0
+    if provider.enabled or identity_count:
+        return RedirectResponse(
+            url="/admin/settings?error=Disable%20the%20provider%20and%20remove%20its%20linked%20identities%20before%20deleting%20it.",
+            status_code=303,
+        )
+    audit(db, user, "oidc_provider", provider.id, "oidc.deleted", oidc_provider_payload(provider, db), {})
+    db.delete(provider)
+    restore_local_login_if_no_oidc_provider(db)
+    db.commit()
+    return RedirectResponse(url="/admin/settings?message=Single%20sign-on%20provider%20deleted.", status_code=303)
 
 
 @app.post("/admin/users")
@@ -4360,6 +4927,40 @@ def admin_revoke_user_sessions(user_id: int, request: Request, db: Session = Dep
     audit(db, admin, 'user', user.id, 'sessions.revoked', {}, {})
     db.commit()
     return RedirectResponse(url="/admin/users?message=Sessions%20revoked.", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/oidc/{identity_id}/unlink")
+def admin_unlink_oidc_identity(
+    user_id: int,
+    identity_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    admin = require_admin_user(request, db)
+    if isinstance(admin, RedirectResponse):
+        return admin
+    require_permission(admin, "users.edit")
+    user = db.get(User, user_id)
+    identity = db.get(OIDCIdentity, identity_id)
+    if user is None or identity is None or identity.user_id != user.id:
+        raise HTTPException(404, "Linked identity not found")
+    identity_count = db.scalar(
+        select(func.count()).select_from(OIDCIdentity).where(OIDCIdentity.user_id == user.id)
+    ) or 0
+    local_login_available = bool(user.password_hash) and (oidc_login_mode(db) != "oidc" or user.is_admin)
+    if not local_login_available and identity_count <= 1:
+        return RedirectResponse(
+            url=f"/admin/users/{user.id}?tab=security&error=Add%20another%20sign-in%20method%20before%20removing%20the%20user%27s%20only%20single%20sign-on%20identity.",
+            status_code=303,
+        )
+    audit(db, admin, "user", user.id, "oidc.unlinked", {"provider_id": identity.provider_id}, {})
+    db.delete(identity)
+    user.session_version = (user.session_version or 1) + 1
+    db.commit()
+    return RedirectResponse(
+        url=f"/admin/users/{user.id}?tab=security&message=Single%20sign-on%20identity%20removed.",
+        status_code=303,
+    )
 
 
 @app.post("/admin/puzzles/manual")
@@ -5864,6 +6465,150 @@ def create_user(payload: UserCreate, request: Request, db: Session = Depends(get
         "requires_password_setup": bool(setup_token),
         "setup_url": setup_url(setup_token, db) if setup_token else "",
     }
+
+
+@app.get("/api/admin/oidc/providers")
+def api_list_oidc_providers(request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "settings.manage")
+    return {
+        "login_mode": oidc_login_mode(db),
+        "local_accounts_default": True,
+        "local_admin_recovery": True,
+        "callback_url": oidc_callback_url(db),
+        "providers": [
+            oidc_provider_payload(provider, db)
+            for provider in db.scalars(select(OIDCProvider).order_by(OIDCProvider.display_name, OIDCProvider.id))
+        ],
+    }
+
+
+@app.post("/api/admin/oidc/providers", status_code=201)
+def api_create_oidc_provider(
+    payload: OIDCProviderWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "settings.manage")
+    provider = OIDCProvider(created_by_id=user.id)
+    try:
+        update_oidc_provider(
+            provider,
+            display_name=payload.display_name,
+            issuer_url=payload.issuer_url,
+            client_id=payload.client_id,
+            client_secret=payload.client_secret,
+            scopes=payload.scopes,
+            provisioning_mode=payload.provisioning_mode,
+            enabled=payload.enabled,
+        )
+        if db.scalar(select(OIDCProvider.id).where(OIDCProvider.issuer_url == provider.issuer_url)) is not None:
+            raise OIDCError("A provider with that issuer already exists.")
+    except OIDCError as oidc_error:
+        raise HTTPException(400, str(oidc_error)) from oidc_error
+    db.add(provider)
+    db.flush()
+    audit(db, user, "oidc_provider", provider.id, "oidc.created", {}, {"issuer": provider.issuer_url})
+    db.commit()
+    db.refresh(provider)
+    return oidc_provider_payload(provider, db)
+
+
+@app.patch("/api/admin/oidc/providers/{provider_id}")
+def api_update_oidc_provider(
+    provider_id: int,
+    payload: OIDCProviderPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "settings.manage")
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None:
+        raise HTTPException(404, "OIDC provider not found")
+    values = payload.model_dump(exclude_unset=True)
+    before = oidc_provider_payload(provider, db)
+    try:
+        update_oidc_provider(
+            provider,
+            display_name=values.get("display_name", provider.display_name),
+            issuer_url=values.get("issuer_url", provider.issuer_url),
+            client_id=values.get("client_id", provider.client_id),
+            client_secret=values.get("client_secret") or None,
+            scopes=values.get("scopes", provider.scopes),
+            provisioning_mode=values.get("provisioning_mode", provider.provisioning_mode),
+            enabled=values.get("enabled", provider.enabled),
+        )
+        duplicate = db.scalar(
+            select(OIDCProvider.id).where(
+                OIDCProvider.issuer_url == provider.issuer_url,
+                OIDCProvider.id != provider.id,
+            )
+        )
+        if duplicate is not None:
+            raise OIDCError("A provider with that issuer already exists.")
+    except OIDCError as oidc_error:
+        db.rollback()
+        raise HTTPException(400, str(oidc_error)) from oidc_error
+    restore_local_login_if_no_oidc_provider(db)
+    audit(db, user, "oidc_provider", provider.id, "oidc.updated", before, oidc_provider_payload(provider, db))
+    db.commit()
+    return oidc_provider_payload(provider, db)
+
+
+@app.delete("/api/admin/oidc/providers/{provider_id}", status_code=204)
+def api_delete_oidc_provider(provider_id: int, request: Request, db: Session = Depends(get_db)) -> Response:
+    user = require_admin_api(request, db)
+    require_permission(user, "settings.manage")
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None:
+        raise HTTPException(404, "OIDC provider not found")
+    identity_count = db.scalar(
+        select(func.count()).select_from(OIDCIdentity).where(OIDCIdentity.provider_id == provider.id)
+    ) or 0
+    if provider.enabled or identity_count:
+        raise HTTPException(409, "Disable the provider and remove linked identities before deleting it")
+    audit(db, user, "oidc_provider", provider.id, "oidc.deleted", oidc_provider_payload(provider, db), {})
+    db.delete(provider)
+    restore_local_login_if_no_oidc_provider(db)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.put("/api/admin/oidc/settings")
+def api_update_oidc_settings(
+    payload: OIDCLoginSettingsWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "settings.manage")
+    mode = payload.login_mode.strip().lower()
+    if mode not in OIDC_LOGIN_MODES:
+        raise HTTPException(400, "Unknown login mode")
+    if mode != "local" and not oidc_enabled_providers(db):
+        raise HTTPException(409, "Enable a successfully tested OIDC provider first")
+    set_app_setting(db, "oidc_login_mode", mode)
+    audit(db, user, "settings", "oidc_login_mode", "oidc.login_mode", {}, {"mode": mode})
+    db.commit()
+    return {"login_mode": mode, "local_admin_recovery": True}
+
+
+@app.post("/api/admin/oidc/providers/{provider_id}/test")
+def api_test_oidc_provider(provider_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    require_permission(user, "settings.manage")
+    provider = db.get(OIDCProvider, provider_id)
+    if provider is None:
+        raise HTTPException(404, "OIDC provider not found")
+    try:
+        authorization_url = begin_oidc_authorization(
+            db, provider, intent="test", user_id=user.id, return_to="/admin/settings"
+        )
+    except OIDCError as oidc_error:
+        raise HTTPException(400, str(oidc_error)) from oidc_error
+    return {"authorization_url": authorization_url, "callback_url": oidc_callback_url(db)}
 
 
 def apply_definition_payload(

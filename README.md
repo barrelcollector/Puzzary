@@ -93,6 +93,7 @@ http://localhost:8790/admin
 ## Accounts
 
 Puzzary does not allow public self-registration. Users sign in with their display name or email address and password.
+Built-in accounts remain the default, while deployments with an identity provider can opt into [OpenID Connect sign-in](docs/oidc-sso.md) without removing the local administrator recovery path.
 
 Admins manage accounts from:
 

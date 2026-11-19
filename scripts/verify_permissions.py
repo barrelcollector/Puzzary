@@ -6,6 +6,7 @@ os.environ['UPLOAD_DIR'] = '/tmp/permissions-uploads'
 import base64
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -70,7 +71,7 @@ print('Migration preserves accounts, puzzles and progress; presets, union, deny 
 base='http://127.0.0.1:8792'
 def cookie(user_id):
     return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':user_id,'session_version':1}).encode())).decode()
-server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8792'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8792'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
 try:
     with sync_playwright() as p:
         browser=p.chromium.launch()

@@ -1579,9 +1579,68 @@
         </div>
         <p class="muted">Transport settings come from environment variables and require an application restart. Certificate paths and secrets are never displayed here.</p>
 
+        <h2>Account Sign-in</h2>
+        <p class="muted">Built-in Puzzary accounts are the default. External OpenID Connect sign-in is optional, and local administrator recovery always remains available.</p>
+        <label>Login mode
+          <select name="oidc_login_mode" {% if not current_user.can('settings.manage') %}disabled{% endif %}>
+            <option value="local" {% if app_settings.oidc_login_mode == 'local' %}selected{% endif %}>Puzzary accounts only (default)</option>
+            <option value="mixed" {% if app_settings.oidc_login_mode == 'mixed' %}selected{% endif %}>Puzzary accounts and single sign-on</option>
+            <option value="oidc" {% if app_settings.oidc_login_mode == 'oidc' %}selected{% endif %}>Single sign-on for users; local admin recovery</option>
+          </select>
+        </label>
+
         {% if current_user.can('plugins.manage') %}<p class="muted">Puzzle modules are installed and enabled from <a href="/admin/plugins">Plugins</a>.</p>{% endif %}
         <button type="submit">Save Settings</button>
       </form>
+
+      {% if current_user.can('settings.manage') %}
+      <section class="panel admin-section">
+        <h2>OpenID Connect Providers</h2>
+        <p class="muted">Use authorization code flow with PKCE. Save a provider, test it in your browser, then enable it. Client secrets are encrypted and never shown again.</p>
+        <label>Exact callback URL<input readonly value="{{ app_settings.oidc_callback_url }}"></label>
+
+        {% for provider in app_settings.oidc_providers %}
+        <details class="oidc-provider" open>
+          <summary><strong>{{ provider.display_name }}</strong> &middot; {{ 'Enabled' if provider.enabled else 'Disabled' }} &middot; {{ 'Test passed' if provider.last_test_status == 'ok' else 'Not tested' }}</summary>
+          <form method="post" action="/admin/settings/oidc/{{ provider.id }}">
+            <label>Display name<input name="display_name" value="{{ provider.display_name }}" required maxlength="120"></label>
+            <label>Issuer URL<input type="url" name="issuer_url" value="{{ provider.issuer_url }}" required></label>
+            <label>Client ID<input name="client_id" value="{{ provider.client_id }}" required></label>
+            <label>New client secret<input type="password" name="client_secret" autocomplete="new-password" placeholder="Leave blank to keep the saved secret"><small class="muted">A secret is saved: {{ 'Yes' if provider.has_client_secret else 'No' }}</small></label>
+            <label>Scopes<input name="scopes" value="{{ provider.scopes }}" required></label>
+            <label>Account provisioning
+              <select name="provisioning_mode">
+                <option value="link_only" {% if provider.provisioning_mode == 'link_only' %}selected{% endif %}>Explicit linking to an existing Puzzary account</option>
+                <option value="jit" {% if provider.provisioning_mode == 'jit' %}selected{% endif %}>Automatically create Player accounts</option>
+              </select>
+            </label>
+            <label class="check-row"><input type="checkbox" name="enabled" {% if provider.enabled %}checked{% endif %}> Enabled on the login page</label>
+            {% if provider.last_test_message %}<p class="muted">{{ provider.last_test_message }}</p>{% endif %}
+            <div class="action-row"><button type="submit">Save Provider</button></div>
+          </form>
+          <form method="post" action="/admin/settings/oidc/{{ provider.id }}/test">
+            <button class="ghost-button" type="submit">Test Provider</button>
+          </form>
+          {% if not provider.enabled %}<form method="post" action="/admin/settings/oidc/{{ provider.id }}/delete"><button class="ghost-button" type="submit">Delete Provider</button></form>{% endif %}
+        </details>
+        {% endfor %}
+
+        <details class="oidc-provider" {% if not app_settings.oidc_providers %}open{% endif %}>
+          <summary><strong>Add an OpenID Connect provider</strong></summary>
+          <form method="post" action="/admin/settings/oidc">
+            <label>Display name<input name="display_name" placeholder="Company SSO" required maxlength="120"></label>
+            <label>Issuer URL<input type="url" name="issuer_url" placeholder="https://auth.example.com/application/o/puzzary/" required></label>
+            <label>Client ID<input name="client_id" required></label>
+            <label>Client secret<input type="password" name="client_secret" autocomplete="new-password" required></label>
+            <label>Scopes<input name="scopes" value="openid profile email" required></label>
+            <label>Account provisioning
+              <select name="provisioning_mode"><option value="link_only">Explicit linking (recommended)</option><option value="jit">Automatically create Player accounts</option></select>
+            </label>
+            <button type="submit">Save Provider</button>
+          </form>
+        </details>
+      </section>
+      {% endif %}
     {% endif %}
 
     {% if section == "users" %}{% include 'admin_users.html' %}{% endif %}
