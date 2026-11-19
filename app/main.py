@@ -4008,7 +4008,11 @@ def plugin_management_context(db: Session) -> dict:
         "github_access_configured": github_access["configured"],
         "github_access": github_access,
         "official": official,
-        "custom_installed": [package for package in status["installed"] if package["slug"] not in official_slugs],
+        "custom_installed": [
+            {**package, "enabled": package["slug"] not in disabled}
+            for package in status["installed"]
+            if package["slug"] not in official_slugs
+        ],
         "rollback_by_slug": rollback_by_slug,
         "registered_count": len(list_puzzle_types()),
         "external_count": len(LOADED_PACKAGES),
@@ -4643,6 +4647,42 @@ def admin_update_plugin_status(
         )
     db.commit()
     return RedirectResponse(url="/admin/plugins?message=Module%20status%20saved.", status_code=303)
+
+
+@app.post("/admin/plugins/{slug}/status")
+def admin_update_single_plugin_status(
+    slug: str,
+    request: Request,
+    enabled: bool = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "plugins.manage")
+    registered = {puzzle_type.slug for puzzle_type in list_puzzle_types()}
+    if slug not in registered:
+        return RedirectResponse(url="/admin/plugins?error=Unknown%20module.", status_code=303)
+    disabled = disabled_puzzle_type_slugs(db)
+    before = slug not in disabled
+    if enabled:
+        disabled.discard(slug)
+    else:
+        disabled.add(slug)
+    set_disabled_puzzle_type_slugs(db, sorted(disabled))
+    if before != enabled:
+        audit(
+            db,
+            user,
+            "plugin",
+            slug,
+            "plugin.enabled" if enabled else "plugin.disabled",
+            {"enabled": before},
+            {"enabled": enabled},
+        )
+    db.commit()
+    state = "enabled" if enabled else "disabled"
+    return RedirectResponse(url=f"/admin/plugins?message=Module%20{quote(state)}.", status_code=303)
 
 
 @app.post("/admin/plugins/{slug}/rollback")

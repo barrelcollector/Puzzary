@@ -33,8 +33,9 @@ Packages execute trusted server-side Python. Install only reviewed, versioned
 release archives and pin their published SHA-256 digest. **Admin -> Plugins** is
 the primary management surface. It shows whether each module is running from an
 official GitHub package or the bundled startup fallback, installs one or all
-official modules, accepts a custom GitHub release URL and digest, reports load
-errors, and manages generation availability. A restart activates newly installed
+official modules, gives each module its own update and enable/disable controls,
+accepts a custom GitHub release URL and digest, reports load errors, and manages
+generation availability. A restart activates newly installed
 code; running requests are never hot-swapped.
 
 The same operations are available for automation through
