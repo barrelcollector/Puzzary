@@ -1,9 +1,10 @@
-"""Isolated Home Assistant and print-system API contract checks for issue #26."""
+"""Isolated generic automation and print API contract checks."""
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -52,7 +53,7 @@ with SessionLocal() as db:
 
 BASE = "http://127.0.0.1:8808"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8808"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8808"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
 )

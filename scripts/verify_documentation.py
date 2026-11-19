@@ -39,5 +39,7 @@ for marker in (
 
 assert "replace every change-* value" in env_example
 assert not re.search(r"\b(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)", docs)
+assert ("home " + "assistant") not in docs.lower()
+assert ("puzzary-home-" + "assistant") not in docs.lower()
 
 print("PASS: local Docker, persistence, migration, backup/restore, and module contribution documentation is complete and environment-neutral")

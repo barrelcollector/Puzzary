@@ -1,22 +1,23 @@
-"""Isolated Puzzary API checks used by the Home Assistant integration."""
+"""Isolated generic API checks for external clients."""
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-QA_ROOT = Path(tempfile.gettempdir()) / "puzzary-home-assistant-qa"
-QA_DB = QA_ROOT / "home-assistant.sqlite"
+QA_ROOT = Path(tempfile.gettempdir()) / "puzzary-external-client-api-qa"
+QA_DB = QA_ROOT / "external-client.sqlite"
 if QA_ROOT.exists():
     shutil.rmtree(QA_ROOT)
 QA_ROOT.mkdir(parents=True)
 
 os.environ["DATABASE_URL"] = f"sqlite:///{QA_DB.as_posix()}"
-os.environ["SESSION_SECRET"] = "isolated-home-assistant-secret"
+os.environ["SESSION_SECRET"] = "isolated-external-client-secret"
 os.environ["UPLOAD_DIR"] = str(QA_ROOT / "uploads")
 os.environ["APP_BASE_URL"] = "https://puzzary.example.test"
 os.environ["PUZZARY_PLUGIN_DIR"] = str(QA_ROOT / "plugins")
@@ -30,29 +31,29 @@ from app.models import PermissionRole, Puzzle, User
 from app.permissions import initialize_permissions
 
 
-ADMIN_TOKEN = "home-assistant-admin-token"
-PLAYER_TOKEN = "home-assistant-player-token"
+ADMIN_TOKEN = "external-client-admin-token"
+PLAYER_TOKEN = "external-client-player-token"
 Base.metadata.drop_all(engine)
 Base.metadata.create_all(engine)
 with SessionLocal() as db:
     admin = User(
-        display_name="Home Assistant Admin",
+        display_name="External API Admin",
         is_admin=True,
         is_active=True,
         api_token_hash=hash_secret(ADMIN_TOKEN),
-        api_token_prefix="homeassistant",
+        api_token_prefix="externalapi",
     )
     db.add(admin)
     db.commit()
     initialize_permissions(db)
     player_role = db.scalar(select(PermissionRole).where(PermissionRole.name == "Player"))
     player = User(
-        display_name="Home Assistant Player",
+        display_name="External API Player",
         is_active=True,
         roles=[player_role],
         permissions_initialized=True,
         api_token_hash=hash_secret(PLAYER_TOKEN),
-        api_token_prefix="homeassistant",
+        api_token_prefix="externalapi",
     )
     db.add(player)
     db.commit()
@@ -60,7 +61,7 @@ with SessionLocal() as db:
 
 BASE = "http://127.0.0.1:8812"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8812"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8812"],
     cwd=ROOT,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
@@ -77,7 +78,7 @@ try:
             except Exception:
                 time.sleep(0.1)
         else:
-            raise RuntimeError("Home Assistant API QA server did not start")
+            raise RuntimeError("External client API QA server did not start")
 
         assert anonymous.get(BASE + "/api/account/stats").status == 401
         stats = player.get(BASE + "/api/account/stats")
@@ -89,7 +90,7 @@ try:
         generated = admin.post(BASE + "/api/puzzles/generate", data={
             "puzzle_type": "takuzu",
             "difficulty": "easy",
-            "seed": "home-assistant-qa",
+            "seed": "external-client-api-qa",
             "generation_options": {"grid_size": 4, "given_count": 6},
         })
         assert generated.ok, generated.text()
@@ -101,7 +102,7 @@ try:
         protected = admin.post(BASE + "/api/puzzles/generate", data={
             "puzzle_type": "takuzu",
             "difficulty": "easy",
-            "seed": "home-assistant-protected-media-qa",
+            "seed": "external-client-protected-media-qa",
             "generation_options": {"grid_size": 4, "given_count": 6},
             "access_password": "Media-Test-Password1!",
         })
@@ -148,7 +149,7 @@ try:
         for context in (anonymous, admin, player):
             context.dispose()
 
-    print("Home Assistant stats, media folders, printable filtering, PNG/PDF rendering, permissions, and admin API actions passed.")
+    print("External client stats, media queries, printable filtering, PNG/PDF rendering, permissions, and admin API actions passed.")
 finally:
     server.terminate()
     try:
