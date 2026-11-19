@@ -1464,6 +1464,43 @@
       <section class="panel admin-section">
         <div class="section-heading">
           <div>
+            <h2>Private GitHub Access</h2>
+            <p class="muted">Used only when Puzzary downloads puzzle modules from private GitHub repositories.</p>
+          </div>
+          <span class="status-pill">
+            {% if plugin_management.github_access.source == "saved" %}Saved in Puzzary
+            {% elif plugin_management.github_access.source == "environment" %}Server environment fallback
+            {% else %}Not configured{% endif %}
+          </span>
+        </div>
+        <form method="post" action="/admin/plugins/github-access" class="stacked-form">
+          <label>
+            New GitHub credential
+            <input type="password" name="github_token" required maxlength="2000" autocomplete="new-password" placeholder="Paste a fine-grained access token">
+            <small class="muted">The credential is encrypted when saved and is never returned or displayed again. Entering a new value replaces the saved value.</small>
+          </label>
+          <button type="submit">{{ "Replace Saved Credential" if plugin_management.github_access.stored else "Save Credential" }}</button>
+        </form>
+        {% if plugin_management.github_access.configured %}
+        <div class="button-row">
+          <form method="post" action="/admin/plugins/github-access/test">
+            <button type="submit" class="ghost-button">Test Access</button>
+          </form>
+          {% if plugin_management.github_access.stored %}
+          <form method="post" action="/admin/plugins/github-access/remove">
+            <button type="submit" class="danger-button" onclick="return confirm('Remove the saved private GitHub credential?')">Remove Saved Credential</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% if plugin_management.github_access.environment_fallback %}
+        <small class="muted">A server environment fallback is also present. It remains available if the saved credential is removed.</small>
+        {% endif %}
+      </section>
+
+      <section class="panel admin-section">
+        <div class="section-heading">
+          <div>
             <h2>Official Modules</h2>
             <p class="muted">Catalog release {{ plugin_management.official_catalog.release }} from <a href="{{ plugin_management.official_catalog.repository }}" target="_blank" rel="noopener">puzzary-official-plugins</a>.</p>
           </div>
@@ -1521,7 +1558,7 @@
           <label>Release ZIP URL <input type="url" name="url" required placeholder="https://github.com/owner/repository/releases/download/v1.0.0/puzzary-example-1.0.0.zip"></label>
           <label>SHA-256 digest <input name="sha256" required minlength="64" maxlength="64" pattern="[0-9a-fA-F]{64}" placeholder="64 hexadecimal characters"></label>
           <button type="submit">Install Package</button>
-          <small class="muted">Private repositories require <code>PUZZARY_PLUGIN_GITHUB_TOKEN</code> in the server environment. The token is never displayed or stored in the package.</small>
+          <small class="muted">Private repositories use the write-only credential configured above. It is never stored in an installed package.</small>
         </form>
       </section>
 

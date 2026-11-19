@@ -39,6 +39,8 @@ code; running requests are never hot-swapped.
 
 The same operations are available for automation through
 `GET /api/plugin-packages`, `GET /api/plugin-packages/catalog`,
+`GET`, `PUT`, and `DELETE /api/plugin-packages/github-access`,
+`POST /api/plugin-packages/github-access/test`,
 `POST /api/plugin-packages/install`, `POST /api/plugin-packages/install-official`,
 `PATCH /api/plugin-packages/{slug}`, and
 `POST /api/plugin-packages/{slug}/rollback`. The web and API paths share the same
@@ -58,9 +60,13 @@ An account with `plugins.manage` can install or upgrade one through the API:
 The response identifies the installed version and sets `restart_required` to
 `true`.
 
-For a private GitHub repository, set `PUZZARY_PLUGIN_GITHUB_TOKEN` only in the
-installer process environment. The token is sent as an authorization header and
-is never stored in the installed package or passed on the command line.
+For a private GitHub repository, save a fine-grained GitHub access token under
+**Admin -> Plugins -> Private GitHub Access**. The field is write-only: Puzzary
+encrypts the value with the server session key and never returns or displays it
+after submission. The page can test, replace, or remove the saved credential.
+The supporting API accepts the credential only in the `PUT` request body and
+returns redacted status fields. `PUZZARY_PLUGIN_GITHUB_TOKEN` remains an optional
+server-environment fallback for recovery and existing deployments.
 
 Independently installable releases for all ten official puzzle types are
 maintained at https://github.com/barrelcollector/puzzary-official-plugins. Core

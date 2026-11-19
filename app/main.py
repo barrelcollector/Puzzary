@@ -89,7 +89,7 @@ from app.plugin_packages import (
     plugin_static_directories,
     plugin_template_directories,
 )
-from app.plugin_installer import install_plugin_release, restore_plugin_rollback
+from app.plugin_installer import install_plugin_release, restore_plugin_rollback, test_github_access
 from app.user_activity import account_activity, progress_states
 from app.permissions import (
     authorize_request, initialize_permissions, require as require_permission,
@@ -118,6 +118,7 @@ from app.schemas import (
     PluginInstallRequest,
     OfficialPluginInstallRequest,
     PluginEnabledRequest,
+    PluginGitHubAccessWrite,
     PuzzleManualWrite,
     PuzzlePrintPreview,
     PrintManifestRequest,
@@ -368,6 +369,71 @@ def set_app_setting(db: Session, key: str, value: str) -> None:
         db.add(setting)
     else:
         setting.value = value
+
+
+PLUGIN_GITHUB_TOKEN_SETTING = "plugin_github_token_encrypted"
+
+
+def stored_plugin_github_token(db: Session) -> str:
+    encrypted = app_setting(db, PLUGIN_GITHUB_TOKEN_SETTING)
+    if not encrypted:
+        return ""
+    try:
+        return decrypt_secret(encrypted, SESSION_SECRET)
+    except OIDCError as error:
+        raise ValueError("The saved GitHub credential cannot be decrypted with this server key.") from error
+
+
+def plugin_github_access(db: Session) -> dict:
+    stored = bool(app_setting(db, PLUGIN_GITHUB_TOKEN_SETTING))
+    environment = bool(os.getenv("PUZZARY_PLUGIN_GITHUB_TOKEN", "").strip())
+    return {
+        "configured": stored or environment,
+        "source": "saved" if stored else "environment" if environment else "none",
+        "stored": stored,
+        "environment_fallback": environment,
+    }
+
+
+def plugin_github_token(db: Session) -> str:
+    stored = stored_plugin_github_token(db)
+    return stored or os.getenv("PUZZARY_PLUGIN_GITHUB_TOKEN", "").strip()
+
+
+def validate_plugin_github_token(value: str) -> str:
+    token = value.strip()
+    if not token:
+        raise ValueError("Enter a GitHub credential.")
+    if len(token) > 2000 or any(character.isspace() for character in token):
+        raise ValueError("The GitHub credential is not valid.")
+    return token
+
+
+def save_plugin_github_token(db: Session, user: User, value: str) -> None:
+    token = validate_plugin_github_token(value)
+    replacing = bool(app_setting(db, PLUGIN_GITHUB_TOKEN_SETTING))
+    set_app_setting(db, PLUGIN_GITHUB_TOKEN_SETTING, encrypt_secret(token, SESSION_SECRET))
+    audit(db, user, "plugin_github_access", "private", "plugin.github_access.saved", {"configured": replacing}, {"configured": True})
+    db.commit()
+
+
+def remove_plugin_github_token(db: Session, user: User) -> None:
+    setting = db.get(AppSetting, PLUGIN_GITHUB_TOKEN_SETTING)
+    existed = setting is not None
+    if setting is not None:
+        db.delete(setting)
+    audit(db, user, "plugin_github_access", "private", "plugin.github_access.removed", {"configured": existed}, {"configured": False})
+    db.commit()
+
+
+def check_plugin_github_token(db: Session, user: User) -> dict:
+    result = test_github_access(plugin_github_token(db))
+    audit(db, user, "plugin_github_access", "private", "plugin.github_access.tested", {}, {
+        "repository": result["repository"],
+        "accessible": True,
+    })
+    db.commit()
+    return result
 
 
 def disabled_puzzle_type_slugs(db: Session) -> set[str]:
@@ -3915,6 +3981,7 @@ def web_create_user(request: Request, db: Session = Depends(get_db)):
 
 def plugin_management_context(db: Session) -> dict:
     status = package_status()
+    github_access = plugin_github_access(db)
     installed_by_slug = {package["slug"]: package for package in status["installed"]}
     rollback_by_slug = {package["slug"]: package for package in status["rollbacks"]}
     official_slugs = {plugin["slug"] for plugin in status["official_catalog"]["plugins"]}
@@ -3938,6 +4005,8 @@ def plugin_management_context(db: Session) -> dict:
         })
     return {
         **status,
+        "github_access_configured": github_access["configured"],
+        "github_access": github_access,
         "official": official,
         "custom_installed": [package for package in status["installed"] if package["slug"] not in official_slugs],
         "rollback_by_slug": rollback_by_slug,
@@ -4431,7 +4500,7 @@ def admin_plugins_page(request: Request, db: Session = Depends(get_db)):
 
 def install_plugin_for_user(db: Session, user: User, url: str, sha256: str) -> dict:
     require_permission(user, "plugins.manage")
-    _target, manifest = install_plugin_release(url, sha256, plugin_root())
+    _target, manifest = install_plugin_release(url, sha256, plugin_root(), plugin_github_token(db))
     audit(db, user, "plugin", str(manifest["slug"]), "plugin.installed", {}, {
         "version": str(manifest.get("version", "")),
         "restart_required": True,
@@ -4473,6 +4542,53 @@ def admin_install_plugin(
     except (ValueError, OSError) as error:
         return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
     message = f"{manifest.get('name', manifest['slug'])} {manifest.get('version', '')} installed. Restart Puzzary to activate it."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
+@app.post("/admin/plugins/github-access")
+def admin_save_plugin_github_access(
+    request: Request,
+    github_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "plugins.manage")
+    try:
+        save_plugin_github_token(db, user, github_token)
+    except ValueError as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    return RedirectResponse(
+        url="/admin/plugins?message=Private%20GitHub%20credential%20saved.%20It%20will%20not%20be%20shown%20again.",
+        status_code=303,
+    )
+
+
+@app.post("/admin/plugins/github-access/test")
+def admin_test_plugin_github_access(request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "plugins.manage")
+    try:
+        result = check_plugin_github_token(db, user)
+    except ValueError as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    message = f"Private GitHub access verified for {result['repository']}."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
+@app.post("/admin/plugins/github-access/remove")
+def admin_remove_plugin_github_access(request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    require_permission(user, "plugins.manage")
+    remove_plugin_github_token(db, user)
+    message = "Saved private GitHub credential removed."
+    if plugin_github_access(db)["environment_fallback"]:
+        message += " The server environment fallback remains active."
     return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
 
 
@@ -7364,6 +7480,43 @@ def list_plugin_packages(request: Request, db: Session = Depends(get_db)) -> dic
 def get_plugin_catalog(request: Request, db: Session = Depends(get_db)) -> dict:
     require_admin_api(request, db)
     return official_plugin_catalog()
+
+
+@app.get("/api/plugin-packages/github-access")
+def get_plugin_github_access(request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    return plugin_github_access(db)
+
+
+@app.put("/api/plugin-packages/github-access")
+def put_plugin_github_access(
+    payload: PluginGitHubAccessWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    try:
+        save_plugin_github_token(db, user, payload.token)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return plugin_github_access(db)
+
+
+@app.post("/api/plugin-packages/github-access/test")
+def api_test_plugin_github_access(request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    try:
+        result = check_plugin_github_token(db, user)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"accessible": True, **result, "source": plugin_github_access(db)["source"]}
+
+
+@app.delete("/api/plugin-packages/github-access")
+def delete_plugin_github_access(request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    remove_plugin_github_token(db, user)
+    return plugin_github_access(db)
 
 
 @app.post("/api/plugin-packages/install")
