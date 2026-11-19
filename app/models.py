@@ -119,6 +119,61 @@ class User(Base):
     )
 
 
+class OIDCProvider(Base):
+    __tablename__ = "oidc_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+    issuer_url: Mapped[str] = mapped_column(String(500), unique=True, index=True)
+    client_id: Mapped[str] = mapped_column(String(255))
+    client_secret_encrypted: Mapped[str] = mapped_column(Text, default="")
+    scopes: Mapped[str] = mapped_column(String(500), default="openid profile email")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    provisioning_mode: Mapped[str] = mapped_column(String(24), default="link_only")
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_status: Mapped[str] = mapped_column(String(24), default="")
+    last_test_message: Mapped[str] = mapped_column(String(300), default="")
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OIDCIdentity(Base):
+    __tablename__ = "oidc_identities"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_oidc_identity_subject"),
+        UniqueConstraint("provider_id", "user_id", name="uq_oidc_identity_provider_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("oidc_providers.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    issuer: Mapped[str] = mapped_column(String(500), index=True)
+    subject: Mapped[str] = mapped_column(String(500), index=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(160), default="")
+    claims: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OIDCAuthAttempt(Base):
+    __tablename__ = "oidc_auth_attempts"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("oidc_providers.id", ondelete="CASCADE"), index=True)
+    intent: Mapped[str] = mapped_column(String(16), default="login")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    code_verifier_encrypted: Mapped[str] = mapped_column(Text)
+    nonce: Mapped[str] = mapped_column(String(128))
+    return_to: Mapped[str] = mapped_column(String(500), default="/library")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PuzzleFeedToken(Base):
     __tablename__ = "puzzle_feed_tokens"
 

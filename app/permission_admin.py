@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from app.database import get_db
 from app.user_activity import account_activity
-from app.models import PermissionRole, PermissionAudit, User
+from app.models import OIDCIdentity, OIDCProvider, PermissionRole, PermissionAudit, User
 from app.permissions import CATALOG, DANGEROUS, ADMIN_CORE, effective_permissions, require, lock_permissions, protect_last_admin, audit
 
 router = APIRouter()
@@ -49,6 +49,12 @@ def permission_user_page(user_id: int, request: Request, db=Depends(get_db)):
         'dangerous':DANGEROUS, 'events':events,
         'active_tab': request.query_params.get('tab') if request.query_params.get('tab') in {'profile', 'access', 'security', 'activity'} else 'profile',
         'activity': account_activity(db, user, viewer=actor) if actor.can('activity.view') else None,
+        'oidc_identities': [
+            {'identity': identity, 'provider': db.get(OIDCProvider, identity.provider_id)}
+            for identity in db.scalars(
+                select(OIDCIdentity).where(OIDCIdentity.user_id == user.id).order_by(OIDCIdentity.created_at)
+            )
+        ],
     })
 
 

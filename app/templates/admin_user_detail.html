@@ -1,5 +1,6 @@
 <a href="/admin/users" class="user-back">&larr; Users</a>
 {% if request.query_params.get('message') %}<p class="notice">{{ request.query_params.get('message') }}</p>{% endif %}
+{% if request.query_params.get('error') %}<p class="notice danger">{{ request.query_params.get('error') }}</p>{% endif %}
 {% set can_edit_target = managed_user.id == current_user.id or not managed_user.can('roles.manage') or current_user.can('roles.manage') %}
 <header class="user-detail-header">
   <div class="user-avatar user-color-{{ managed_user.id % 4 }}"><span>{{ managed_user.display_name[:2]|upper }}</span></div>
@@ -56,6 +57,11 @@
 {% for capability, endpoint, label, heading, value in [('users.reset','reset-password','Reset Password','Password','Setup required' if managed_user.must_change_password or not managed_user.password_hash else 'Configured'),('users.sessions','revoke-sessions','Revoke Sessions','Sessions','Last login: ' ~ (managed_user.last_login_at or 'Never')),('users.tokens','api-token','Rotate API Token','API token',(managed_user.api_token_prefix ~ '...') if managed_user.api_token_prefix else 'Not configured')] %}
 <div class="user-security-row"><div><h3>{{ heading }}</h3><p class="muted">{{ value }}</p></div>
 {% if can_edit_target and current_user.can(capability) %}<form method="post" action="/admin/users/{{ managed_user.id }}/{{ endpoint }}"><button class="ghost-button">{{ label }}</button></form>{% endif %}</div>
+{% endfor %}
+{% if oidc_identities %}<h3>Linked single sign-on identities</h3>{% endif %}
+{% for item in oidc_identities %}
+<div class="user-security-row"><div><h3>{{ item.provider.display_name if item.provider else 'External identity' }}</h3><p class="muted">{{ item.identity.email or item.identity.display_name or 'Linked identity' }}</p></div>
+{% if can_edit_target and current_user.can('users.edit') %}<form method="post" action="/admin/users/{{ managed_user.id }}/oidc/{{ item.identity.id }}/unlink"><button class="ghost-button">Unlink and revoke sessions</button></form>{% endif %}</div>
 {% endfor %}
 </section>
 <section class="user-tab-panel" role="tabpanel" id="user-panel-activity" aria-labelledby="user-tab-activity" data-user-panel="activity" {% if active_tab != 'activity' %}hidden{% endif %}>

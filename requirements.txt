@@ -11,3 +11,4 @@ playwright==1.58.0
 ortools==9.14.6206
 pypdf==6.10.0
 pywebpush==2.5.0
+PyJWT[crypto]==2.10.1

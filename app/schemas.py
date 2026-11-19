@@ -236,3 +236,27 @@ class WordBankEntryWrite(BaseModel):
     word_id: int
     definition_id: int | None = None
     position: int | None = None
+
+
+class OIDCProviderWrite(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=120)
+    issuer_url: str = Field(..., min_length=1, max_length=500)
+    client_id: str = Field(..., min_length=1, max_length=255)
+    client_secret: str = Field(..., min_length=1, max_length=2000)
+    scopes: str = Field(default="openid profile email", max_length=500)
+    provisioning_mode: str = "link_only"
+    enabled: bool = False
+
+
+class OIDCProviderPatch(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    issuer_url: str | None = Field(default=None, min_length=1, max_length=500)
+    client_id: str | None = Field(default=None, min_length=1, max_length=255)
+    client_secret: str | None = Field(default=None, max_length=2000)
+    scopes: str | None = Field(default=None, max_length=500)
+    provisioning_mode: str | None = None
+    enabled: bool | None = None
+
+
+class OIDCLoginSettingsWrite(BaseModel):
+    login_mode: str
