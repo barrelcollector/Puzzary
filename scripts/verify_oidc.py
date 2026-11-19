@@ -78,6 +78,7 @@ class FakeOIDCHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/.well-known/openid-configuration":
+            assert self.headers.get("User-Agent") == "Puzzary/0.1 OIDC client"
             return self.json_response({
                 "issuer": IDP_BASE,
                 "authorization_endpoint": f"{IDP_BASE}/authorize",
@@ -90,6 +91,7 @@ class FakeOIDCHandler(BaseHTTPRequestHandler):
                 "scopes_supported": ["openid", "profile", "email"],
             })
         if parsed.path == "/jwks":
+            assert self.headers.get("User-Agent") == "Puzzary/0.1 OIDC client"
             return self.json_response({"keys": [PUBLIC_JWK]})
         if parsed.path == "/authorize":
             query = parse_qs(parsed.query)
@@ -110,6 +112,7 @@ class FakeOIDCHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if parsed.path == "/userinfo":
+            assert self.headers.get("User-Agent") == "Puzzary/0.1 OIDC client"
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
             claims = TOKENS.get(token)
             if claims is None:
@@ -121,6 +124,7 @@ class FakeOIDCHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path != "/token":
             return self.json_response({"error": "not_found"}, 404)
+        assert self.headers.get("User-Agent") == "Puzzary/0.1 OIDC client"
         auth = self.headers.get("Authorization", "")
         expected = "Basic " + base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
         if auth != expected:
