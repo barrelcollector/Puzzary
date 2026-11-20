@@ -106,22 +106,30 @@ def post_form(opener: urllib.request.OpenerDirector, url: str, fields: dict[str,
     return opener.open(request, timeout=120)
 
 
-def setup_admin(source: Path, base_url: str) -> urllib.request.OpenerDirector:
-    delivery = source / "data" / "bootstrap-admin-setup.txt"
+def setup_admin(source: Path, base_url: str, project: str) -> urllib.request.OpenerDirector:
     for _ in range(60):
-        if delivery.is_file():
+        try:
+            setup_record = run(
+                "docker", "compose", "--project-name", project, "exec", "-T", "app",
+                "cat", "/data/bootstrap-admin-setup.txt", cwd=source, capture=True,
+            )
             break
+        except subprocess.CalledProcessError:
+            pass
         time.sleep(1)
     else:
         raise RuntimeError("First-run setup file was not created")
-    setup_line = next(line for line in delivery.read_text(encoding="utf-8").splitlines() if line.startswith("Setup link: "))
+    setup_line = next(line for line in setup_record.splitlines() if line.startswith("Setup link: "))
     token = urllib.parse.urlsplit(setup_line.removeprefix("Setup link: ")).fragment.removeprefix("token=")
     administrator = client()
     with post_form(administrator, base_url + "/password/setup", {
         "token": token, "password": PASSWORD, "confirm_password": PASSWORD,
     }) as response:
         assert response.geturl().endswith("/library"), response.geturl()
-    assert not delivery.exists()
+    run(
+        "docker", "compose", "--project-name", project, "exec", "-T", "app",
+        "test", "!", "-e", "/data/bootstrap-admin-setup.txt", cwd=source,
+    )
     return administrator
 
 
@@ -148,7 +156,7 @@ def multipart_upload(opener: urllib.request.OpenerDirector, url: str) -> None:
 
 
 def exercise_install(source: Path, base_url: str, project: str, version: str | None) -> str:
-    administrator = setup_admin(source, base_url)
+    administrator = setup_admin(source, base_url, project)
     administrator = login(base_url)
     with administrator.open(base_url + "/generate", timeout=30) as response:
         generate_html = response.read().decode()
@@ -166,7 +174,11 @@ def exercise_install(source: Path, base_url: str, project: str, version: str | N
         assert response.headers.get_content_type() == "application/pdf"
         assert response.read(4) == b"%PDF"
     multipart_upload(administrator, base_url + f"/web/puzzles/{puzzle_id}/photos")
-    assert any((source / "data" / "uploads" / puzzle_id).iterdir())
+    uploaded = run(
+        "docker", "compose", "--project-name", project, "exec", "-T", "app", "sh", "-c",
+        f"find /data/uploads/{puzzle_id} -type f -print -quit", cwd=source, capture=True,
+    )
+    assert uploaded
 
     with post_form(administrator, base_url + "/admin/plugins/install-official", {"slug": "word_search"}) as response:
         assert "Installed" in urllib.parse.unquote(response.geturl())
@@ -178,12 +190,37 @@ def exercise_install(source: Path, base_url: str, project: str, version: str | N
     return puzzle_id
 
 
-def assert_upgrade(source: Path, base_url: str, puzzle_id: str, version: str) -> None:
+def assert_upgrade(source: Path, base_url: str, project: str, puzzle_id: str, version: str) -> None:
     wait_for_health(base_url, version)
     administrator = login(base_url)
     with administrator.open(base_url + f"/puzzles/{puzzle_id}", timeout=30) as response:
         assert response.status == 200
-    assert any((source / "data" / "uploads" / puzzle_id).iterdir())
+    uploaded = run(
+        "docker", "compose", "--project-name", project, "exec", "-T", "app", "sh", "-c",
+        f"find /data/uploads/{puzzle_id} -type f -print -quit", cwd=source, capture=True,
+    )
+    assert uploaded
+
+
+def copy_data_with_docker(source: Path, target: Path) -> None:
+    run(
+        "docker", "run", "--rm",
+        "--volume", f"{(source / 'data').resolve()}:/source:ro",
+        "--volume", f"{target.resolve()}:/target",
+        "alpine:3.20", "sh", "-c", "cp -a /source /target/data",
+        cwd=ROOT,
+    )
+
+
+def release_data_ownership(source: Path) -> None:
+    data = source / "data"
+    if not data.exists() or os.name == "nt":
+        return
+    run(
+        "docker", "run", "--rm", "--volume", f"{data.resolve()}:/data",
+        "alpine:3.20", "chown", "-R", f"{os.getuid()}:{os.getgid()}", "/data",
+        cwd=ROOT,
+    )
 
 
 def assert_image_version(version: str) -> None:
@@ -201,7 +238,7 @@ def prove(reference: str) -> None:
         raise RuntimeError(f"Refusing to replace existing containers: {sorted(conflict)}")
 
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    with tempfile.TemporaryDirectory(prefix="puzzary-beta-proof-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="puzzary-beta-proof-", ignore_cleanup_errors=True) as temporary:
         proof_root = Path(temporary)
         baseline = proof_root / "baseline"
         candidate = proof_root / "candidate"
@@ -220,16 +257,18 @@ def prove(reference: str) -> None:
         finally:
             compose(baseline, baseline_project, "down")
 
-        shutil.copytree(baseline / "data", candidate / "data")
+        copy_data_with_docker(baseline, candidate)
+        release_data_ownership(baseline)
         candidate_port = free_port()
         write_environment(candidate, candidate_port, version)
         candidate_project = "puzzary-beta-upgrade"
         try:
             compose(candidate, candidate_project, "up", "--detach", "--build")
-            assert_upgrade(candidate, f"http://127.0.0.1:{candidate_port}", puzzle_id, version)
+            assert_upgrade(candidate, f"http://127.0.0.1:{candidate_port}", candidate_project, puzzle_id, version)
             assert_image_version(version)
         finally:
             compose(candidate, candidate_project, "down", "--volumes")
+            release_data_ownership(candidate)
 
         clean_port = free_port()
         write_environment(clean, clean_port, version)
@@ -241,6 +280,7 @@ def prove(reference: str) -> None:
             assert_image_version(version)
         finally:
             compose(clean, clean_project, "down", "--volumes")
+            release_data_ownership(clean)
 
     print(f"PASS: clean install and upgrade from {reference} preserved login, data, all ten games, modules, uploads, printing, and {version} metadata")
 
