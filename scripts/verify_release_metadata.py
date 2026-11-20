@@ -4,16 +4,13 @@ from __future__ import annotations
 import os
 import re
 import sys
-import tempfile
+import json
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-os.environ["PUZZARY_PLUGIN_DIR"] = str(Path(tempfile.gettempdir()) / "puzzary-release-metadata-plugins")
 
-from app.plugin_packages import official_plugin_catalog
-from app.puzzles import list_puzzle_types
 from app.version import __version__
 
 
@@ -46,8 +43,12 @@ expected = {
     "cross_equations", "crossword", "maze", "minesweeper", "nonogram",
     "spell_it", "sudoku", "takuzu", "word_pyramid", "word_search",
 }
-bundled = {puzzle_type.slug for puzzle_type in list_puzzle_types()}
-official = {plugin["slug"] for plugin in official_plugin_catalog()["plugins"]}
+bundled = {
+    path.stem for path in (ROOT / "app" / "puzzle_types").glob("*.py")
+    if path.stem != "__init__"
+}
+catalog = json.loads((ROOT / "app" / "official_plugins.json").read_text(encoding="utf-8"))
+official = {plugin["slug"] for plugin in catalog["plugins"]}
 assert bundled == expected, bundled
 assert official == expected, official
 

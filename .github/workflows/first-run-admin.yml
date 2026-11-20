@@ -39,6 +39,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+      - name: Set release version for Compose
+        run: echo "PUZZARY_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - name: Build and start a clean production stack
         run: docker compose --project-name puzzary-first-run up --detach --build
       - name: Wait for application health
