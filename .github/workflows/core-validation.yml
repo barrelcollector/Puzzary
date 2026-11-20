@@ -118,7 +118,7 @@ jobs:
       - name: Build production image
         run: docker build --build-arg "PUZZARY_VERSION=$(cat VERSION)" --tag puzzary:core-ci .
       - name: Verify production image version label
-        run: test "$(docker image inspect --format '{{ index .Config.Labels \"org.opencontainers.image.version\" }}' puzzary:core-ci)" = "$(cat VERSION)"
+        run: test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' puzzary:core-ci)" = "$(cat VERSION)"
 
   python-security:
     name: Python security scan
