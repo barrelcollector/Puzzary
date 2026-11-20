@@ -171,6 +171,18 @@ app.add_middleware(
 )
 if TRANSPORT_CONFIG.https_redirect:
     app.add_middleware(HTTPSRedirectMiddleware)
+
+
+@app.middleware("http")
+async def redact_legacy_password_setup_query(request: Request, call_next):
+    path = request.scope.get("path", "")
+    original_query = request.scope.get("query_string", b"")
+    response = await call_next(request)
+    if path == "/password/setup" and b"token=" in original_query:
+        request.scope["query_string"] = b"token=REDACTED"
+    return response
+
+
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[appearance_template_context])
 templates.env.loader = ChoiceLoader([
     FileSystemLoader(str(path)) for path in plugin_template_directories()
@@ -2280,6 +2292,12 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def parse_local_datetime(value: str, label: str = "Date/time") -> datetime | None:
     text = value.strip()
     if not text:
@@ -2807,19 +2825,47 @@ def api_token_from_request(request: Request) -> str:
 
 
 def setup_url(token: str, db: Session | None = None) -> str:
-    return f"{app_base_url(db)}/password/setup?token={token}"
+    return f"{app_base_url(db)}/password/setup#token={token}"
 
 
 def write_bootstrap_setup_link(user: User, token: str) -> None:
     path = UPLOAD_DIR.parent / "bootstrap-admin-setup.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    content = (
         "Puzzary initial admin setup\n"
         f"Account: {user.display_name}\n"
         f"Setup link: {setup_url(token)}\n"
-        f"Expires: {user.reset_token_expires_at}\n",
-        encoding="utf-8",
+        f"Expires: {user.reset_token_expires_at}\n"
     )
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(content)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    logging.getLogger("puzzary.bootstrap").warning(
+        "The first administrator needs a password. Read the one-time setup link from %s.",
+        path,
+    )
+
+
+def clear_bootstrap_setup_link() -> None:
+    path = UPLOAD_DIR.parent / "bootstrap-admin-setup.txt"
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def bootstrap_admin_pending(db: Session) -> bool:
+    return db.scalar(
+        select(User.id).where(
+            User.is_admin == True,  # noqa: E712
+            User.is_active == True,  # noqa: E712
+            User.password_hash.is_(None),
+        ).limit(1)
+    ) is not None
 
 
 def login_rate_key(request: Request, username: str) -> str:
@@ -2937,55 +2983,32 @@ def create_user_record(
     return user, setup_token
 
 
-def ensure_default_admin_account(db: Session) -> User:
-    admin = db.scalar(select(User).where(User.display_name == "admin"))
-    if admin is None:
-        admin = User(display_name="admin", is_admin=True, is_active=True, password_hash=hash_password("admin"))
-        db.add(admin)
-        db.commit()
-        db.refresh(admin)
-        return admin
-    changed = False
-    if admin.permissions_initialized:
-        return admin
-    if not admin.is_admin:
-        admin.is_admin = True
-        changed = True
-    if not admin.is_active:
-        admin.is_active = True
-        changed = True
-    if not admin.password_hash:
-        admin.password_hash = hash_password("admin")
-        admin.must_change_password = False
-        admin.reset_token_hash = None
-        admin.reset_token_expires_at = None
-        changed = True
-    if changed:
-        db.commit()
-        db.refresh(admin)
-    return admin
-
-
 def ensure_admin_user(db: Session) -> None:
-    ensure_default_admin_account(db)
-    has_admin = db.scalar(select(User).where(User.is_admin == True))  # noqa: E712
-    first_user = db.scalar(select(User).order_by(User.created_at, User.id))
-    if first_user is None:
-        first_user = User(display_name=os.getenv("PUZZARY_BOOTSTRAP_ADMIN_NAME", "admin"), is_admin=True, is_active=True)
-        db.add(first_user)
+    admin_user = db.scalar(
+        select(User).where(User.is_admin == True, User.is_active == True).order_by(User.created_at, User.id)  # noqa: E712
+    )
+    if admin_user is None:
+        admin_user = db.scalar(select(User).where(User.is_admin == True).order_by(User.created_at, User.id))  # noqa: E712
+    if admin_user is None:
+        admin_user = db.scalar(select(User).order_by(User.created_at, User.id))
+    if admin_user is None:
+        display_name = os.getenv("PUZZARY_BOOTSTRAP_ADMIN_NAME", "admin").strip() or "admin"
+        admin_user = User(display_name=display_name, is_admin=True, is_active=True)
+        db.add(admin_user)
         db.flush()
-    if has_admin is None:
-        first_user.is_admin = True
-        first_user.is_active = True
-        admin_user = first_user
     else:
-        admin_user = has_admin
+        admin_user.is_admin = True
+        admin_user.is_active = True
+    if admin_user.password_hash:
+        db.commit()
+        clear_bootstrap_setup_link()
+        return
     token_missing_or_expired = (
         not admin_user.reset_token_hash
         or not admin_user.reset_token_expires_at
-        or admin_user.reset_token_expires_at <= utcnow()
-    ) if admin_user is not None else False
-    if admin_user is not None and admin_user.is_admin and not admin_user.password_hash and token_missing_or_expired:
+        or as_utc(admin_user.reset_token_expires_at) <= utcnow()
+    )
+    if token_missing_or_expired:
         token = issue_password_setup_token(db, admin_user)
         write_bootstrap_setup_link(admin_user, token)
         return
@@ -3668,6 +3691,7 @@ def login_page(request: Request, db: Session = Depends(get_db)):
             "login_mode": mode,
             "oidc_providers": oidc_enabled_providers(db) if mode != "local" else [],
             "show_local_login": mode != "oidc" or request.query_params.get("local") == "1",
+            "bootstrap_admin_pending": bootstrap_admin_pending(db),
         },
     )
 
@@ -3713,7 +3737,9 @@ def logout(request: Request):
 def password_setup_page(request: Request, token: str = "", db: Session = Depends(get_db)):
     token_hash = hash_secret(token)
     user = db.scalar(select(User).where(User.reset_token_hash == token_hash))
-    token_valid = bool(user and user.reset_token_expires_at and user.reset_token_expires_at > utcnow())
+    token_valid = bool(
+        user and user.reset_token_expires_at and as_utc(user.reset_token_expires_at) > utcnow()
+    )
     return templates.TemplateResponse(
         request,
         "password_setup.html",
@@ -3722,6 +3748,7 @@ def password_setup_page(request: Request, token: str = "", db: Session = Depends
             "current_user": current_user(request, db),
             "token": token,
             "token_valid": token_valid,
+            "fragment_setup": not token,
             "error": request.query_params.get("error", ""),
         },
     )
@@ -3737,13 +3764,37 @@ def password_setup(
 ):
     token_hash = hash_secret(token)
     user = db.scalar(select(User).where(User.reset_token_hash == token_hash))
-    if user is None or not user.reset_token_expires_at or user.reset_token_expires_at <= utcnow():
+    if user is None or not user.reset_token_expires_at or as_utc(user.reset_token_expires_at) <= utcnow():
         return RedirectResponse(url="/password/setup?error=That%20setup%20link%20is%20invalid%20or%20expired.", status_code=303)
     if password != confirm_password:
-        return RedirectResponse(url=f"/password/setup?token={quote(token)}&error=Passwords%20do%20not%20match.", status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "password_setup.html",
+            {
+                "request": request,
+                "current_user": current_user(request, db),
+                "token": token,
+                "token_valid": True,
+                "fragment_setup": False,
+                "error": "Passwords do not match.",
+            },
+            status_code=400,
+        )
     error = password_error(password)
     if error:
-        return RedirectResponse(url=f"/password/setup?token={quote(token)}&error={quote(error)}", status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "password_setup.html",
+            {
+                "request": request,
+                "current_user": current_user(request, db),
+                "token": token,
+                "token_valid": True,
+                "fragment_setup": False,
+                "error": error,
+            },
+            status_code=400,
+        )
     user.password_hash = hash_password(password)
     user.must_change_password = False
     user.reset_token_hash = None
@@ -3752,6 +3803,8 @@ def password_setup(
     user.session_version = (user.session_version or 1) + 1
     user.last_login_at = utcnow()
     db.commit()
+    if user.is_admin:
+        clear_bootstrap_setup_link()
     request.session["user_id"] = user.id
     request.session["session_version"] = user.session_version
     return RedirectResponse(url="/library", status_code=303)
@@ -5003,7 +5056,7 @@ def admin_create_user(
     db.commit()
     if setup_token:
         return RedirectResponse(
-            url=f"/admin/users?setup_user={quote(new_user.display_name)}&setup_token={quote(setup_token)}",
+            url=f"/admin/users#setup_user={quote(new_user.display_name)}&setup_token={quote(setup_token)}",
             status_code=303,
         )
     return RedirectResponse(url="/admin/users?message=User%20created.", status_code=303)
@@ -5074,7 +5127,7 @@ def admin_reset_user_password(user_id: int, request: Request, db: Session = Depe
     audit(db, admin, 'user', user.id, 'password.reset', {}, {})
     db.commit()
     return RedirectResponse(
-        url=f"/admin/users?setup_user={quote(user.display_name)}&setup_token={quote(token)}",
+        url=f"/admin/users#setup_user={quote(user.display_name)}&setup_token={quote(token)}",
         status_code=303,
     )
 

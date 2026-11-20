@@ -21,12 +21,30 @@ docker compose config --quiet
 docker compose up -d --build
 docker compose ps
 curl --fail http://localhost:8790/health
+docker compose exec app cat /data/bootstrap-admin-setup.txt
 ```
 
-Open `http://localhost:8790`, sign in with the documented bootstrap account,
-and change its password immediately. Set `APP_BASE_URL` to the externally
-reachable HTTPS origin before printing QR codes or using Puzzary behind a
-reverse proxy.
+Open the one-time setup link, choose the initial administrator password, and
+then sign in at `http://localhost:8790`. The setup token expires after 24 hours,
+is stored in PostgreSQL only as a hash, and cannot be reused. Its delivery file
+is mode `0600` where the host filesystem supports Unix permissions and is
+deleted after successful setup. Container logs contain only a pointer to the
+file, never the setup link itself. Do not copy the file into tickets or chat.
+If the link expires before use, restart only the app container and read the
+replacement file:
+
+```bash
+docker compose restart app
+docker compose exec app cat /data/bootstrap-admin-setup.txt
+```
+
+Set `PUZZARY_BOOTSTRAP_ADMIN_NAME` in `.env` before the first start if the
+initial account should use a name other than `admin`. Existing databases keep
+their users and password hashes; the bootstrap file is only created when no
+usable administrator password exists.
+
+Set `APP_BASE_URL` to the externally reachable HTTPS origin before printing QR
+codes or using Puzzary behind a reverse proxy.
 
 HTTP remains the compatibility default. Public deployments should follow the [HTTPS and trusted reverse-proxy guide](https-tls.md), including its secure-cookie, proxy allowlist, WebSocket, certificate-mount, and renewal checks.
 

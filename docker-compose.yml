@@ -10,6 +10,7 @@ services:
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8790}"
       UPLOAD_DIR: "/data/uploads"
       SESSION_SECRET: "${SESSION_SECRET:-change-me-local-session-secret}"
+      PUZZARY_BOOTSTRAP_ADMIN_NAME: "${PUZZARY_BOOTSTRAP_ADMIN_NAME:-admin}"
       GROUP_HOST_RECONNECT_GRACE_SECONDS: "${GROUP_HOST_RECONNECT_GRACE_SECONDS:-30}"
       PUZZARY_HOST: "${PUZZARY_HOST:-0.0.0.0}"
       PUZZARY_PORT: "${PUZZARY_PORT:-8790}"

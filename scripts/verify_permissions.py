@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from app.database import Base, engine, SessionLocal, ensure_schema, init_db
 from app.models import User, Puzzle, PuzzleProgress, PermissionRole, PermissionAudit
 from app.permissions import initialize_permissions, effective_permissions, require, lock_permissions, protect_last_admin, register_permission, register_route_permission, ADMIN_CORE
-from app.main import hash_password, hash_secret, SESSION_SECRET, ensure_default_admin_account
+from app.main import hash_password, hash_secret, SESSION_SECRET, ensure_admin_user
 from app.puzzles import get_puzzle_type
 
 Base.metadata.drop_all(engine); Base.metadata.create_all(engine)
@@ -296,7 +296,7 @@ try:
             assert sum(ADMIN_CORE <= effective_permissions(u) for u in db.scalars(select(User)))==1
             current=db.get(User,admin_id)
             before=effective_permissions(current)
-            ensure_default_admin_account(db)
+            ensure_admin_user(db)
             assert effective_permissions(current)==before
         print('PostgreSQL concurrent last-admin protection and no bootstrap re-promotion passed.')
 finally:
