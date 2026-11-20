@@ -1,11 +1,15 @@
 """Disposable SQLite + two-browser QA for every plugin and the three maze modes."""
 import os
-os.environ['DATABASE_URL'] = 'sqlite:////tmp/puzzary-all-groups-qa.sqlite'
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('all-group-puzzles')
+os.environ['DATABASE_URL'] = f"sqlite:///{(qa_root / 'all-groups.sqlite').as_posix()}"
 os.environ['SESSION_SECRET'] = 'isolated-all-groups-test-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/all-groups-qa-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 import base64
 import json
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -51,7 +55,7 @@ def cookie(uid):
 base = 'http://127.0.0.1:8792'
 artifacts = Path(os.environ.get('QA_ARTIFACT_DIR', Path(tempfile.gettempdir()) / 'puzzary-qa-artifacts'))
 artifacts.mkdir(parents=True, exist_ok=True)
-server = subprocess.Popen(['uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8792'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+server = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8792'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     with sync_playwright() as p:
         browser = p.chromium.launch()

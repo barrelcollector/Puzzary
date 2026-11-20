@@ -7,6 +7,7 @@ import base64
 import json
 import sys
 from pathlib import Path
+import tempfile
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from sqlalchemy import select
@@ -33,7 +34,7 @@ if '--preflight' in sys.argv:
     raise SystemExit(0)
 
 base='http://127.0.0.1:8790'
-output=Path('/tmp/activity-live-qa'); output.mkdir(exist_ok=True)
+output=Path(tempfile.gettempdir()) / 'activity-live-qa'; output.mkdir(exist_ok=True)
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
     errors=[]

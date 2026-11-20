@@ -1,12 +1,16 @@
 """Isolated multi-account library, statistics, archive and reset regression checks."""
 import os
-os.environ['DATABASE_URL'] = os.getenv('ACTIVITY_QA_DATABASE', 'sqlite:////tmp/puzzary-activity-qa.sqlite')
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('user-activity')
+os.environ['DATABASE_URL'] = os.getenv('ACTIVITY_QA_DATABASE', f"sqlite:///{(qa_root / 'activity.sqlite').as_posix()}")
 os.environ['SESSION_SECRET'] = 'isolated-activity-test-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/activity-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 
 import base64
 import json
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,7 +87,7 @@ init_db()
 base='http://127.0.0.1:8793'
 def cookie(uid):
     return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':uid,'session_version':1}).encode())).decode()
-server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8793'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8793'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
 try:
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=True)
@@ -135,7 +139,7 @@ try:
         history=alice.request.get(base+'/api/account/stats').json()['history']
         empty_types=[row['event_type'] for row in history if row['puzzle_id']=='empty']
         assert {'started','attempt','hint','reveal','completion','reset'} <= set(empty_types),empty_types
-        output=Path('/tmp/activity-qa'); output.mkdir(exist_ok=True)
+        output=qa_root / 'screenshots'; output.mkdir(exist_ok=True)
         errors=[]
         for width in [1280,390]:
             page=alice.new_page(); page.set_viewport_size({'width':width,'height':900})
@@ -180,7 +184,7 @@ try:
                 PuzzleActivityEvent.user_id==ids['alice'], PuzzleActivityEvent.event_type=='reset'
             )) is not None
         server.terminate(); server.wait(timeout=10)
-        server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8793'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8793'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         for _ in range(100):
             try:
                 if alice.request.get(base+'/health').ok: break

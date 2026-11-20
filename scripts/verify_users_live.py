@@ -7,6 +7,7 @@ if os.getenv('PUZZARY_USERS_LIVE_QA') != '1':
 import base64
 import json
 from pathlib import Path
+import tempfile
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from sqlalchemy import select
@@ -20,7 +21,7 @@ with SessionLocal() as db:
     cookie = TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id': uid, 'session_version': user.session_version}).encode())).decode()
 
 base = 'http://127.0.0.1:8790'
-output = Path('/tmp/users-live-qa')
+output = Path(tempfile.gettempdir()) / 'users-live-qa'
 output.mkdir(exist_ok=True)
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True, args=['--no-sandbox'])

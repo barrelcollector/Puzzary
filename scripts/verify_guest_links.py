@@ -1,9 +1,11 @@
 """Isolated lifecycle and security coverage for expiring puzzle guest links."""
 import os
+from qa_runtime import qa_directory
 
-os.environ["DATABASE_URL"] = "sqlite:////tmp/puzzary-guest-links-qa.sqlite"
+qa_root = qa_directory("guest-links")
+os.environ["DATABASE_URL"] = f"sqlite:///{(qa_root / 'guest-links.sqlite').as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-guest-links-secret"
-os.environ["UPLOAD_DIR"] = "/tmp/puzzary-guest-links-uploads"
+os.environ["UPLOAD_DIR"] = str(qa_root / "uploads")
 os.environ["APP_BASE_URL"] = "http://127.0.0.1:8798"
 
 import base64
@@ -12,6 +14,7 @@ import html
 import json
 import re
 import subprocess
+import sys
 import time
 
 from itsdangerous import TimestampSigner
@@ -67,7 +70,7 @@ def created_url(response):
 
 base = "http://127.0.0.1:8798"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8798"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8798"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
 )

@@ -5,6 +5,7 @@ os.environ["DATABASE_URL"] = "sqlite://"
 
 from copy import deepcopy
 from pathlib import Path
+import tempfile
 import unittest
 
 from fastapi import HTTPException
@@ -105,7 +106,7 @@ class PublishingChecks(unittest.TestCase):
     def test_combined_pdf(self):
         issue = write_issue(self.db, self.admin, self.payload)
         publish_issue(self.db, issue, request(), self.admin)
-        output = Path("/tmp/puzzary-publishing-qa")
+        output = Path(tempfile.gettempdir()) / "puzzary-publishing-qa"
         output.mkdir(exist_ok=True)
         for size in ("zebra", "letter", "a4"):
             response = issue_pdf(issue, request(size=size), self.db, self.admin)

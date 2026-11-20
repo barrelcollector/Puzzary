@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+import tempfile
 from urllib.request import Request, urlopen
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
@@ -62,7 +63,7 @@ with SessionLocal() as db:
         browser=p.chromium.launch(headless=True)
         context=browser.new_context()
         context.add_cookies([{'name':'session','value':session,'url':'http://127.0.0.1:8790'}])
-        output=Path('/tmp/live-bank-import'); output.mkdir(exist_ok=True)
+        output=Path(tempfile.gettempdir()) / 'live-bank-import'; output.mkdir(exist_ok=True)
         for width in [1280,390]:
             page=context.new_page(); page.set_viewport_size({'width':width,'height':900})
             assert page.goto('http://127.0.0.1:8790/admin/word-banks/import').ok

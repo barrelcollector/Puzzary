@@ -1,13 +1,17 @@
 """Isolated API and browser QA for the opt-in public Group Solve lobby."""
 import os
-os.environ['DATABASE_URL'] = 'sqlite:////tmp/puzzary-group-lobby-qa.sqlite'
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('group-lobby')
+os.environ['DATABASE_URL'] = f"sqlite:///{(qa_root / 'group-lobby.sqlite').as_posix()}"
 os.environ['SESSION_SECRET'] = 'isolated-group-lobby-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/group-lobby-qa-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 
 import base64
 from datetime import datetime, timedelta, timezone
 import json
 import subprocess
+import sys
 import time
 import uuid
 
@@ -51,7 +55,7 @@ def cookie(user_id):
 
 
 base = 'http://127.0.0.1:8795'
-server = subprocess.Popen(['uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8795'],
+server = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8795'],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     with sync_playwright() as p:

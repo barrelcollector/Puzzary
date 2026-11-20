@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 import os
 from pathlib import Path
+import tempfile
 
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
@@ -15,7 +16,7 @@ from app.main import SESSION_SECRET
 from app.models import Puzzle, User
 
 base='http://127.0.0.1:8790'
-output=Path(os.environ.get('QA_OUTPUT','/tmp/takuzu-live')); output.mkdir(parents=True,exist_ok=True)
+output=Path(os.environ.get('QA_OUTPUT',str(Path(tempfile.gettempdir()) / 'takuzu-live'))); output.mkdir(parents=True,exist_ok=True)
 with SessionLocal() as db:
     admin=db.scalar(select(User).where(User.is_admin==True,User.is_active==True).order_by(User.id))
     player=db.scalar(select(User).where(User.is_admin==False,User.is_active==True).order_by(User.id))

@@ -1,6 +1,9 @@
 """Verify populated legacy Group Solve tables migrate without losing progress."""
 import os
-os.environ['DATABASE_URL'] = 'sqlite:////tmp/puzzary-guest-migration-qa.sqlite'
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('group-guest-migration')
+os.environ['DATABASE_URL'] = f"sqlite:///{(qa_root / 'migration.sqlite').as_posix()}"
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text, inspect
 from app.database import Base, engine, SessionLocal, ensure_schema

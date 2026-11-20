@@ -1,12 +1,16 @@
 """Isolated API, WebSocket and browser QA for Group Solve guest passwords."""
 import os
-os.environ['DATABASE_URL'] = 'sqlite:////tmp/puzzary-group-password-qa.sqlite'
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('group-passwords')
+os.environ['DATABASE_URL'] = f"sqlite:///{(qa_root / 'group-passwords.sqlite').as_posix()}"
 os.environ['SESSION_SECRET'] = 'isolated-group-password-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/group-password-qa-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 
 import base64
 import json
 import subprocess
+import sys
 import time
 
 from itsdangerous import TimestampSigner
@@ -45,7 +49,7 @@ def cookie(user_id):
 
 
 base = 'http://127.0.0.1:8794'
-server = subprocess.Popen(['uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8794'],
+server = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8794'],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     with sync_playwright() as p:

@@ -1,9 +1,11 @@
 """Isolated lifecycle, access-control and Group Solve coverage for puzzle series."""
 import os
+from qa_runtime import qa_directory
 
-os.environ["DATABASE_URL"] = "sqlite:////tmp/puzzary-series-qa.sqlite"
+qa_root = qa_directory("puzzle-series")
+os.environ["DATABASE_URL"] = f"sqlite:///{(qa_root / 'series.sqlite').as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-series-secret"
-os.environ["UPLOAD_DIR"] = "/tmp/puzzary-series-uploads"
+os.environ["UPLOAD_DIR"] = str(qa_root / "uploads")
 os.environ["APP_BASE_URL"] = "http://127.0.0.1:8799"
 
 import base64
@@ -12,6 +14,7 @@ import html
 import json
 import re
 import subprocess
+import sys
 import time
 
 from itsdangerous import TimestampSigner
@@ -66,7 +69,7 @@ def full_answers():
 
 base = "http://127.0.0.1:8799"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8799"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8799"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 )
 try:

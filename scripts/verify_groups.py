@@ -1,12 +1,16 @@
 """Isolated API and two-browser Group Solve QA; never uses the live database."""
 import os
-os.environ['DATABASE_URL'] = 'sqlite:////tmp/puzzary-group-qa.sqlite'
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('groups')
+os.environ['DATABASE_URL'] = f"sqlite:///{(qa_root / 'groups.sqlite').as_posix()}"
 os.environ['SESSION_SECRET'] = 'isolated-group-test-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/group-qa-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 import base64
 import json
 from pathlib import Path
 import subprocess
+import sys
 import time
 import uuid
 from websockets.sync.client import connect as ws_connect
@@ -45,7 +49,7 @@ def cookie(user_id):
     return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':user_id,'session_version':1}).encode())).decode()
 
 base='http://127.0.0.1:8791'
-server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8791'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8791'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 try:
     with sync_playwright() as p:
         browser=p.chromium.launch()
@@ -190,10 +194,10 @@ try:
         bounds=remote.bounding_box()
         ring=a.locator(f'.group-player-focus[data-user="{ids[1]}"]').bounding_box()
         assert abs(bounds['width']-ring['width'])<2
-        a.screenshot(path='/tmp/group-presence-desktop.png',full_page=True)
+        a.screenshot(path=str(qa_root / 'group-presence-desktop.png'),full_page=True)
         a.set_viewport_size({'width':390,'height':844})
         a.wait_for_timeout(1100)
-        a.screenshot(path='/tmp/group-presence-mobile.png',full_page=True)
+        a.screenshot(path=str(qa_root / 'group-presence-mobile.png'),full_page=True)
         mobile_ring=a.locator(f'.group-player-focus[data-user="{ids[1]}"]').bounding_box()
         mobile_cell=a.locator(f'.takuzu-play [data-key="{k2}"]').bounding_box()
         assert abs(mobile_ring['width']-mobile_cell['width'])<2
@@ -275,7 +279,7 @@ try:
         a.locator('#group-check').click(); a.wait_for_timeout(500)
         a.locator('#group-hint').click(); a.wait_for_timeout(500)
         assert host.request.get(endpoint).json()['state']['hints_used']==1
-        out=Path('/tmp/groups-qa'); out.mkdir(exist_ok=True)
+        out=qa_root / 'screenshots'; out.mkdir(exist_ok=True)
         a.screenshot(path=str(out/'group-desktop.png'),full_page=True)
         b.set_viewport_size({'width':390,'height':844}); b.screenshot(path=str(out/'group-mobile.png'),full_page=True)
         assert b.evaluate('document.documentElement.scrollWidth <= innerWidth')

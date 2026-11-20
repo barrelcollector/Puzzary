@@ -1,14 +1,17 @@
 """Isolated API/browser regression coverage for public and unlisted puzzle visibility."""
 import os
+from qa_runtime import qa_directory
 
-os.environ["DATABASE_URL"] = "sqlite:////tmp/puzzary-unlisted-qa.sqlite"
+qa_root = qa_directory("unlisted-puzzles")
+os.environ["DATABASE_URL"] = f"sqlite:///{(qa_root / 'unlisted.sqlite').as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-unlisted-secret"
-os.environ["UPLOAD_DIR"] = "/tmp/puzzary-unlisted-uploads"
+os.environ["UPLOAD_DIR"] = str(qa_root / "uploads")
 
 import base64
 from datetime import datetime, timedelta, timezone
 import json
 import subprocess
+import sys
 import time
 
 from fastapi import HTTPException
@@ -58,7 +61,7 @@ def session_cookie(user_id):
 
 base = "http://127.0.0.1:8796"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8796"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8796"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
 )

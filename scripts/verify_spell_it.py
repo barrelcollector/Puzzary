@@ -1,8 +1,11 @@
 """Isolated Spell It engine, authorization, persistence and browser checks."""
 import os
-os.environ['DATABASE_URL'] = os.getenv('SPELL_IT_QA_DATABASE', 'sqlite:////tmp/puzzary-spell-it-qa.sqlite')
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('spell-it')
+os.environ['DATABASE_URL'] = os.getenv('SPELL_IT_QA_DATABASE', f"sqlite:///{(qa_root / 'spell-it.sqlite').as_posix()}")
 os.environ['SESSION_SECRET'] = 'isolated-spell-it-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/spell-it-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 
 import base64
 import json
@@ -96,7 +99,7 @@ with SessionLocal() as db:
     db.add(bank); db.commit()
 
 base='http://127.0.0.1:8795'
-output=Path('/tmp/spell-it-qa'); output.mkdir(exist_ok=True)
+output=qa_root / 'output'; output.mkdir(exist_ok=True)
 def cookie(uid): return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':uid,'session_version':1}).encode())).decode()
 server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8795'],stdout=open(output/'server.log','w'),stderr=subprocess.STDOUT)
 try:

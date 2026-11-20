@@ -3,6 +3,7 @@ import base64
 from io import BytesIO
 import json
 from pathlib import Path
+import tempfile
 import os
 
 from itsdangerous import TimestampSigner
@@ -14,7 +15,7 @@ from app.database import SessionLocal
 from app.main import SESSION_SECRET
 from app.models import PublishedIssue, User
 
-output = Path(os.environ.get('QA_OUTPUT','/tmp/booklet-live'))
+output = Path(os.environ.get('QA_OUTPUT', str(Path(tempfile.gettempdir()) / 'booklet-live')))
 output.mkdir(parents=True,exist_ok=True)
 base = 'http://127.0.0.1:8790'
 with SessionLocal() as db:

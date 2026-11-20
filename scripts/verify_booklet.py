@@ -3,6 +3,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 import os
+import tempfile
 import unittest
 
 from pypdf import PdfReader
@@ -38,7 +39,7 @@ class BookletTests(unittest.TestCase):
 
     def test_render(self):
         templates = Jinja2Templates(APP_DIR / "templates")
-        output = Path(os.environ.get('QA_OUTPUT','/tmp/booklet-qa'))
+        output = Path(os.environ.get('QA_OUTPUT', str(Path(tempfile.gettempdir()) / 'booklet-qa')))
         output.mkdir(parents=True,exist_ok=True)
         css = (APP_DIR / "static/styles.css").read_text()
         for name,width,height,count in [('letter',215.9,279.4,8),('a4',210,297,5),('custom',180,260,3)]:
