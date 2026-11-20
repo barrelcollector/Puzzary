@@ -401,7 +401,7 @@ def account_notifications(request: Request, db: Session = Depends(get_db)):
     user = core().require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    return core().templates.TemplateResponse("account_notifications.html", account_context(request, db, user))
+    return core().templates.TemplateResponse(request, "account_notifications.html", account_context(request, db, user))
 
 
 @router.post("/account/notifications/preferences")

@@ -7,6 +7,7 @@ os.environ['UPLOAD_DIR'] = '/tmp/spell-it-uploads'
 import base64
 import json
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -97,7 +98,7 @@ with SessionLocal() as db:
 base='http://127.0.0.1:8795'
 output=Path('/tmp/spell-it-qa'); output.mkdir(exist_ok=True)
 def cookie(uid): return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':uid,'session_version':1}).encode())).decode()
-server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8795'],stdout=open(output/'server.log','w'),stderr=subprocess.STDOUT)
+server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8795'],stdout=open(output/'server.log','w'),stderr=subprocess.STDOUT)
 try:
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=True)

@@ -49,7 +49,7 @@ def get_preview(actor, key):
 
 
 def render(request, db, actor, **context):
-    return core().templates.TemplateResponse("word_bank_import.html", {"request": request, "current_user": actor, "fields": FIELDS, "banks": db.scalars(select(WordBank).where(WordBank.archived_at.is_(None)).order_by(WordBank.name)).all(), "plugins": [plugin for plugin in list_puzzle_types() if "word_bank" in plugin.source_requirements], "stage": "source", **context})
+    return core().templates.TemplateResponse(request, "word_bank_import.html", {"request": request, "current_user": actor, "fields": FIELDS, "banks": db.scalars(select(WordBank).where(WordBank.archived_at.is_(None)).order_by(WordBank.name)).all(), "plugins": [plugin for plugin in list_puzzle_types() if "word_bank" in plugin.source_requirements], "stage": "source", **context})
 
 
 def safe_error(error):

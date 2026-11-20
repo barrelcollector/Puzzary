@@ -193,7 +193,7 @@ def print_issue(issue, request, db, user, toolbar=True):
         layout = booklet_layout(sheet) if print_mode == "booklet" else sheet
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return c.templates.TemplateResponse("issue_print.html", {
+    return c.templates.TemplateResponse(request, "issue_print.html", {
         "request": request, "issue": issue, "snapshot": snapshot, "print_layout": layout,
         "print_pdf_css": snapshot["css"], "current_user": user,
         "hide_app_chrome": True, "show_print_toolbar": toolbar,
@@ -228,7 +228,7 @@ def admin_issue_editor(issue_id: str, request: Request, db: Session = Depends(ge
         return user
     context = c.admin_context(request, db, user, "publishing")
     context["selected_issue"] = find_issue(db, issue_id)
-    return c.templates.TemplateResponse("admin.html", context)
+    return c.templates.TemplateResponse(request, "admin.html", context)
 
 
 @router.post("/admin/publishing/save")

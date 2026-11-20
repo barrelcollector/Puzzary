@@ -12,6 +12,8 @@ from starlette.templating import Jinja2Templates
 from app.booklet import booklet_layout, booklet_pairs, impose_booklet
 from app.print_pdf import render_pdf
 
+APP_DIR = Path(__file__).resolve().parents[1] / "app"
+
 
 class BookletTests(unittest.TestCase):
     def test_order(self):
@@ -35,10 +37,10 @@ class BookletTests(unittest.TestCase):
             booklet_layout({'page_width_mm':80,'page_height_mm':None,'page_margin_mm':4})
 
     def test_render(self):
-        templates = Jinja2Templates('/app/app/templates')
+        templates = Jinja2Templates(APP_DIR / "templates")
         output = Path(os.environ.get('QA_OUTPUT','/tmp/booklet-qa'))
         output.mkdir(parents=True,exist_ok=True)
-        css = Path('/app/app/static/styles.css').read_text()
+        css = (APP_DIR / "static/styles.css").read_text()
         for name,width,height,count in [('letter',215.9,279.4,8),('a4',210,297,5),('custom',180,260,3)]:
             sheet = {'page_width_mm':width,'page_height_mm':height,'page_margin_mm':8,'page_size':name,'page_size_presets':[]}
             logical = booklet_layout(sheet)
@@ -50,7 +52,8 @@ class BookletTests(unittest.TestCase):
             html = templates.env.get_template('issue_print.html').render(
                 request=request,issue=SimpleNamespace(id='qa',title='Booklet Test',published_at=None,description=''),
                 snapshot={'modules':modules},print_layout=logical,sheet_layout=sheet,print_mode='booklet',
-                print_pdf_css=css,hide_app_chrome=True,show_print_toolbar=False)
+                print_pdf_css=css,hide_app_chrome=True,show_print_toolbar=False,
+                appearance=SimpleNamespace(slug='dark',scheme='dark',style=''),current_user=None)
             sequential = render_pdf(html,logical)
             reader = PdfReader(BytesIO(sequential))
             self.assertEqual(len(reader.pages),count)

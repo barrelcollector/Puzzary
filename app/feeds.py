@@ -175,7 +175,7 @@ def account_feeds(request: Request, db: Session = Depends(get_db)):
     user = core().require_web_user(request, db)
     if isinstance(user, RedirectResponse):
         return user
-    return core().templates.TemplateResponse("account_feeds.html", account_feed_context(request, db, user))
+    return core().templates.TemplateResponse(request, "account_feeds.html", account_feed_context(request, db, user))
 
 
 @router.post("/account/feeds", response_class=HTMLResponse, status_code=201)
@@ -207,6 +207,7 @@ def account_feed_create(
     db.add(token)
     db.commit()
     return core().templates.TemplateResponse(
+        request,
         "account_feeds.html",
         account_feed_context(request, db, user, created_secret=secret, created_name=clean_name),
         status_code=201,
@@ -237,6 +238,7 @@ def account_feed_rotate(token_id: str, request: Request, db: Session = Depends(g
     with FEED_RATE_LOCK:
         FEED_RATE_BUCKETS.pop(token.id, None)
     return core().templates.TemplateResponse(
+        request,
         "account_feeds.html",
         account_feed_context(request, db, user, created_secret=secret, created_name=token.name),
     )
