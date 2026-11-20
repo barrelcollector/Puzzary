@@ -1453,6 +1453,7 @@
       {% if request.query_params.get("error") %}<p class="notice danger" role="alert">{{ request.query_params.get("error") }}</p>{% endif %}
       {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
       {% if plugin_management.restart_required %}<p class="notice danger"><strong>Restart required.</strong> One or more packages on disk differ from the currently loaded version. Existing requests continue using the loaded version until Puzzary restarts.</p>{% endif %}
+      <p class="notice danger"><strong>Trusted code only.</strong> Plugins run server-side Python with the same access as Puzzary; capability declarations describe intended access but are not a security sandbox. Install only packages you have reviewed and trust.</p>
 
       <div class="metric-grid">
         <div class="metric-card"><strong>{{ plugin_management.registered_count }}</strong><span>Registered modules</span></div>
@@ -1483,7 +1484,15 @@
                 <div class="row"><span>Loaded version</span><strong>{{ plugin.loaded_version or "Fallback" if plugin.registered else "Not loaded" }}</strong></div>
                 <div class="row"><span>Installed package</span><strong>{{ plugin.installed.version if plugin.installed else "Not installed" }}</strong></div>
                 <div class="row"><span>Generation</span><strong>{{ "Enabled" if plugin.enabled else "Disabled" }}</strong></div>
+                {% if plugin.installed %}
+                <div class="row"><span>Author / license</span><strong>{{ plugin.installed.author or "Not declared" }}{% if plugin.installed.license %} / {{ plugin.installed.license }}{% endif %}</strong></div>
+                <div class="row"><span>Core compatibility</span><strong>{{ plugin.installed.min_core_version or "Any" }} to {{ plugin.installed.max_core_version or "current" }}</strong></div>
+                <div class="row"><span>Capabilities</span><strong>{{ plugin.installed.capabilities | join(", ") if plugin.installed.capabilities else "None declared" }}</strong></div>
+                <div class="row"><span>Dependencies</span><strong>{{ plugin.installed.requires | join(", ") if plugin.installed.requires else "None" }}</strong></div>
+                <div class="row"><span>Health</span><strong>{{ plugin.installed.diagnostic }}</strong></div>
+                {% endif %}
               </div>
+              {% if plugin.installed and plugin.installed.description %}<p class="muted">{{ plugin.installed.description }}</p>{% endif %}
               {% if plugin.restart_required %}<p class="muted">Installed and waiting for restart.</p>{% endif %}
               <div class="button-row">
                 <form method="post" action="/admin/plugins/install-official">
@@ -1500,6 +1509,23 @@
                 <button type="submit" class="ghost-button">Restore {{ plugin.rollback.version }} rollback</button>
               </form>
               {% endif %}
+              {% if plugin.installed and plugin.installed.settings %}
+              <details>
+                <summary>Configure</summary>
+                <form method="post" action="/admin/plugins/{{ plugin.slug }}/settings" class="stacked-form">
+                  {% for field in plugin.installed.settings %}
+                    <label>{{ field.label }}{% if field.required %} *{% endif %}
+                    {% if field.type == "textarea" %}<textarea name="{{ field.name }}">{{ plugin.installed.configuration.values[field.name] }}</textarea>
+                    {% elif field.type == "select" %}<select name="{{ field.name }}">{% for option in field.options %}<option value="{{ option }}"{% if plugin.installed.configuration.values[field.name] == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select>
+                    {% elif field.type == "checkbox" %}<input type="checkbox" name="{{ field.name }}" value="true"{% if plugin.installed.configuration.values[field.name] %} checked{% endif %}>
+                    {% else %}<input type="{{ 'password' if field.type == 'secret' else 'number' if field.type == 'number' else 'text' }}" name="{{ field.name }}" value="{{ '' if field.type == 'secret' else plugin.installed.configuration.values[field.name] }}"{% if field.type == 'secret' and plugin.installed.configuration.secret_configured[field.name] %} placeholder="Configured — leave blank to keep"{% endif %}>{% endif %}
+                    {% if field.help %}<small class="muted">{{ field.help }}</small>{% endif %}</label>
+                  {% endfor %}
+                  <button type="submit" class="ghost-button">Save Settings</button>
+                </form>
+              </details>
+              {% endif %}
+              {% if plugin.installed %}<form method="post" action="/admin/plugins/{{ plugin.slug }}/uninstall"><button type="submit" class="danger-button" onclick="return confirm('Uninstall {{ plugin.name }}? Settings and puzzle data will be preserved, and the package can be restored from rollback.')">Uninstall Package</button></form>{% endif %}
             </article>
           {% endfor %}
         </div>
@@ -1508,19 +1534,45 @@
       {% if plugin_management.custom_installed %}
       <section class="panel admin-section">
         <h2>Additional Installed Modules</h2>
-        <div class="list compact">
+        <div class="plugin-card-grid">
           {% for plugin in plugin_management.custom_installed %}
-            <div class="row">
-              <span><strong>{{ plugin.name }}</strong><small>{{ plugin.slug }} &middot; {{ plugin.path }} &middot; {{ "Enabled" if plugin.enabled else "Disabled" }}</small></span>
-              <span>
-                <strong>{{ plugin.version }}{% if plugin.restart_required %} / restart required{% endif %}</strong>
+            <article class="plugin-card">
+              <h3>{{ plugin.name }}</h3>
+              <p class="muted">{{ plugin.description or "No description supplied." }}</p>
+              <small>{{ plugin.slug }} &middot; {{ plugin.version }} &middot; {{ "Enabled" if plugin.enabled else "Disabled" }}</small>
+              <div class="list compact">
+                <div class="row"><span>Author / license</span><strong>{{ plugin.author or "Not declared" }}{% if plugin.license %} / {{ plugin.license }}{% endif %}</strong></div>
+                <div class="row"><span>API / core</span><strong>API {{ plugin.api_version }} &middot; {{ plugin.min_core_version or "Any" }} to {{ plugin.max_core_version or "current" }}</strong></div>
+                <div class="row"><span>Capabilities</span><strong>{{ plugin.capabilities | join(", ") if plugin.capabilities else "None declared" }}</strong></div>
+                <div class="row"><span>Dependencies</span><strong>{{ plugin.requires | join(", ") if plugin.requires else "None" }}</strong></div>
+                <div class="row"><span>Source</span><strong>{{ plugin.install_source or "Existing package directory" }}</strong></div>
+                <div class="row"><span>Health</span><strong>{{ plugin.diagnostic }}</strong></div>
+              </div>
+              <div class="button-row">
                 <form method="post" action="/admin/plugins/{{ plugin.slug }}/status">
                   <input type="hidden" name="enabled" value="{{ 'false' if plugin.enabled else 'true' }}">
                   <button type="submit" class="ghost-button compact-button">{{ "Disable" if plugin.enabled else "Enable" }}</button>
                 </form>
                 {% if plugin.slug in plugin_management.rollback_by_slug %}<form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback"><button type="submit" class="ghost-button compact-button">Restore {{ plugin_management.rollback_by_slug[plugin.slug].version }}</button></form>{% endif %}
-              </span>
-            </div>
+              </div>
+              {% if plugin.settings %}
+              <details>
+                <summary>Configure</summary>
+                <form method="post" action="/admin/plugins/{{ plugin.slug }}/settings" class="stacked-form">
+                  {% for field in plugin.settings %}
+                    <label>{{ field.label }}{% if field.required %} *{% endif %}
+                    {% if field.type == "textarea" %}<textarea name="{{ field.name }}">{{ plugin.configuration.values[field.name] }}</textarea>
+                    {% elif field.type == "select" %}<select name="{{ field.name }}">{% for option in field.options %}<option value="{{ option }}"{% if plugin.configuration.values[field.name] == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select>
+                    {% elif field.type == "checkbox" %}<input type="checkbox" name="{{ field.name }}" value="true"{% if plugin.configuration.values[field.name] %} checked{% endif %}>
+                    {% else %}<input type="{{ 'password' if field.type == 'secret' else 'number' if field.type == 'number' else 'text' }}" name="{{ field.name }}" value="{{ '' if field.type == 'secret' else plugin.configuration.values[field.name] }}"{% if field.type == 'secret' and plugin.configuration.secret_configured[field.name] %} placeholder="Configured — leave blank to keep"{% endif %}>{% endif %}
+                    {% if field.help %}<small class="muted">{{ field.help }}</small>{% endif %}</label>
+                  {% endfor %}
+                  <button type="submit" class="ghost-button">Save Settings</button>
+                </form>
+              </details>
+              {% endif %}
+              <form method="post" action="/admin/plugins/{{ plugin.slug }}/uninstall"><button type="submit" class="danger-button" onclick="return confirm('Uninstall {{ plugin.name }}? Settings and puzzle data will be preserved, and the package can be restored from rollback.')">Uninstall Package</button></form>
+            </article>
           {% endfor %}
         </div>
       </section>
@@ -1536,7 +1588,17 @@
           <small class="muted">Private repositories use the write-only credential configured beside this form. It is never stored in an installed package.</small>
         </form>
 
-        <section class="panel">
+        <form class="panel" method="post" action="/admin/plugins/install-upload" enctype="multipart/form-data">
+          <h2>Upload Local Package</h2>
+          <p class="muted">Install a reviewed plugin ZIP from this device. Puzzary validates its manifest, compatibility, dependencies, paths, size, and SHA-256 digest before replacing anything.</p>
+          <label>Package ZIP <input type="file" name="package" accept=".zip,application/zip" required></label>
+          <label>SHA-256 digest <input name="sha256" required minlength="64" maxlength="64" pattern="[0-9a-fA-F]{64}" placeholder="64 hexadecimal characters"></label>
+          <label><input type="checkbox" name="trust_package" value="true" required> I reviewed and trust this package source.</label>
+          <button type="submit">Install Uploaded Package</button>
+        </form>
+      </section>
+
+      <section class="panel admin-section">
           <div class="section-heading">
             <div>
               <h2>Private GitHub Access</h2>
@@ -1571,7 +1633,6 @@
           {% if plugin_management.github_access.environment_fallback %}
           <small class="muted">A server environment fallback is also present. It remains available if the saved credential is removed.</small>
           {% endif %}
-        </section>
       </section>
 
       {% if plugin_management.errors %}

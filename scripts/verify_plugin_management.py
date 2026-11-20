@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,6 +38,18 @@ PACKAGE = PLUGIN_DIR / "example_clock"
     "entrypoint": "plugin.py",
     "templates": "templates",
     "static": "static",
+    "author": "Puzzary QA",
+    "description": "Exercises managed plugin metadata and settings.",
+    "license": "Apache-2.0",
+    "min_core_version": "0.1.0",
+    "capabilities": ["puzzles.generate", "puzzles.play"],
+    "requires": [],
+    "settings": [
+        {"name": "endpoint", "label": "Service URL", "type": "text", "required": True, "default": "https://example.test"},
+        {"name": "mode", "label": "Mode", "type": "select", "options": ["quiet", "loud"], "default": "quiet"},
+        {"name": "api_key", "label": "API key", "type": "secret"},
+        {"name": "alerts", "label": "Alerts", "type": "checkbox", "default": False},
+    ],
 }), encoding="utf-8")
 (PACKAGE / "plugin.py").write_text("""
 from app.puzzles import GeneratedPuzzle, PuzzleType, register_puzzle_type
@@ -51,6 +65,29 @@ shutil.copytree(PACKAGE, ROLLBACK)
 rollback_manifest = json.loads((ROLLBACK / "puzzary-plugin.json").read_text(encoding="utf-8"))
 rollback_manifest["version"] = "0.9.0"
 (ROLLBACK / "puzzary-plugin.json").write_text(json.dumps(rollback_manifest), encoding="utf-8")
+
+UPLOAD_SOURCE = QA_ROOT / "upload-source"
+UPLOAD_SOURCE.mkdir()
+upload_manifest = {
+    "schema": "puzzary.plugin.v1", "api_version": "1", "slug": "uploaded_timer",
+    "name": "Uploaded Timer", "version": "1.0.0", "entrypoint": "plugin.py",
+    "author": "Puzzary QA", "license": "Apache-2.0",
+    "capabilities": ["puzzles.generate"], "requires": [],
+}
+(UPLOAD_SOURCE / "puzzary-plugin.json").write_text(json.dumps(upload_manifest), encoding="utf-8")
+(UPLOAD_SOURCE / "plugin.py").write_text("# upload fixture\n", encoding="utf-8")
+UPLOAD_ARCHIVE = QA_ROOT / "uploaded-timer.zip"
+with zipfile.ZipFile(UPLOAD_ARCHIVE, "w", zipfile.ZIP_DEFLATED) as archive:
+    for source in UPLOAD_SOURCE.iterdir():
+        archive.write(source, source.name)
+UPLOAD_DIGEST = hashlib.sha256(UPLOAD_ARCHIVE.read_bytes()).hexdigest()
+missing_dependency_manifest = {**upload_manifest, "slug": "needs_missing", "name": "Needs Missing", "requires": ["missing_plugin"]}
+(UPLOAD_SOURCE / "puzzary-plugin.json").write_text(json.dumps(missing_dependency_manifest), encoding="utf-8")
+MISSING_DEPENDENCY_ARCHIVE = QA_ROOT / "needs-missing.zip"
+with zipfile.ZipFile(MISSING_DEPENDENCY_ARCHIVE, "w", zipfile.ZIP_DEFLATED) as archive:
+    for source in UPLOAD_SOURCE.iterdir():
+        archive.write(source, source.name)
+MISSING_DEPENDENCY_DIGEST = hashlib.sha256(MISSING_DEPENDENCY_ARCHIVE.read_bytes()).hexdigest()
 
 environment = os.environ.copy()
 environment.update({
@@ -124,7 +161,8 @@ try:
             "Puzzle Plugins", "Update All Modules", "Official Modules", "Update Module",
             "Add From GitHub", "Example Clock", "Additional Installed Modules",
             "GitHub packages loaded", "Bundled fallback", "Restore 0.9.0",
-            "Public release catalog",
+            "Public release catalog", "Trusted code only", "Upload Local Package",
+            "Puzzary QA", "Apache-2.0", "puzzles.generate", "Configure",
         ):
             assert phrase in html, phrase
         assert html.count('action="/admin/plugins/install-official"') == 11
@@ -132,6 +170,8 @@ try:
         assert "Enabled Modules" not in html
         assert html.index("Additional Installed Modules") < html.index("Add From GitHub")
         assert html.index("Add From GitHub") < html.index("Private GitHub Access")
+        assert 'action="/admin/plugins/install-upload"' in html
+        assert 'action="/admin/plugins/example_clock/uninstall"' in html
 
         settings = request.get(BASE + "/admin/settings")
         assert settings.ok and 'href="/admin/plugins"' in settings.text()
@@ -191,6 +231,58 @@ try:
         })
         assert bad_api_install.status == 400
 
+        settings_saved = request.put(BASE + "/api/plugin-packages/example_clock/settings", data={
+            "values": {"endpoint": "https://service.test", "mode": "loud", "api_key": "super-secret", "alerts": True},
+        })
+        assert settings_saved.ok, settings_saved.text()
+        assert settings_saved.json()["values"]["api_key"] == ""
+        assert settings_saved.json()["secret_configured"]["api_key"] is True
+        settings_read = request.get(BASE + "/api/plugin-packages/example_clock/settings")
+        assert settings_read.ok and "super-secret" not in settings_read.text()
+        with sqlite3.connect(QA_ROOT / "plugins.sqlite") as database:
+            encrypted_settings = database.execute(
+                "SELECT value FROM app_settings WHERE key = 'plugin_config:example_clock'"
+            ).fetchone()[0]
+        assert encrypted_settings and "super-secret" not in encrypted_settings
+        web_settings = request.post(BASE + "/admin/plugins/example_clock/settings", form={
+            "endpoint": "https://web.test", "mode": "quiet", "api_key": "", "alerts": "true",
+        }, max_redirects=0)
+        assert web_settings.status == 303 and "message=" in web_settings.headers["location"]
+
+        rejected_upload = request.post(BASE + "/api/plugin-packages/install-upload", multipart={
+            "package": {"name": "uploaded-timer.zip", "mimeType": "application/zip", "buffer": UPLOAD_ARCHIVE.read_bytes()},
+            "sha256": UPLOAD_DIGEST,
+            "trust_package": "false",
+        })
+        assert rejected_upload.status == 422
+        wrong_digest = request.post(BASE + "/api/plugin-packages/install-upload", multipart={
+            "package": {"name": "uploaded-timer.zip", "mimeType": "application/zip", "buffer": UPLOAD_ARCHIVE.read_bytes()},
+            "sha256": "0" * 64,
+            "trust_package": "true",
+        })
+        assert wrong_digest.status == 400 and "digest mismatch" in wrong_digest.text()
+        missing_dependency = request.post(BASE + "/api/plugin-packages/install-upload", multipart={
+            "package": {"name": "needs-missing.zip", "mimeType": "application/zip", "buffer": MISSING_DEPENDENCY_ARCHIVE.read_bytes()},
+            "sha256": MISSING_DEPENDENCY_DIGEST,
+            "trust_package": "true",
+        })
+        assert missing_dependency.status == 400 and "missing required plugin dependencies" in missing_dependency.text()
+        uploaded = request.post(BASE + "/api/plugin-packages/install-upload", multipart={
+            "package": {"name": "uploaded-timer.zip", "mimeType": "application/zip", "buffer": UPLOAD_ARCHIVE.read_bytes()},
+            "sha256": UPLOAD_DIGEST,
+            "trust_package": "true",
+        })
+        assert uploaded.ok and uploaded.json()["slug"] == "uploaded_timer", uploaded.text()
+        uploaded_status = request.get(BASE + "/api/plugin-packages").json()
+        timer = next(item for item in uploaded_status["custom_installed"] if item["slug"] == "uploaded_timer")
+        assert timer["installed_sha256"] == UPLOAD_DIGEST
+        assert timer["install_source"].startswith("local upload:")
+        uninstalled = request.delete(BASE + "/api/plugin-packages/uploaded_timer")
+        assert uninstalled.ok and uninstalled.json()["rollback_available"] is True
+        assert uninstalled.json()["data_preserved"] is True
+        restored_upload = request.post(BASE + "/api/plugin-packages/uploaded_timer/rollback")
+        assert restored_upload.ok and restored_upload.json()["version"] == "1.0.0"
+
         disabled = request.post(BASE + "/admin/plugins/maze/status", form={"enabled": "false"}, max_redirects=0)
         assert disabled.status == 303
         disabled_page = request.get(BASE + "/admin/plugins").text()
@@ -213,14 +305,15 @@ try:
             assert login.status == 303
             page = context.new_page()
             page.goto(BASE + "/admin/plugins")
-            assert page.locator(".plugin-card").count() == 10
-            assert page.locator('.plugin-card form[action$="/status"]').count() == 10
+            assert page.locator(".plugin-card").count() == 12
+            assert page.locator('.plugin-card form[action$="/status"]').count() == 12
             assert page.get_by_role("button", name="Update Module").count() == 10
             assert page.locator('form[action="/admin/plugins/install"]').is_visible()
+            assert page.locator('form[action="/admin/plugins/install-upload"]').is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             context.close()
         browser.close()
-    print("Plugin web UI, encrypted write-only GitHub access, official catalog, custom install validation, source status, enable/disable controls, and supporting APIs passed.")
+    print("Plugin web UI, trusted local upload, encrypted settings, metadata, recoverable uninstall, GitHub access, status controls, and supporting APIs passed.")
 finally:
     server.terminate()
     try:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -10,12 +11,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from app.version import __version__
+
 
 LOGGER = logging.getLogger(__name__)
 PLUGIN_SCHEMA = "puzzary.plugin.v1"
 PLUGIN_API_VERSION = "1"
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+SETTING_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 OFFICIAL_CATALOG_PATH = Path(__file__).with_name("official_plugins.json")
+PLUGIN_CAPABILITIES = {
+    "puzzles.generate", "puzzles.play", "puzzles.print", "puzzles.progress",
+    "groups.collaborate", "network.outbound", "filesystem.plugin_data",
+}
+PLUGIN_SETTING_TYPES = {"text", "textarea", "number", "checkbox", "select", "secret"}
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,14 @@ class PluginPackage:
     static: Path | None = None
     homepage: str = ""
     replaces_builtin: bool = False
+    author: str = ""
+    description: str = ""
+    license: str = ""
+    capabilities: tuple[str, ...] = ()
+    requires: tuple[str, ...] = ()
+    settings: tuple[dict[str, Any], ...] = ()
+    min_core_version: str = ""
+    max_core_version: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -47,14 +64,84 @@ def plugin_root() -> Path:
 
 
 def _child_path(package_dir: Path, value: str, label: str, *, must_be_file: bool = False) -> Path:
-    candidate = (package_dir / value).resolve()
-    if package_dir != candidate and package_dir not in candidate.parents:
+    package_root = package_dir.resolve()
+    candidate = (package_root / value).resolve()
+    if package_root != candidate and package_root not in candidate.parents:
         raise ValueError(f"{label} must stay inside the plugin package")
     if must_be_file and not candidate.is_file():
         raise ValueError(f"{label} does not exist: {value}")
     if not must_be_file and not candidate.is_dir():
         raise ValueError(f"{label} does not exist: {value}")
     return candidate
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?", value.strip())
+    if match is None:
+        raise ValueError(f"version must start with major.minor.patch: {value}")
+    return tuple(int(part) for part in match.groups())
+
+
+def _string_list(value: Any, field: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of strings")
+    cleaned = tuple(dict.fromkeys(item.strip() for item in value if item.strip()))
+    if len(cleaned) > 100:
+        raise ValueError(f"{field} contains too many entries")
+    return cleaned
+
+
+def _settings_schema(value: Any) -> tuple[dict[str, Any], ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or len(value) > 50:
+        raise ValueError("settings must be a list containing at most 50 fields")
+    fields: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each settings field must be an object")
+        unknown = set(item) - {"name", "label", "type", "required", "default", "options", "help"}
+        if unknown:
+            raise ValueError(f"unsupported settings fields: {', '.join(sorted(unknown))}")
+        name = str(item.get("name", "")).strip()
+        field_type = str(item.get("type", "text")).strip()
+        if not SETTING_NAME_PATTERN.fullmatch(name) or name in names:
+            raise ValueError("plugin setting names must be unique lowercase identifiers")
+        if field_type not in PLUGIN_SETTING_TYPES:
+            raise ValueError(f"unsupported plugin setting type: {field_type}")
+        label = str(item.get("label") or name.replace("_", " ").title()).strip()[:100]
+        help_text = str(item.get("help", "")).strip()[:500]
+        options = _string_list(item.get("options"), f"settings.{name}.options")
+        if field_type == "select" and not options:
+            raise ValueError(f"select setting {name} requires options")
+        if field_type != "select" and options:
+            raise ValueError(f"only select settings can declare options: {name}")
+        default = item.get("default", False if field_type == "checkbox" else "")
+        if field_type == "secret" and default not in ("", None):
+            raise ValueError(f"secret setting {name} cannot have a packaged default")
+        if field_type == "checkbox" and not isinstance(default, bool):
+            raise ValueError(f"checkbox setting {name} requires a boolean default")
+        if field_type == "number" and default not in ("", None):
+            if isinstance(default, bool) or not isinstance(default, (int, float)) or not math.isfinite(default):
+                raise ValueError(f"number setting {name} requires a finite numeric default")
+        if field_type == "select" and default not in options:
+            raise ValueError(f"select setting {name} default must be one of its options")
+        if field_type in {"text", "textarea"} and (not isinstance(default, str) or len(default) > 4000):
+            raise ValueError(f"{field_type} setting {name} requires a string default of at most 4000 characters")
+        fields.append({
+            "name": name,
+            "label": label,
+            "type": field_type,
+            "required": bool(item.get("required", False)),
+            "default": default,
+            "options": list(options),
+            "help": help_text,
+        })
+        names.add(name)
+    return tuple(fields)
 
 
 def read_manifest(package_dir: Path) -> PluginPackage:
@@ -66,6 +153,9 @@ def read_manifest(package_dir: Path) -> PluginPackage:
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid puzzary-plugin.json: {exc.msg}") from exc
 
+    if not isinstance(manifest, dict):
+        raise ValueError("puzzary-plugin.json must contain a JSON object")
+
     if manifest.get("schema") != PLUGIN_SCHEMA:
         raise ValueError(f"schema must be {PLUGIN_SCHEMA}")
     if str(manifest.get("api_version", "")) != PLUGIN_API_VERSION:
@@ -76,6 +166,22 @@ def read_manifest(package_dir: Path) -> PluginPackage:
     version = str(manifest.get("version", "")).strip()
     if not version:
         raise ValueError("version is required")
+    _version_tuple(version)
+    min_core_version = str(manifest.get("min_core_version", "")).strip()
+    max_core_version = str(manifest.get("max_core_version", "")).strip()
+    current_core = _version_tuple(__version__)
+    if min_core_version and current_core < _version_tuple(min_core_version):
+        raise ValueError(f"plugin requires Puzzary {min_core_version} or newer")
+    if max_core_version and current_core > _version_tuple(max_core_version):
+        raise ValueError(f"plugin supports Puzzary only through {max_core_version}")
+    capabilities = _string_list(manifest.get("capabilities"), "capabilities")
+    unknown_capabilities = set(capabilities) - PLUGIN_CAPABILITIES
+    if unknown_capabilities:
+        raise ValueError(f"unsupported plugin capabilities: {', '.join(sorted(unknown_capabilities))}")
+    requires = _string_list(manifest.get("requires"), "requires")
+    if any(not SLUG_PATTERN.fullmatch(required) for required in requires) or slug in requires:
+        raise ValueError("plugin dependencies must be other valid plugin slugs")
+    settings = _settings_schema(manifest.get("settings"))
     entrypoint = _child_path(package_dir, str(manifest.get("entrypoint", "plugin.py")), "entrypoint", must_be_file=True)
 
     templates = None
@@ -95,6 +201,14 @@ def read_manifest(package_dir: Path) -> PluginPackage:
         static=static,
         homepage=str(manifest.get("homepage", "")),
         replaces_builtin=bool(manifest.get("replaces_builtin", False)),
+        author=str(manifest.get("author", "")).strip()[:120],
+        description=str(manifest.get("description", "")).strip()[:500],
+        license=str(manifest.get("license", "")).strip()[:80],
+        capabilities=capabilities,
+        requires=requires,
+        settings=settings,
+        min_core_version=min_core_version,
+        max_core_version=max_core_version,
     )
 
 
@@ -188,6 +302,18 @@ def installed_plugin_packages() -> tuple[list[dict[str, Any]], dict[str, str]]:
         try:
             package = read_manifest(package_dir)
             data = package.as_dict()
+            install_metadata_path = package_dir / ".puzzary-install.json"
+            if install_metadata_path.is_file():
+                try:
+                    metadata = json.loads(install_metadata_path.read_text(encoding="utf-8"))
+                    data["install_source"] = str(metadata.get("source", ""))[:2048]
+                    data["installed_sha256"] = str(metadata.get("sha256", ""))[:64]
+                except (OSError, json.JSONDecodeError):
+                    data["install_source"] = ""
+                    data["installed_sha256"] = ""
+            else:
+                data["install_source"] = ""
+                data["installed_sha256"] = ""
             loaded = LOADED_PACKAGES.get(package.slug)
             data["loaded"] = loaded is not None and loaded.version == package.version
             data["loaded_version"] = loaded.version if loaded is not None else None
@@ -224,6 +350,11 @@ def package_status() -> dict[str, Any]:
         "rollbacks": rollbacks,
         "official_catalog": official_plugin_catalog(),
         "github_access_configured": bool(os.getenv("PUZZARY_PLUGIN_GITHUB_TOKEN", "").strip()),
-        "restart_required": any(package["restart_required"] for package in installed),
+        "restart_required": (
+            any(package["restart_required"] for package in installed)
+            or bool(set(LOADED_PACKAGES) - {package["slug"] for package in installed})
+        ),
+        "trust_boundary": "Plugin packages execute trusted server-side Python with the same process privileges as Puzzary.",
+        "supported_capabilities": sorted(PLUGIN_CAPABILITIES),
         "errors": dict(PLUGIN_LOAD_ERRORS) | installed_errors | rollback_errors,
     }
