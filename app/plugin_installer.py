@@ -12,6 +12,8 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 from urllib.error import HTTPError, URLError
 
+from app.plugin_packages import official_plugin_catalog, read_manifest
+
 
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -119,10 +121,6 @@ def install_plugin_release(
     plugin_dir: Path,
     github_token: str | None = None,
 ) -> tuple[Path, dict]:
-    expected = expected_sha256.strip().lower()
-    if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
-        raise ValueError("sha256 must be a 64-character hexadecimal digest")
-
     parsed_url = urlparse(url)
     url_parts = parsed_url.path.strip("/").split("/")
     if (
@@ -139,20 +137,61 @@ def install_plugin_release(
         work = Path(temporary)
         archive = work / "package.zip"
         download_release(url, archive, github_token)
-        actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-        if actual != expected:
-            raise ValueError(f"archive digest mismatch: expected {expected}, received {actual}")
+        return install_plugin_archive(archive, expected_sha256, plugin_dir, source_url=url)
 
-        extracted = work / "extracted"
+
+def _validate_digest(archive: Path, expected_sha256: str) -> str:
+    expected = expected_sha256.strip().lower()
+    if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
+        raise ValueError("sha256 must be a 64-character hexadecimal digest")
+    if archive.stat().st_size > MAX_ARCHIVE_BYTES:
+        raise ValueError("plugin archive exceeds the 100 MB limit")
+    digest = hashlib.sha256()
+    with archive.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise ValueError(f"archive digest mismatch: expected {expected}, received {actual}")
+    return actual
+
+
+def _validate_dependencies(manifest, plugin_dir: Path) -> None:
+    builtins = {plugin["slug"] for plugin in official_plugin_catalog()["plugins"]}
+    installed = {
+        path.name for path in plugin_dir.iterdir()
+        if path.is_dir() and not path.name.startswith(".") and (path / "puzzary-plugin.json").is_file()
+    } if plugin_dir.is_dir() else set()
+    missing = set(manifest.requires) - builtins - installed
+    if missing:
+        raise ValueError(f"missing required plugin dependencies: {', '.join(sorted(missing))}")
+
+
+def install_plugin_archive(
+    archive: Path,
+    expected_sha256: str,
+    plugin_dir: Path,
+    *,
+    source_url: str = "local upload",
+) -> tuple[Path, dict]:
+    actual = _validate_digest(archive, expected_sha256)
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="puzzary-plugin-extract-") as temporary:
+        extracted = Path(temporary) / "extracted"
         extracted.mkdir()
-        safe_extract(archive, extracted)
+        try:
+            safe_extract(archive, extracted)
+        except zipfile.BadZipFile as error:
+            raise ValueError("plugin package must be a valid ZIP archive") from error
         source = package_root(extracted)
+        package = read_manifest(source)
+        _validate_dependencies(package, plugin_dir)
         manifest = json.loads((source / "puzzary-plugin.json").read_text(encoding="utf-8"))
-        if manifest.get("schema") != "puzzary.plugin.v1" or str(manifest.get("api_version")) != "1":
-            raise ValueError("package does not target Puzzary plugin API version 1")
-        slug = str(manifest.get("slug", "")).strip()
-        if not SLUG_PATTERN.fullmatch(slug):
-            raise ValueError("package slug must use lowercase letters, numbers, and underscores")
+        (source / ".puzzary-install.json").write_text(json.dumps({
+            "source": source_url,
+            "sha256": actual,
+        }), encoding="utf-8")
+        slug = package.slug
         target = plugin_dir / slug
         staged = plugin_dir / f".{slug}.staged"
         rollback = plugin_dir / f".{slug}.rollback"
@@ -170,6 +209,23 @@ def install_plugin_release(
                 os.replace(rollback, target)
             raise
         return target, manifest
+
+
+def uninstall_plugin_package(slug: str, plugin_dir: Path) -> tuple[Path, dict]:
+    if not SLUG_PATTERN.fullmatch(slug):
+        raise ValueError("plugin slug is invalid")
+    target = plugin_dir / slug
+    if not target.is_dir():
+        raise ValueError(f"no installed package exists for {slug}")
+    package = read_manifest(target)
+    if package.slug != slug:
+        raise ValueError("installed package manifest does not match the requested plugin")
+    manifest = json.loads((target / "puzzary-plugin.json").read_text(encoding="utf-8"))
+    rollback = plugin_dir / f".{slug}.rollback"
+    if rollback.exists():
+        shutil.rmtree(rollback)
+    os.replace(target, rollback)
+    return rollback, manifest
 
 
 def restore_plugin_rollback(slug: str, plugin_dir: Path) -> tuple[Path, dict]:

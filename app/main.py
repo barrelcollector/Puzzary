@@ -13,6 +13,7 @@ import math
 import secrets
 import time
 import threading
+import tempfile
 from collections import deque
 from copy import deepcopy
 from io import BytesIO
@@ -88,8 +89,22 @@ from app.plugin_packages import (
     plugin_root,
     plugin_static_directories,
     plugin_template_directories,
+    read_manifest,
 )
-from app.plugin_installer import install_plugin_release, restore_plugin_rollback, test_github_access
+from app.plugin_installer import (
+    MAX_ARCHIVE_BYTES,
+    install_plugin_archive,
+    install_plugin_release,
+    restore_plugin_rollback,
+    test_github_access,
+    uninstall_plugin_package,
+)
+from app.plugin_settings import (
+    plugin_settings_for_package,
+    plugin_settings_view,
+    save_plugin_settings,
+    validate_plugin_settings,
+)
 from app.user_activity import account_activity, progress_states
 from app.permissions import (
     authorize_request, initialize_permissions, require as require_permission,
@@ -119,6 +134,7 @@ from app.schemas import (
     OfficialPluginInstallRequest,
     PluginEnabledRequest,
     PluginGitHubAccessWrite,
+    PluginSettingsWrite,
     PuzzleManualWrite,
     PuzzlePrintPreview,
     PrintManifestRequest,
@@ -4041,7 +4057,37 @@ def web_create_user(request: Request, db: Session = Depends(get_db)):
 def plugin_management_context(db: Session) -> dict:
     status = package_status()
     github_access = plugin_github_access(db)
-    installed_by_slug = {package["slug"]: package for package in status["installed"]}
+    installed = []
+    for package_data in status["installed"]:
+        package = read_manifest(Path(package_data["path"]))
+        try:
+            configuration = plugin_settings_view(db, package)
+            configuration_error = ""
+        except ValueError as error:
+            configuration = {
+                "values": {field["name"]: field.get("default") for field in package.settings},
+                "secret_configured": {
+                    field["name"]: False for field in package.settings if field["type"] == "secret"
+                },
+            }
+            configuration_error = str(error)
+            status["errors"][f"{package.slug}:settings"] = configuration_error
+        installed.append({
+            **package_data,
+            "configuration": configuration,
+            "diagnostic": (
+                configuration_error
+                if configuration_error
+                else
+                "Restart required to load the installed version."
+                if package_data.get("restart_required")
+                else "Loaded and available."
+                if package_data.get("loaded")
+                else "Installed but not loaded; check plugin load errors."
+            ),
+        })
+    status["installed"] = installed
+    installed_by_slug = {package["slug"]: package for package in installed}
     rollback_by_slug = {package["slug"]: package for package in status["rollbacks"]}
     official_slugs = {plugin["slug"] for plugin in status["official_catalog"]["plugins"]}
     disabled = disabled_puzzle_type_slugs(db)
@@ -4575,6 +4621,84 @@ def install_plugin_for_user(db: Session, user: User, url: str, sha256: str) -> d
     return manifest
 
 
+async def install_uploaded_plugin_for_user(
+    db: Session,
+    user: User,
+    upload: UploadFile,
+    sha256: str,
+) -> dict:
+    require_permission(user, "plugins.manage")
+    if not (upload.filename or "").lower().endswith(".zip"):
+        raise ValueError("Local plugin package must be a ZIP file.")
+    with tempfile.TemporaryDirectory(prefix="puzzary-plugin-upload-") as temporary:
+        archive = Path(temporary) / "package.zip"
+        total = 0
+        with archive.open("wb") as output:
+            while chunk := await upload.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_ARCHIVE_BYTES:
+                    raise ValueError("Plugin archive exceeds the 100 MB limit.")
+                output.write(chunk)
+        _target, manifest = install_plugin_archive(
+            archive,
+            sha256,
+            plugin_root(),
+            source_url=f"local upload: {Path(upload.filename or 'package.zip').name}",
+        )
+    audit(db, user, "plugin", str(manifest["slug"]), "plugin.installed", {}, {
+        "version": str(manifest.get("version", "")),
+        "source": "local_upload",
+        "restart_required": True,
+    })
+    db.commit()
+    return manifest
+
+
+def installed_plugin_package(slug: str):
+    target = plugin_root() / slug
+    if not target.is_dir():
+        raise ValueError(f"No installed package exists for {slug}.")
+    return read_manifest(target)
+
+
+def save_plugin_configuration_for_user(
+    db: Session,
+    user: User,
+    slug: str,
+    submitted: dict,
+) -> dict:
+    require_permission(user, "plugins.manage")
+    package = installed_plugin_package(slug)
+    if not package.settings:
+        raise ValueError(f"{package.name} does not declare configurable settings.")
+    previous = plugin_settings_for_package(db, package)
+    values = validate_plugin_settings(package, submitted, previous)
+    save_plugin_settings(db, slug, values)
+    audit(db, user, "plugin", slug, "plugin.settings.saved", {
+        "configured_keys": sorted(key for key, value in previous.items() if value not in ("", None, False)),
+    }, {
+        "configured_keys": sorted(key for key, value in values.items() if value not in ("", None, False)),
+    })
+    db.commit()
+    return plugin_settings_view(db, package)
+
+
+def uninstall_plugin_for_user(db: Session, user: User, slug: str) -> dict:
+    require_permission(user, "plugins.manage")
+    _rollback, manifest = uninstall_plugin_package(slug, plugin_root())
+    audit(db, user, "plugin", slug, "plugin.uninstalled", {
+        "version": str(manifest.get("version", "")),
+    }, {
+        "installed": False,
+        "settings_preserved": True,
+        "data_preserved": True,
+        "rollback_available": True,
+        "restart_required": True,
+    })
+    db.commit()
+    return manifest
+
+
 def restore_plugin_for_user(db: Session, user: User, slug: str) -> dict:
     require_permission(user, "plugins.manage")
     _target, manifest = restore_plugin_rollback(slug, plugin_root())
@@ -4605,6 +4729,27 @@ def admin_install_plugin(
         return user
     try:
         manifest = install_plugin_for_user(db, user, url.strip(), sha256.strip())
+    except (ValueError, OSError) as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    message = f"{manifest.get('name', manifest['slug'])} {manifest.get('version', '')} installed. Restart Puzzary to activate it."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
+@app.post("/admin/plugins/install-upload")
+async def admin_upload_plugin(
+    request: Request,
+    package: UploadFile = File(...),
+    sha256: str = Form(""),
+    trust_package: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    if not trust_package:
+        return RedirectResponse(url="/admin/plugins?error=Confirm%20that%20you%20trust%20the%20package%20source.", status_code=303)
+    try:
+        manifest = await install_uploaded_plugin_for_user(db, user, package, sha256.strip())
     except (ValueError, OSError) as error:
         return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
     message = f"{manifest.get('name', manifest['slug'])} {manifest.get('version', '')} installed. Restart Puzzary to activate it."
@@ -4757,6 +4902,37 @@ def admin_restore_plugin_rollback(slug: str, request: Request, db: Session = Dep
     except (ValueError, OSError) as error:
         return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
     message = f"Restored {manifest.get('name', slug)} {manifest.get('version', '')}. Restart Puzzary to activate it."
+    return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
+
+
+@app.post("/admin/plugins/{slug}/settings")
+async def admin_save_plugin_settings(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        package = installed_plugin_package(slug)
+        form = await request.form()
+        submitted = {field["name"]: form.get(field["name"], "") for field in package.settings}
+        save_plugin_configuration_for_user(db, user, slug, submitted)
+    except (ValueError, OSError) as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    return RedirectResponse(url=f"/admin/plugins?message={quote(package.name + ' settings saved.')}", status_code=303)
+
+
+@app.post("/admin/plugins/{slug}/uninstall")
+def admin_uninstall_plugin(slug: str, request: Request, db: Session = Depends(get_db)):
+    user = require_admin_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    try:
+        manifest = uninstall_plugin_for_user(db, user, slug)
+    except (ValueError, OSError) as error:
+        return RedirectResponse(url=f"/admin/plugins?error={quote(str(error))}", status_code=303)
+    message = (
+        f"{manifest.get('name', slug)} uninstalled. Its settings, puzzle data, and a recoverable rollback were preserved. "
+        "Restart Puzzary to finish."
+    )
     return RedirectResponse(url=f"/admin/plugins?message={quote(message)}", status_code=303)
 
 
@@ -7663,6 +7839,72 @@ def install_official_plugin_packages(
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc), "installed": installed}) from exc
     return {"installed": installed, "restart_required": True}
+
+
+@app.post("/api/plugin-packages/install-upload")
+async def upload_plugin_package(
+    request: Request,
+    package: UploadFile = File(...),
+    sha256: str = Form(...),
+    trust_package: bool = Form(False),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    if not trust_package:
+        raise HTTPException(status_code=422, detail="Confirm that you trust the package source.")
+    try:
+        manifest = await install_uploaded_plugin_for_user(db, user, package, sha256)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "slug": manifest["slug"],
+        "name": manifest.get("name", manifest["slug"]),
+        "version": manifest.get("version", ""),
+        "restart_required": True,
+    }
+
+
+@app.get("/api/plugin-packages/{slug}/settings")
+def get_plugin_package_settings(slug: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_admin_api(request, db)
+    try:
+        package = installed_plugin_package(slug)
+        view = plugin_settings_view(db, package)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"slug": slug, "schema": list(package.settings), **view}
+
+
+@app.put("/api/plugin-packages/{slug}/settings")
+def put_plugin_package_settings(
+    slug: str,
+    payload: PluginSettingsWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_admin_api(request, db)
+    try:
+        view = save_plugin_configuration_for_user(db, user, slug, payload.values)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"slug": slug, **view}
+
+
+@app.delete("/api/plugin-packages/{slug}")
+def uninstall_plugin_api(slug: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_admin_api(request, db)
+    try:
+        manifest = uninstall_plugin_for_user(db, user, slug)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "slug": slug,
+        "version": manifest.get("version", ""),
+        "settings_preserved": True,
+        "data_preserved": True,
+        "rollback_available": True,
+        "restart_required": True,
+    }
 
 
 @app.patch("/api/plugin-packages/{slug}")

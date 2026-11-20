@@ -16,6 +16,17 @@ An installed package is one directory containing `puzzary-plugin.json`:
   "slug": "example",
   "name": "Example",
   "version": "1.0.0",
+  "author": "Example Author",
+  "description": "Adds Example puzzles.",
+  "license": "Apache-2.0",
+  "min_core_version": "0.2.1",
+  "max_core_version": "1.0.0",
+  "capabilities": ["puzzles.generate", "puzzles.play", "puzzles.print"],
+  "requires": [],
+  "settings": [
+    {"name": "endpoint", "label": "Service URL", "type": "text", "required": true},
+    {"name": "api_key", "label": "API key", "type": "secret"}
+  ],
   "entrypoint": "plugin.py",
   "templates": "templates",
   "static": "static",
@@ -29,22 +40,27 @@ The entrypoint registers exactly one puzzle type matching `slug`. Templates use
 served at `/plugins/{slug}/static/`; `play_script` may use an absolute path below
 that URL.
 
-Packages execute trusted server-side Python. Install only reviewed, versioned
-release archives and pin their published SHA-256 digest. **Admin -> Plugins** is
+Packages execute trusted server-side Python with the same process privileges as
+Puzzary. Capability declarations are reviewed metadata, not a sandbox. Install
+only reviewed, versioned release archives and pin their published SHA-256
+digest. **Admin -> Plugins** is
 the primary management surface. It shows whether each module is running from an
 official GitHub package or the bundled startup fallback, installs one or all
 official modules, gives each module its own update and enable/disable controls,
-accepts a custom GitHub release URL and digest, reports load errors, and manages
-generation availability. A restart activates newly installed
+accepts a custom GitHub release URL or local ZIP plus digest, renders declared
+configuration fields, reports load errors, supports recoverable uninstall, and
+manages generation availability. A restart activates newly installed
 code; running requests are never hot-swapped.
 
 The same operations are available for automation through
 `GET /api/plugin-packages`, `GET /api/plugin-packages/catalog`,
 `GET`, `PUT`, and `DELETE /api/plugin-packages/github-access`,
 `POST /api/plugin-packages/github-access/test`,
-`POST /api/plugin-packages/install`, `POST /api/plugin-packages/install-official`,
-`PATCH /api/plugin-packages/{slug}`, and
-`POST /api/plugin-packages/{slug}/rollback`. The web and API paths share the same
+`POST /api/plugin-packages/install`, `POST /api/plugin-packages/install-upload`,
+`POST /api/plugin-packages/install-official`, `PATCH` and `DELETE
+/api/plugin-packages/{slug}`, `GET` and `PUT
+/api/plugin-packages/{slug}/settings`, and `POST
+/api/plugin-packages/{slug}/rollback`. The web and API paths share the same
 validation, audit, permission, staging, and rollback behavior. The optional
 `scripts/install_plugin.py` command uses that installer for recovery or scripted
 deployment. Docker persists packages within the existing `./data` volume.
@@ -60,6 +76,32 @@ An account with `plugins.manage` can install or upgrade one through the API:
 
 The response identifies the installed version and sets `restart_required` to
 `true`.
+
+Local upload is a multipart request containing `package`, `sha256`, and the
+explicit `trust_package=true` acknowledgement. Both download paths enforce a
+100 MB archive limit, a 250 MB expanded limit, safe ZIP paths, exact digest,
+manifest schema and API compatibility, core version bounds, declared
+capabilities, and installed dependencies before atomically replacing a package.
+
+Supported configuration field types are `text`, `textarea`, `number`,
+`checkbox`, `select`, and `secret`. Select fields declare `options`; secret
+fields cannot package a default. Settings are validated on the server and the
+complete configuration is encrypted at rest. Secret values are never returned
+by the web page or API. Plugin code reads its current values with:
+
+```python
+from app.plugin_settings import configured_plugin_settings
+
+settings = configured_plugin_settings("example")
+```
+
+Uninstall moves the current package to its rollback slot instead of deleting
+it. Saved settings, generated puzzles, progress, and other database records are
+preserved. The administrator can restore the package from the rollback control;
+install, update, uninstall, and restore all require an application restart to
+change the code currently loaded in memory. A failing plugin is isolated during
+startup and shown under Plugin Load Errors without preventing other modules from
+loading.
 
 For a private GitHub repository, save a fine-grained GitHub access token under
 **Admin -> Plugins -> Private GitHub Access**. The field is write-only: Puzzary
@@ -211,7 +253,7 @@ register_puzzle_type(
 
 ## Enabling and Disabling
 
-Registered modules can be disabled from **Admin -> Settings**. A disabled module:
+Registered modules can be disabled from **Admin -> Plugins**. A disabled module:
 
 - is hidden from the public and admin generation wizards;
 - is rejected by `/api/puzzles/generate`;
@@ -283,8 +325,12 @@ GET /api/puzzle-types?include_disabled=true
 GET /api/plugin-packages
 GET /api/plugin-packages/catalog
 POST /api/plugin-packages/install
+POST /api/plugin-packages/install-upload
 POST /api/plugin-packages/install-official
 PATCH /api/plugin-packages/{slug}
+DELETE /api/plugin-packages/{slug}
+GET /api/plugin-packages/{slug}/settings
+PUT /api/plugin-packages/{slug}/settings
 POST /api/plugin-packages/{slug}/rollback
 ```
 
