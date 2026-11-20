@@ -70,7 +70,9 @@ returns redacted status fields. `PUZZARY_PLUGIN_GITHUB_TOKEN` remains an optiona
 server-environment fallback for recovery and existing deployments.
 
 Independently installable releases for all ten official puzzle types are
-maintained at https://github.com/barrelcollector/puzzary-official-plugins. Core
+publicly maintained at https://github.com/barrelcollector/puzzary-official-plugins.
+Official modules install and update without a GitHub credential; private access
+is only needed for additional modules hosted in private repositories. Core
 retains compatible copies only so a new or damaged installation can reach the
 web management page; normal deployments should install and load the official
 packages from the catalog.
