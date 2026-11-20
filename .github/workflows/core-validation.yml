@@ -116,7 +116,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
       - name: Build production image
-        run: docker build --tag puzzary:core-ci .
+        run: docker build --build-arg "PUZZARY_VERSION=$(cat VERSION)" --tag puzzary:core-ci .
+      - name: Verify production image version label
+        run: test "$(docker image inspect --format '{{ index .Config.Labels \"org.opencontainers.image.version\" }}' puzzary:core-ci)" = "$(cat VERSION)"
 
   python-security:
     name: Python security scan

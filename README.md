@@ -48,6 +48,11 @@ Prerequisites are Docker Engine and Docker Compose v2. The full
 data, upgrades, automatic schema migrations, backups, restores, and health
 checks.
 
+The current application version is recorded in [`VERSION`](VERSION). The API
+health response and release image metadata use that same value. See the
+[`CHANGELOG`](CHANGELOG.md) and [v0.1.0-beta.1 release notes](docs/releases/v0.1.0-beta.1.md)
+for beta scope and upgrade warnings.
+
 Copy the sample environment:
 
 ```bash

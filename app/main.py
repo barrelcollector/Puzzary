@@ -142,6 +142,7 @@ from app.oidc import (
     provider_metadata,
     provider_summary,
 )
+from app.version import __version__
 
 
 DEFAULT_APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8790").rstrip("/")
@@ -160,7 +161,7 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(
     title="Puzzary",
     description="An extensible puzzle and game library with a flexible API and plugin-based game system.",
-    version="0.1.0",
+    version=__version__,
 )
 app.add_middleware(
     SessionMiddleware,
@@ -3289,7 +3290,7 @@ def progress_response(puzzle: Puzzle, user: User, progress: PuzzleProgress | Non
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "app": "puzzary"}
+    return {"status": "ok", "app": "puzzary", "version": __version__}
 
 
 def qr_svg_bytes(value: str) -> bytes:

@@ -83,6 +83,21 @@ Stopping only `app` keeps PostgreSQL available while the new image is built.
 If startup or migration fails, keep the failed logs, restore the matching
 pre-upgrade database backup, and return to the previous application revision.
 
+### Rollback procedure
+
+Keep the previous image or source revision until the upgrade has passed health,
+login, puzzle, upload, module, and print checks. If the new application cannot
+start or a migration check fails:
+
+1. Stop only the application container and preserve its logs.
+2. Restore the validated pre-upgrade database dump and matching application-data
+   backup into an empty, verified target.
+3. Rebuild or retag the exact previous application revision.
+4. Start the application and repeat the health and login checks.
+
+Never point an older image at a database already modified by newer code. A
+rollback is the previous image **plus** its matching database and file backup.
+
 ## Database backup
 
 Choose a backup directory outside `./data/postgres`. Substitute the database
