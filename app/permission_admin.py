@@ -42,7 +42,7 @@ def permission_user_page(user_id: int, request: Request, db=Depends(get_db)):
     if not user: raise HTTPException(404, 'User not found')
     inherited = set().union(*(set(r.permissions or []) for r in user.roles)) if user.roles else set()
     events = db.scalars(select(PermissionAudit).where(PermissionAudit.subject_type=='user', PermissionAudit.subject_id==str(user.id)).order_by(PermissionAudit.id.desc()).limit(30)).all() if actor.can('audit.view') else []
-    return core().templates.TemplateResponse('permission_admin.html', {
+    return core().templates.TemplateResponse(request, 'permission_admin.html', {
         'request':request, 'current_user':actor, 'section':'user_detail', 'managed_user':user,
         'roles':db.scalars(select(PermissionRole).order_by(PermissionRole.name)).all(),
         'permission_groups':groups(), 'inherited':inherited, 'effective':effective_permissions(user),
@@ -94,7 +94,7 @@ async def save_user_permissions(user_id: int, request: Request, db=Depends(get_d
 def roles_page(request: Request, db=Depends(get_db)):
     actor = core().require_admin_user(request, db)
     if isinstance(actor, RedirectResponse): return actor
-    return core().templates.TemplateResponse('permission_admin.html', {
+    return core().templates.TemplateResponse(request, 'permission_admin.html', {
         'request':request, 'current_user':actor, 'section':'roles',
         'roles':db.scalars(select(PermissionRole).order_by(PermissionRole.name)).all(),
         'permission_groups':groups(), 'dangerous':DANGEROUS,
@@ -133,7 +133,7 @@ def audit_page(request: Request, db=Depends(get_db)):
     actor = core().require_admin_user(request, db)
     if isinstance(actor, RedirectResponse): return actor
     events = db.scalars(select(PermissionAudit).order_by(PermissionAudit.id.desc()).limit(200)).all()
-    return core().templates.TemplateResponse('permission_admin.html', {
+    return core().templates.TemplateResponse(request, 'permission_admin.html', {
         'request':request, 'current_user':actor, 'section':'audit', 'events':events,
         'actors':{u.id:u.display_name for u in db.scalars(select(User))},
     })

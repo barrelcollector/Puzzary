@@ -3328,7 +3328,7 @@ def guest_share_context(request: Request, db: Session, token: str, error: str = 
     account = current_user(request, db)
     if account is not None and can_view(account, puzzle, play=True) and puzzle_access_granted(request, puzzle):
         return RedirectResponse(f"/puzzles/{puzzle.id}", status_code=303)
-    return templates.TemplateResponse("guest_share_join.html", {
+    return templates.TemplateResponse(request, "guest_share_join.html", {
         "request": request, "current_user": account, "link": link,
         "puzzle": puzzle, "token": token, "error": error,
     })
@@ -3657,6 +3657,7 @@ def login_page(request: Request, db: Session = Depends(get_db)):
     return_to = safe_return_to(request.query_params.get("return_to", ""))
     mode = oidc_login_mode(db)
     return templates.TemplateResponse(
+        request,
         "login.html",
         {
             "request": request,
@@ -3714,6 +3715,7 @@ def password_setup_page(request: Request, token: str = "", db: Session = Depends
     user = db.scalar(select(User).where(User.reset_token_hash == token_hash))
     token_valid = bool(user and user.reset_token_expires_at and user.reset_token_expires_at > utcnow())
     return templates.TemplateResponse(
+        request,
         "password_setup.html",
         {
             "request": request,
@@ -3762,6 +3764,7 @@ def account_password_page(request: Request, db: Session = Depends(get_db)):
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
+        request,
         "account_password.html",
         {
             "request": request,
@@ -3882,6 +3885,7 @@ def library(request: Request, db: Session = Depends(get_db)):
     next_pairs.append(("limit", str(library_data["next_limit"])))
     next_url = f"/library?{urlencode(next_pairs, doseq=True)}"
     return templates.TemplateResponse(
+        request,
         "home.html",
         {
             "request": request,
@@ -3908,6 +3912,7 @@ def generate_page(request: Request, db: Session = Depends(get_db)):
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
+        request,
         "generate.html",
         {
             "request": request,
@@ -4208,6 +4213,7 @@ def render_admin(
     if isinstance(user, RedirectResponse):
         return user
     return templates.TemplateResponse(
+        request,
         "admin.html",
         admin_context(
             request,
@@ -4263,7 +4269,7 @@ def admin_series_detail(series_id: str, request: Request, db: Session = Depends(
     series = managed_series(db, user, series_id)
     context = admin_context(request, db, user, "series")
     context["selected_series"] = series
-    return templates.TemplateResponse("admin.html", context)
+    return templates.TemplateResponse(request, "admin.html", context)
 
 
 @app.post("/admin/series")
@@ -4435,6 +4441,7 @@ def admin_word_bank_detail_page(bank_id: int, request: Request, db: Session = De
     if bank is None:
         raise HTTPException(status_code=404, detail="Word bank not found")
     return templates.TemplateResponse(
+        request,
         "admin.html",
         admin_context(request, db, user, "word_bank_detail", selected_word_bank=bank),
     )
@@ -4454,6 +4461,7 @@ def admin_dictionary_word_page(word_id: int, request: Request, db: Session = Dep
     if word is None:
         raise HTTPException(status_code=404, detail="Word not found")
     return templates.TemplateResponse(
+        request,
         "admin.html",
         admin_context(request, db, user, "word_detail", word),
     )
@@ -4705,7 +4713,7 @@ def admin_themes_page(request: Request, edit: str = "", db: Session = Depends(ge
         return user
     themes = list(db.scalars(select(AppearanceTheme).order_by(AppearanceTheme.name, AppearanceTheme.slug)))
     selected = db.get(AppearanceTheme, edit) if edit else None
-    return templates.TemplateResponse("admin_themes.html", {
+    return templates.TemplateResponse(request, "admin_themes.html", {
         "request":request, "current_user":user, "themes":themes, "builtins":appearance_options(db)[:3],
         "default_theme":appearance_default_slug(db), "selected_theme":selected,
         "selected_manifest":json.dumps(selected.manifest if selected else {}, indent=2),
@@ -5366,7 +5374,7 @@ async def admin_import_puzzles(
             "skipped": 0,
         }
     context["puzzle_import_result"] = result
-    return templates.TemplateResponse("admin.html", context)
+    return templates.TemplateResponse(request, "admin.html", context)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/guest-links", response_class=HTMLResponse)
@@ -5412,7 +5420,7 @@ def admin_create_guest_link(
     context["new_guest_link"] = {
         "id": link.id, "url": f"{app_base_url(db)}/share/{token}", "label": link.label or puzzle.title,
     }
-    return templates.TemplateResponse("admin.html", context, status_code=201)
+    return templates.TemplateResponse(request, "admin.html", context, status_code=201)
 
 
 @app.post("/admin/puzzles/{puzzle_id}/guest-links/{link_id}/revoke")
@@ -5765,7 +5773,7 @@ def admin_import_dictionary(
             "errors": [str(error)],
         }
     context["dictionary_import_result"] = result
-    return templates.TemplateResponse("admin.html", context)
+    return templates.TemplateResponse(request, "admin.html", context)
 
 
 @app.post("/admin/dictionary/import-sources")
@@ -6225,7 +6233,7 @@ def group_lobby_page(request: Request, q: str = '', puzzle_type: str = '', avail
                      password: str = 'any', sort: str = 'recent', db: Session = Depends(get_db)):
     from app.groups import public_lobby_items
     lobby = public_lobby_items(db, q, puzzle_type, available, password, sort)
-    response = templates.TemplateResponse('group_lobby.html', {
+    response = templates.TemplateResponse(request, 'group_lobby.html', {
         'request': request,
         'current_user': current_user(request, db),
         'groups': lobby['groups'],
@@ -6262,7 +6270,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
                 if error.status_code not in {401, 423}:
                     raise
                 writable(group)
-                return templates.TemplateResponse('group_guest_join.html', {
+                return templates.TemplateResponse(request, 'group_guest_join.html', {
                     'request': request, 'group': group, 'password_protected': bool(group.password_hash),
                     'puzzle_password_protected': bool(guest_puzzle and guest_puzzle.access_password_hash),
                     'current_user': None,
@@ -6287,7 +6295,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     if not is_guest:
         authorize_request(request, db, user)
     if not puzzle_access_granted(request, puzzle):
-        return templates.TemplateResponse("puzzle_unlock.html", {
+        return templates.TemplateResponse(request, "puzzle_unlock.html", {
             "request": request,
             "puzzle": puzzle,
             "current_user": user,
@@ -6300,7 +6308,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     except HTTPException as error:
         if error.status_code != 423:
             raise
-        return templates.TemplateResponse("series_locked.html", {
+        return templates.TemplateResponse(request, "series_locked.html", {
             "request": request,
             "current_user": user,
             "puzzle": puzzle,
@@ -6336,6 +6344,7 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     has_solution_template = template_exists(solution_template_name)
     return_to = safe_library_return_to(request.query_params.get("return_to", "/library"))
     return templates.TemplateResponse(
+        request,
         "puzzle.html",
         {
             "request": request,
@@ -6385,7 +6394,7 @@ def unlock_puzzle(
     except HTTPException as error:
         if error.status_code == 429:
             raise
-        return templates.TemplateResponse("puzzle_unlock.html", {
+        return templates.TemplateResponse(request, "puzzle_unlock.html", {
             "request": request,
             "puzzle": puzzle,
             "current_user": user,
@@ -6500,6 +6509,7 @@ def render_puzzle_print_page(
         raise HTTPException(status_code=404, detail="This puzzle does not support printing")
     print_layout = apply_print_request_layout(print_layout_context(puzzle, puzzle_type, db), request)
     return templates.TemplateResponse(
+        request,
         "print.html",
         {
             "request": request,

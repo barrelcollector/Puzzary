@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -95,7 +96,7 @@ PNG = base64.b64decode(
 )
 BASE = "http://127.0.0.1:8807"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8807"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8807"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
 )
