@@ -48,10 +48,10 @@ def test_github_access(token: str, repository: str = OFFICIAL_PLUGIN_REPOSITORY)
         if error.code == 403:
             raise ValueError("GitHub accepted the request but denied repository access.") from error
         if error.code == 404:
-            raise ValueError("The credential cannot access the private official plugin repository.") from error
+            raise ValueError("The credential cannot access the GitHub repository used for the access check.") from error
         raise ValueError(f"GitHub access check failed with status {error.code}.") from error
     except (URLError, TimeoutError, json.JSONDecodeError) as error:
-        raise ValueError("GitHub could not be reached to test private repository access.") from error
+        raise ValueError("GitHub could not be reached to test repository access.") from error
     if payload.get("full_name") != repository:
         raise ValueError("GitHub returned an unexpected repository during the access check.")
     return {

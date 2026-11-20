@@ -115,6 +115,7 @@ try:
             "Puzzle Plugins", "Update All Modules", "Official Modules", "Update Module",
             "Add From GitHub", "Example Clock", "Additional Installed Modules",
             "GitHub packages loaded", "Bundled fallback", "Restore 0.9.0",
+            "Public release catalog",
         ):
             assert phrase in html, phrase
         assert html.count('action="/admin/plugins/install-official"') == 11
