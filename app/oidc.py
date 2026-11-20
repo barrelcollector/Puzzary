@@ -125,7 +125,8 @@ def fetch_json(
     if data is not None:
         request.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is admin configured and validated
+        # The scheme, authority, and local-HTTP exception are validated above.
+        with urlopen(request, timeout=timeout) as response:  # nosec B310
             final_url = urlparse(response.geturl())
             if final_url.scheme not in {"http", "https"} or not final_url.netloc:
                 raise OIDCError("The identity provider redirected to an invalid endpoint.")

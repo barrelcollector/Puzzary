@@ -164,7 +164,8 @@ def load_transport_config(
         trusted_proxies=trusted_proxies,
         https_redirect=https_redirect,
         secure_cookies=secure_cookies,
-        host=values.get("PUZZARY_HOST", "0.0.0.0").strip() or "0.0.0.0",
+        # Container deployments intentionally default the configurable listener to all interfaces.
+        host=values.get("PUZZARY_HOST", "0.0.0.0").strip() or "0.0.0.0",  # nosec B104
         port=port,
         warnings=tuple(warnings),
     )

@@ -77,13 +77,17 @@ def detect_source_type(url: str) -> str:
 
 
 def fetch_url(url: str, bearer_token: str = "") -> dict[str, str]:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Import source must be an http or https URL")
     headers = {"User-Agent": "Puzzary-Dictionary-Importer/1.0"}
     if bearer_token.strip():
         headers["Authorization"] = f"Bearer {bearer_token.strip()}"
         headers["x-puzzary-api-token"] = bearer_token.strip()
     request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        # The scheme and authority are validated immediately before the request.
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec B310
             content_type = response.headers.get("Content-Type", "")
             content = response.read(MAX_FETCH_BYTES + 1)
     except urllib.error.URLError as error:
