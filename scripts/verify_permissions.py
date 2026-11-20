@@ -1,14 +1,18 @@
 """Isolated RBAC migration, browser/API authorization, revocation and UI QA."""
 import os
-os.environ['DATABASE_URL'] = os.getenv('PERMISSIONS_QA_DATABASE', 'sqlite:////tmp/puzzary-permissions-qa.sqlite')
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('permissions')
+qa_output = qa_root / 'screenshots'
+qa_output.mkdir(exist_ok=True)
+os.environ['DATABASE_URL'] = os.getenv('PERMISSIONS_QA_DATABASE', f"sqlite:///{(qa_root / 'permissions.sqlite').as_posix()}")
 os.environ['SESSION_SECRET'] = 'isolated-permissions-test-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/permissions-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 import base64
 import json
 import subprocess
 import sys
 import time
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
 from urllib.parse import parse_qs, urlsplit
@@ -232,14 +236,13 @@ try:
             assert page.locator('[data-permission]').count()>40
             page.locator('[data-permission-search]').fill('')
             assert page.evaluate("[...new FormData(document.querySelector('[data-permission-form]')).keys()].filter(key => key.startsWith('permission:')).length") == page.locator('[data-permission]').count()
-            page.screenshot(path=f'/tmp/user-access-{width}.png',full_page=True)
+            page.screenshot(path=str(qa_output / f'user-access-{width}.png'),full_page=True)
             page.goto(base+f'/admin/users/{ids["Publisher"]}?tab=security')
             assert page.locator('[data-user-panel="security"]').is_visible()
             page.goto(base+f'/admin/users/{ids["Publisher"]}')
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
-            Path('/tmp/permissions-qa').mkdir(exist_ok=True)
-            page.screenshot(path=f'/tmp/permissions-qa/user-{width}.png',full_page=True)
-            page.screenshot(path=f'/tmp/permissions-qa/viewport-{width}.png')
+            page.screenshot(path=str(qa_output / f'user-{width}.png'),full_page=True)
+            page.screenshot(path=str(qa_output / f'viewport-{width}.png'))
             page.goto(base+'/admin/users')
             assert page.locator('[data-user-card]').count()>=4
             page.locator('[data-user-search]').fill('Publisher')
@@ -260,7 +263,7 @@ try:
             page.keyboard.press('Escape')
             assert not menu.locator('a').first.is_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
-            page.screenshot(path=f'/tmp/permissions-qa/users-{width}.png',full_page=True)
+            page.screenshot(path=str(qa_output / f'users-{width}.png'),full_page=True)
             page.goto(base+'/admin/users?q=Publisher')
             assert page.locator('[data-user-card]:visible').count()==1
             page.locator('[data-user-search]').fill('')

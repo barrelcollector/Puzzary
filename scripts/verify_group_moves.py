@@ -1,4 +1,6 @@
 """Host puzzle switching, stale-edit fencing and multi-browser guest following."""
+from pathlib import Path
+import tempfile
 import uuid
 from app.database import SessionLocal
 from app.models import GroupMember
@@ -73,7 +75,7 @@ def verify_moves(browser, base, host, player, first='group-qa', second='qa-sudok
                                                         'changes':{'0,1':'1'}}).status==409
     hp.locator('#group-host > summary').click(); hp.locator('#group-puzzle-picker summary').click()
     hp.wait_for_function('document.querySelector("#group-move select").options.length>0')
-    hp.screenshot(path='/tmp/group-move-host.png',full_page=True)
+    hp.screenshot(path=str(Path(tempfile.gettempdir()) / 'group-move-host.png'),full_page=True)
     assert host.request.post(endpoint+'/close',data={}).ok
     assert host.request.post(endpoint+'/puzzle',data={'puzzle_id':second,'revision':returned_revision}).status==409
     assert not errors, errors

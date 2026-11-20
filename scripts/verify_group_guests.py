@@ -1,5 +1,7 @@
 """Guest browser/API regression checks, invoked against isolated Group Solve QA."""
 import json
+from pathlib import Path
+import tempfile
 import time
 import uuid
 
@@ -67,8 +69,9 @@ def verify_guests(browser, base, host, player, host_id):
     assert data['recent'][0]['user_id'] == guest_id and data['recent'][0]['name'] == 'QA guest'
     page.locator('.takuzu-play [data-key="0,0"]').hover()
     hp.wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)', arg=guest_id)
-    page.screenshot(path='/tmp/group-guest-mobile.png', full_page=True)
-    hp.screenshot(path='/tmp/group-guest-host.png', full_page=True)
+    output = Path(tempfile.gettempdir())
+    page.screenshot(path=str(output / 'group-guest-mobile.png'), full_page=True)
+    hp.screenshot(path=str(output / 'group-guest-host.png'), full_page=True)
     token = next(c['value'] for c in guest.cookies() if c['name'] == 'session')
     ws_url = endpoint.replace('http:', 'ws:') + '/presence/ws'
     with connect(ws_url, origin=base, additional_headers={'Cookie': 'session=' + token}, proxy=None) as socket:

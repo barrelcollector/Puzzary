@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import tempfile
 
 from playwright.sync_api import sync_playwright
 from sqlalchemy import select
@@ -14,7 +15,7 @@ from app.print_pdf import render_pdf
 
 
 def main():
-    output = Path("/tmp/puzzary-pdf-qa")
+    output = Path(tempfile.gettempdir()) / "puzzary-pdf-qa"
     output.mkdir(exist_ok=True)
     results = []
     jobs = []

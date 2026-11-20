@@ -76,6 +76,14 @@ Open:
 http://localhost:8790
 ```
 
+## Development checks
+
+Core development and CI support Python 3.11, 3.12, and 3.13. Run the same
+portable, security, plugin, and PostgreSQL verification groups used by GitHub
+Actions through `scripts/run_core_ci.py`; see
+[Verification scripts](scripts/README.md) for commands and the boundary between
+isolated checks and tests that intentionally use a live installation.
+
 For Cloudflare Tunnel or reverse-proxy use, configure the public URL that printed QR codes and API links should use. You can set it with `APP_BASE_URL` before the first run, or change it later in **Admin -> Settings** without rebuilding the container.
 
 ```bash

@@ -1,8 +1,11 @@
 """Isolated import/export, source security, permissions and browser regression checks."""
 import os
-os.environ['DATABASE_URL'] = os.getenv('BANK_IMPORT_QA_DATABASE', 'sqlite:////tmp/puzzary-bank-import-qa.sqlite')
+from qa_runtime import qa_directory
+
+qa_root = qa_directory('word-bank-imports')
+os.environ['DATABASE_URL'] = os.getenv('BANK_IMPORT_QA_DATABASE', f"sqlite:///{(qa_root / 'word-banks.sqlite').as_posix()}")
 os.environ['SESSION_SECRET'] = 'isolated-bank-import-secret'
-os.environ['UPLOAD_DIR'] = '/tmp/bank-import-uploads'
+os.environ['UPLOAD_DIR'] = str(qa_root / 'uploads')
 
 import base64
 import json
@@ -121,8 +124,8 @@ with SessionLocal() as db:
 base='http://127.0.0.1:8794'
 def cookie(uid):
     return TimestampSigner(SESSION_SECRET).sign(base64.b64encode(json.dumps({'user_id':uid,'session_version':1}).encode())).decode()
-output=Path('/tmp/bank-import-qa'); output.mkdir(exist_ok=True)
-server=subprocess.Popen(['uvicorn','app.main:app','--host','127.0.0.1','--port','8794'],stdout=open(output/'server.log','w'),stderr=subprocess.STDOUT)
+output=qa_root / 'output'; output.mkdir(exist_ok=True)
+server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8794'],stdout=open(output/'server.log','w'),stderr=subprocess.STDOUT)
 try:
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=True)

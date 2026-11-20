@@ -1,9 +1,11 @@
 """Regression coverage for Word Search penalties (#70) and intentional decoys (#71)."""
 import os
+from qa_runtime import qa_directory
 
-os.environ["DATABASE_URL"] = "sqlite:///C:/Temp/puzzary-word-search-decoys-qa.sqlite"
+qa_root = qa_directory("word-search-decoys")
+os.environ["DATABASE_URL"] = f"sqlite:///{(qa_root / 'word-search.sqlite').as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-word-search-decoy-secret"
-os.environ["UPLOAD_DIR"] = "C:/Temp/puzzary-word-search-decoy-uploads"
+os.environ["UPLOAD_DIR"] = str(qa_root / "uploads")
 
 import base64
 from copy import deepcopy

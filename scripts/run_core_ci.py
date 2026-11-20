@@ -1,0 +1,80 @@
+"""Run the reproducible, isolated portions of Puzzary's core validation suite."""
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "portable": (
+        ("-m", "compileall", "-q", "app", "scripts"),
+        ("scripts/verify_documentation.py",),
+        ("scripts/verify_branding.py",),
+        ("scripts/verify_minesweeper.py",),
+        ("scripts/verify_nonogram.py",),
+        ("scripts/verify_takuzu.py",),
+        ("scripts/verify_external_plugins.py",),
+    ),
+    "security": (
+        ("scripts/verify_first_run_admin.py",),
+        ("scripts/verify_solution_privacy.py",),
+        ("scripts/verify_oidc.py",),
+        ("scripts/verify_transport_security.py",),
+        ("scripts/verify_word_search_grid.py",),
+    ),
+    "plugins": (
+        ("scripts/verify_plugin_management.py",),
+    ),
+    "postgres": (
+        ("scripts/verify_permissions.py",),
+    ),
+}
+
+
+def run_group(group: str) -> None:
+    checks = CHECK_GROUPS[group]
+    with tempfile.TemporaryDirectory(prefix=f"puzzary-ci-{group}-") as temporary:
+        group_root = Path(temporary)
+        for index, arguments in enumerate(checks, start=1):
+            check_root = group_root / f"{index:02d}"
+            check_root.mkdir()
+            environment = os.environ.copy()
+            environment.update({
+                "PYTHONPATH": str(ROOT),
+                "PUZZARY_QA_ROOT": str(check_root),
+                "TEMP": str(check_root),
+                "TMP": str(check_root),
+                "TMPDIR": str(check_root),
+            })
+            scripts_directory = str(Path(sys.executable).resolve().parent)
+            environment["PATH"] = scripts_directory + os.pathsep + environment.get("PATH", "")
+            if group == "postgres":
+                environment.setdefault(
+                    "PERMISSIONS_QA_DATABASE",
+                    f"sqlite:///{(check_root / 'permissions.sqlite').as_posix()}",
+                )
+            label = " ".join(arguments)
+            print(f"\n==> [{group}] {label}", flush=True)
+            subprocess.run(
+                [sys.executable, *arguments],
+                cwd=ROOT,
+                env=environment,
+                check=True,
+            )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("group", choices=sorted(CHECK_GROUPS))
+    args = parser.parse_args()
+    run_group(args.group)
+
+
+if __name__ == "__main__":
+    main()

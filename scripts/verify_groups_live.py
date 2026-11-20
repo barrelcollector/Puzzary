@@ -1,5 +1,7 @@
 """Opt-in PostgreSQL concurrency and live browser smoke test; removes its own group."""
 import os
+from pathlib import Path
+import tempfile
 if os.environ.get('PUZZARY_LIVE_GROUP_QA') != '1':
     raise SystemExit('Set PUZZARY_LIVE_GROUP_QA=1 to run against the live service')
 import base64
@@ -124,11 +126,11 @@ try:
         pages[0].wait_for_function('(id)=>!!document.querySelector(`.group-player-pointer[data-user="${id}"]:not([hidden])`)',arg=ids[1])
         pages[0].wait_for_function('(id)=>!!document.querySelector(`.group-player-focus[data-user="${id}"]:not([hidden])`)',arg=ids[1])
         assert pages[0].locator('.group-presence-layer').evaluate('(e)=>getComputedStyle(e).pointerEvents')=='none'
-        pages[0].screenshot(path='/tmp/group-presence-live-desktop.png',full_page=True)
+        pages[0].screenshot(path=str(Path(tempfile.gettempdir()) / 'group-presence-live-desktop.png'),full_page=True)
         pages[0].set_viewport_size({'width':390,'height':844}); pages[0].wait_for_timeout(500)
         pages[0].locator(f'.takuzu-play [data-key="{keys[0]}"]').scroll_into_view_if_needed()
         pages[0].wait_for_timeout(300)
-        pages[0].screenshot(path='/tmp/group-presence-live-mobile.png')
+        pages[0].screenshot(path=str(Path(tempfile.gettempdir()) / 'group-presence-live-mobile.png'))
         remote.tap()
         pages[0].wait_for_function('(id)=>document.querySelector(`.group-player-pointer[data-user="${id}"]`).hidden',arg=ids[1])
         assert not pages[0].locator(f'.group-player-focus[data-user="{ids[1]}"]').is_hidden()
@@ -152,7 +154,7 @@ try:
         gp.reload()
         gp.wait_for_function('document.querySelector(".group-presence-layer").dataset.transport==="websocket"')
         assert guest.request.get(base+endpoint).json()['user_id'] == guest_id
-        gp.screenshot(path='/tmp/group-guest-live-mobile.png',full_page=True)
+        gp.screenshot(path=str(Path(tempfile.gettempdir()) / 'group-guest-live-mobile.png'),full_page=True)
         guest_cookie = next(c['value'] for c in guest.cookies() if c['name']=='session')
         for origin in origins:
             guest_ws = origin.replace('https:','wss:').replace('http:','ws:')+endpoint+'/presence/ws'

@@ -1,14 +1,17 @@
 """Isolated security and UX coverage for per-puzzle access passwords."""
 import os
+from qa_runtime import qa_directory
 
-os.environ["DATABASE_URL"] = "sqlite:////tmp/puzzary-puzzle-password-qa.sqlite"
+qa_root = qa_directory("puzzle-passwords")
+os.environ["DATABASE_URL"] = f"sqlite:///{(qa_root / 'puzzle-passwords.sqlite').as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-puzzle-password-secret"
-os.environ["UPLOAD_DIR"] = "/tmp/puzzary-puzzle-password-uploads"
+os.environ["UPLOAD_DIR"] = str(qa_root / "uploads")
 
 import base64
 from datetime import datetime, timedelta, timezone
 import json
 import subprocess
+import sys
 import time
 
 from fastapi import HTTPException
@@ -60,7 +63,7 @@ def session_cookie(user_id):
 
 base = "http://127.0.0.1:8797"
 server = subprocess.Popen(
-    ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8797"],
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8797"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
 )

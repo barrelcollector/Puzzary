@@ -60,10 +60,8 @@ environment.update({
     "PUZZARY_PLUGIN_DIR": str(PLUGIN_DIR),
     "APP_BASE_URL": "http://127.0.0.1:8818",
 })
-scripts_path = str(ROOT / ".venv" / "Scripts")
-environment["PATH"] = scripts_path + os.pathsep + environment.get("PATH", "")
-
 BASE = "http://127.0.0.1:8818"
+ADMIN_PASSWORD = "Plugin-management-admin-2026!"
 
 
 class GitHubResponse:
@@ -105,7 +103,18 @@ try:
         else:
             raise RuntimeError("Plugin management QA server did not start")
 
-        login = request.post(BASE + "/login", form={"username": "admin", "password": "admin"}, max_redirects=0)
+        delivery = (QA_ROOT / "bootstrap-admin-setup.txt").read_text(encoding="utf-8")
+        setup_link = next(line.removeprefix("Setup link: ") for line in delivery.splitlines() if line.startswith("Setup link: "))
+        setup_token = setup_link.split("#token=", 1)[1]
+        setup = request.post(BASE + "/password/setup", form={
+            "token": setup_token,
+            "password": ADMIN_PASSWORD,
+            "confirm_password": ADMIN_PASSWORD,
+        }, max_redirects=0)
+        assert setup.status == 303 and setup.headers["location"] == "/library", setup.text()
+        assert not (QA_ROOT / "bootstrap-admin-setup.txt").exists()
+
+        login = request.post(BASE + "/login", form={"username": "admin", "password": ADMIN_PASSWORD}, max_redirects=0)
         assert login.status == 303, login.text()
 
         page = request.get(BASE + "/admin/plugins")
@@ -200,7 +209,7 @@ try:
         browser = playwright.chromium.launch()
         for width in (1280, 390):
             context = browser.new_context(viewport={"width": width, "height": 900})
-            login = context.request.post(BASE + "/login", form={"username": "admin", "password": "admin"}, max_redirects=0)
+            login = context.request.post(BASE + "/login", form={"username": "admin", "password": ADMIN_PASSWORD}, max_redirects=0)
             assert login.status == 303
             page = context.new_page()
             page.goto(BASE + "/admin/plugins")

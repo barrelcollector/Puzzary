@@ -1,9 +1,11 @@
 """Isolated migration, access, lifecycle, UI and restart coverage for issue #83."""
 import os
+from qa_runtime import qa_directory
 
-os.environ["DATABASE_URL"] = "sqlite:///C:/Temp/puzzary-scheduled-qa.sqlite"
+qa_root = qa_directory("scheduled-publication")
+os.environ["DATABASE_URL"] = f"sqlite:///{(qa_root / 'scheduled.sqlite').as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-scheduled-secret"
-os.environ["UPLOAD_DIR"] = "C:/Temp/puzzary-scheduled-uploads"
+os.environ["UPLOAD_DIR"] = str(qa_root / "uploads")
 os.environ["PUZZARY_TIMEZONE"] = "America/New_York"
 
 import base64
