@@ -8,6 +8,9 @@
 
     {% if error %}<p class="notice danger">{{ error }}</p>{% endif %}
     {% if message %}<p class="notice">{{ message }}</p>{% endif %}
+    {% if bootstrap_admin_pending %}
+    <p class="notice">First-time administrator setup is waiting. Open the one-time setup link created during deployment before signing in.</p>
+    {% endif %}
 
     {% if oidc_providers %}
     <div class="oidc-login-options" aria-label="Single sign-on options">

@@ -4,13 +4,23 @@
 </div>
       {% if request.query_params.get("error") %}<p class="notice danger">{{ request.query_params.get("error") }}</p>{% endif %}
       {% if request.query_params.get("message") %}<p class="notice">{{ request.query_params.get("message") }}</p>{% endif %}
-      {% if request.query_params.get("setup_token") %}
-        <section class="panel">
+        <section id="password-setup-delivery" class="panel" hidden>
           <h2>Password setup link</h2>
-          <p class="muted">Give this one-time link to {{ request.query_params.get("setup_user") }}. It expires in 24 hours.</p>
-          <input readonly value="{{ request.url_for('password_setup_page') }}?token={{ request.query_params.get('setup_token') }}">
+          <p class="muted">Give this one-time link to <span data-setup-user></span>. It expires in 24 hours.</p>
+          <input data-setup-link readonly value="">
         </section>
-      {% endif %}
+        <script>
+        (() => {
+          const params = new URLSearchParams(window.location.hash.slice(1));
+          const token = params.get("setup_token") || "";
+          if (!token) return;
+          const panel = document.getElementById("password-setup-delivery");
+          panel.querySelector("[data-setup-user]").textContent = params.get("setup_user") || "this user";
+          panel.querySelector("[data-setup-link]").value = `${window.location.origin}/password/setup#token=${encodeURIComponent(token)}`;
+          panel.hidden = false;
+          history.replaceState(null, "", window.location.pathname + window.location.search);
+        })();
+        </script>
       {% if request.query_params.get("api_token") %}
         <section class="panel">
           <h2>API token</h2>

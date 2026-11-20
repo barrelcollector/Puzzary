@@ -103,14 +103,25 @@ http://localhost:8790/admin/users
 
 Admins can create users, assign the Admin role, activate/deactivate accounts, reset passwords with one-time setup links, and revoke active sessions. Puzzary prevents demoting or deactivating the last active administrator.
 
-Fresh installations and existing databases always have a default admin account:
+Fresh installations create an `admin` account without a password and issue an
+expiring, one-time setup link. With Docker Compose, retrieve it from the
+private application data volume:
 
-```text
-username: admin
-password: admin
+```bash
+docker compose exec app cat /data/bootstrap-admin-setup.txt
 ```
 
-Change that password after first login. Existing installations are migrated in place; the oldest existing user still becomes an admin if no admin exists.
+Open the link, choose the first administrator password, and then sign in
+normally. The token is stored in the database only as a hash, expires after 24
+hours, cannot be reused, and its delivery file is deleted after successful
+setup. The setup link is not printed in container logs. If it expires before
+use, restart the app container to issue a replacement. Set
+`PUZZARY_BOOTSTRAP_ADMIN_NAME` before the first start to use a name other than
+`admin`.
+
+Existing installations are migrated in place without replacing passwords or
+accounts. If an older database has users but no administrator, its oldest user
+is promoted while retaining that account's password.
 
 Admins can issue per-account API tokens from the Users page. Tokens are shown once, then stored only as hashes. Use **Rotate API Token** on that account's Security tab to replace the credential; rotation immediately invalidates the previous token.
 
