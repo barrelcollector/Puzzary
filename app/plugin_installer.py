@@ -40,7 +40,8 @@ def test_github_access(token: str, repository: str = OFFICIAL_PLUGIN_REPOSITORY)
         headers=github_headers(clean_token),
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        # The request uses the fixed HTTPS GitHub API base.
+        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
             payload = json.load(response)
     except HTTPError as error:
         if error.code == 401:
@@ -93,7 +94,8 @@ def download_release(url: str, destination: Path, github_token: str | None = Non
             f"https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}",
             headers=api_headers,
         )
-        with urllib.request.urlopen(release_request, timeout=60) as response:
+        # The request uses the fixed HTTPS GitHub API base.
+        with urllib.request.urlopen(release_request, timeout=60) as response:  # nosec B310
             release = json.load(response)
         asset = next((item for item in release.get("assets", []) if item.get("name") == asset_name), None)
         if asset is None:
@@ -101,7 +103,8 @@ def download_release(url: str, destination: Path, github_token: str | None = Non
         download_url = asset["url"]
         headers = github_headers(token, asset=True)
     request = urllib.request.Request(download_url, headers=headers)
-    with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as output:
+    # The caller validates a pinned HTTPS GitHub release URL before this request.
+    with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as output:  # nosec B310
         total = 0
         while chunk := response.read(1024 * 1024):
             total += len(chunk)

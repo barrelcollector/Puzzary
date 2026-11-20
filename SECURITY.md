@@ -22,6 +22,12 @@ https://github.com/barrelcollector/Puzzary/security/advisories/new
 Include affected versions, prerequisites, reproduction steps, impact and any
 suggested mitigation. Do not include credentials or production user data.
 
+If GitHub does not show the private reporting form while the repository is
+still private, wait until public release or contact the maintainer through an
+existing private channel. Never fall back to a public issue. Private
+vulnerability reporting will be enabled as part of the repository's public
+release settings.
+
 The maintainer will acknowledge a report as soon as practical, validate its
 scope, coordinate a fix and publication timeline, and credit reporters who want
 public recognition. Please allow time for a supported release before publicly

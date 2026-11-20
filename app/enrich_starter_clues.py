@@ -31,7 +31,7 @@ def get_or_create_tag(db, tag_type: str, name: str) -> PuzzleTag | None:
     if tag is not None:
         return tag
     slug_base = slugify(f"{tag_type}-{name}")
-    slug = slug_base if len(slug_base) <= 80 else f"{slug_base[:69]}-{sha1(slug_base.encode()).hexdigest()[:10]}"
+    slug = slug_base if len(slug_base) <= 80 else f"{slug_base[:69]}-{sha1(slug_base.encode(), usedforsecurity=False).hexdigest()[:10]}"
     tag = PuzzleTag(tag_type=tag_type, name=name, slug=slug)
     db.add(tag)
     db.flush()
@@ -40,7 +40,8 @@ def get_or_create_tag(db, tag_type: str, name: str) -> PuzzleTag | None:
 
 def datamuse_definition(word: str) -> tuple[str, str] | None:
     url = "https://api.datamuse.com/words?" + urllib.parse.urlencode({"sp": word, "md": "d", "max": "1"})
-    with urllib.request.urlopen(url, timeout=12) as response:
+    # This URL is constructed from the fixed HTTPS Datamuse endpoint above.
+    with urllib.request.urlopen(url, timeout=12) as response:  # nosec B310
         rows = json.loads(response.read().decode("utf-8"))
     if not rows or not rows[0].get("defs"):
         return None
