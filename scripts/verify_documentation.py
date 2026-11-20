@@ -7,6 +7,8 @@ readme = (root / "README.md").read_text(encoding="utf-8")
 deployment = (root / "docs/docker-deployment.md").read_text(encoding="utf-8")
 modules = (root / "docs/puzzle-modules.md").read_text(encoding="utf-8")
 env_example = (root / ".env.example").read_text(encoding="utf-8")
+license_text = (root / "LICENSE").read_text(encoding="utf-8")
+notice = (root / "NOTICE").read_text(encoding="utf-8")
 docs = "\n".join(
     path.read_text(encoding="utf-8")
     for path in [root / "README.md", *sorted((root / "docs").glob("*.md"))]
@@ -38,6 +40,14 @@ for marker in (
     assert marker in modules, marker
 
 assert "replace every change-* value" in env_example
+assert "Apache License" in license_text and "Version 2.0" in license_text
+for policy in ("NOTICE", "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md"):
+    assert (root / policy).is_file(), policy
+assert "Puzzary contributors" in notice
+assert "app/static/icons/LICENSE" in notice
+assert "content_packs/english-wordnet-5000-v1/licenses/" in notice
+dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+assert "COPY LICENSE NOTICE /licenses/puzzary/" in dockerfile
 assert not re.search(r"\b(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)", docs)
 assert ("home " + "assistant") not in docs.lower()
 assert ("puzzary-home-" + "assistant") not in docs.lower()

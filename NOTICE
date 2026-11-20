@@ -1,0 +1,16 @@
+Puzzary
+Copyright 2026 Puzzary contributors
+
+This product includes software developed for the Puzzary project.
+
+Puzzary includes Lucide icons under the ISC License, with some icons derived
+from Feather under the MIT License. The complete notice is distributed at
+app/static/icons/LICENSE.
+
+The optional English dictionary content pack contains material under licenses
+separate from Apache-2.0, including the Princeton WordNet license and CC BY-SA
+4.0. Its complete attribution and license texts are distributed under
+content_packs/english-wordnet-5000-v1/licenses/.
+
+Third-party Python and browser dependencies retain their own licenses. Nothing
+in this NOTICE changes or replaces those licenses.
