@@ -21,10 +21,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          open_issues=$(gh api "repos/$GITHUB_REPOSITORY/issues?milestone=1&state=open&per_page=100" --jq 'length')
+          # The release task (#95) and readiness tracker (#98) close only after
+          # this job publishes and verifies the checksummed artifact. Every
+          # other milestone issue must already be closed.
+          open_issues=$(gh api "repos/$GITHUB_REPOSITORY/issues?milestone=1&state=open&per_page=100" \
+            --jq '[.[] | select(.number != 95 and .number != 98)] | length')
           if [ "$open_issues" -ne 0 ]; then
             echo "The v0.1.0 Public Beta milestone still has $open_issues open item(s)."
-            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=1&state=open&per_page=100" --jq '.[] | "#\(.number) \(.title)"'
+            gh api "repos/$GITHUB_REPOSITORY/issues?milestone=1&state=open&per_page=100" \
+              --jq '.[] | select(.number != 95 and .number != 98) | "#\(.number) \(.title)"'
             exit 1
           fi
       - name: Verify release metadata
