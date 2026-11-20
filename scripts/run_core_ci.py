@@ -15,6 +15,7 @@ CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
     "portable": (
         ("-m", "compileall", "-q", "app", "scripts"),
         ("scripts/verify_documentation.py",),
+        ("scripts/verify_release_metadata.py",),
         ("scripts/verify_branding.py",),
         ("scripts/verify_minesweeper.py",),
         ("scripts/verify_nonogram.py",),

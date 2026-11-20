@@ -1,0 +1,43 @@
+name: Beta release proof
+
+on:
+  pull_request:
+    paths:
+      - "VERSION"
+      - ".dockerignore"
+      - ".env.example"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "app/**"
+      - "scripts/prove_beta_release.py"
+      - "scripts/verify_release_metadata.py"
+      - "docs/docker-deployment.md"
+      - "docs/releases/**"
+      - "CHANGELOG.md"
+      - ".github/workflows/beta-release-proof.yml"
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Git revision used to create the pre-upgrade fixture
+        required: false
+        default: HEAD^
+
+permissions:
+  contents: read
+
+jobs:
+  release-proof:
+    name: Clean install and upgrade proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify release metadata
+        run: PYTHONPATH=. python scripts/verify_release_metadata.py
+      - name: Prove clean install and upgrade
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref || github.event.pull_request.base.sha || 'HEAD^' }}
+        run: python scripts/prove_beta_release.py --baseline-ref "$BASELINE_REF"

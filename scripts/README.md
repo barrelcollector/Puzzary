@@ -27,6 +27,19 @@ configured installation or expect an existing server at port 8790 and must
 only be run against an installation selected by the operator. Deployment
 validation is likewise performed by the deployment procedure, not by core CI.
 
+## Beta release proof
+
+`python scripts/prove_beta_release.py --baseline-ref <revision>` is a destructive
+Docker check that refuses to run while containers named `puzzary` or
+`puzzary-db` exist. In disposable directories it creates production-shaped data
+with the selected baseline revision, upgrades that data with the candidate, and
+then performs a separate clean installation. It verifies first-run setup and
+login, all ten bundled games, official-module installation, upload persistence,
+PDF printing, application/image version agreement, and upgrade preservation.
+
+The **Beta release proof** workflow runs this check for release-affecting pull
+requests. It does not publish or tag a release.
+
 ## GitHub Actions
 
 The **Core validation** workflow runs on every pull request and every push to

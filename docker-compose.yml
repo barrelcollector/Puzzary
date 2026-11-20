@@ -1,6 +1,9 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        PUZZARY_VERSION: "${PUZZARY_VERSION:?Copy .env.example to .env before building Puzzary}"
     container_name: puzzary
     restart: unless-stopped
     ports:
