@@ -16,7 +16,7 @@ env:
 jobs:
   python-matrix:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -37,7 +37,7 @@ jobs:
 
   security-regressions:
     name: Security regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -56,7 +56,7 @@ jobs:
 
   plugin-regressions:
     name: Plugin regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -75,7 +75,7 @@ jobs:
 
   postgres-regressions:
     name: PostgreSQL regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
