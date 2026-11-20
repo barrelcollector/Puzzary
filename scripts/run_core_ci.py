@@ -19,7 +19,6 @@ CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("scripts/verify_minesweeper.py",),
         ("scripts/verify_nonogram.py",),
         ("scripts/verify_takuzu.py",),
-        ("scripts/verify_word_search_grid.py",),
         ("scripts/verify_external_plugins.py",),
     ),
     "security": (
@@ -27,6 +26,7 @@ CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("scripts/verify_solution_privacy.py",),
         ("scripts/verify_oidc.py",),
         ("scripts/verify_transport_security.py",),
+        ("scripts/verify_word_search_grid.py",),
     ),
     "plugins": (
         ("scripts/verify_plugin_management.py",),

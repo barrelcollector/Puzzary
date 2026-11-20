@@ -13,6 +13,7 @@ from pathlib import Path
 db_path = Path(tempfile.gettempdir()) / f"puzzary-solution-privacy-{uuid.uuid4().hex}.sqlite"
 os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
 os.environ["SESSION_SECRET"] = "isolated-solution-privacy-test-secret"
+os.environ["UPLOAD_DIR"] = str(db_path.parent / "solution-privacy-uploads")
 
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
