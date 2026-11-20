@@ -19,9 +19,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_GAMES = (
-    "Cross Equations", "Crossword", "Maze", "Minesweeper", "Nonogram",
-    "Spell It", "Sudoku", "Takuzu", "Word Pyramid", "Word Search",
+EXPECTED_GAME_SLUGS = (
+    "cross_equations", "crossword", "maze", "minesweeper", "nonogram",
+    "spell_it", "sudoku", "takuzu", "word_pyramid", "word_search",
 )
 PASSWORD = "Beta-release-proof-2026!"
 PNG = base64.b64decode(
@@ -160,8 +160,8 @@ def exercise_install(source: Path, base_url: str, project: str, version: str | N
     administrator = login(base_url)
     with administrator.open(base_url + "/generate", timeout=30) as response:
         generate_html = response.read().decode()
-    for label in EXPECTED_GAMES:
-        assert label in generate_html, label
+    for slug in EXPECTED_GAME_SLUGS:
+        assert f'value="{slug}"' in generate_html, slug
 
     with post_form(administrator, base_url + "/web/puzzles/generate", {
         "puzzle_type": "maze", "theme": "Beta Proof", "difficulty": "easy", "seed": "beta-proof",
