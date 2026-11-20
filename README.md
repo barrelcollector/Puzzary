@@ -604,7 +604,20 @@ Migration preserves existing administrators and existing player generation/hosti
 
 ## AI Assistance Disclosure
 
-This project includes AI-assisted scaffolding, implementation, and testing.
+This project includes substantial AI-assisted scaffolding, implementation,
+testing and documentation. Human contributors remain responsible for reviewing,
+understanding and licensing accepted changes. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Puzzary application code is licensed under the
+[Apache License 2.0](LICENSE). Copyright 2026 Puzzary contributors.
+
+The optional dictionary content pack and bundled third-party assets retain
+their own licenses. See [NOTICE](NOTICE), `app/static/icons/LICENSE`, and the
+license files under `content_packs/english-wordnet-5000-v1/licenses/`. The
+Apache license does not grant permission to use project names or branding
+beyond describing the origin of the software.
 ## Word-bank transfers
 
 Word Banks includes an import wizard for UTF-8 TXT, CSV and JSON, pasted data,
