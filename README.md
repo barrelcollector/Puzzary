@@ -154,10 +154,12 @@ publication behavior, HTTPS requirements, device management, and VAPID key
 handling.
 
 Eligible solo puzzles can be saved per browser with **Available offline** and
-managed from **Offline** in the main navigation. Progress persists without a
-connection and synchronizes when the server returns; changed server progress
-requires an explicit conflict choice. Protected, hidden, scheduled, archived,
-guest, and Group Solve content stays online-only. See [offline puzzle
+managed from **Offline** in the main navigation. They can be played and checked
+without a connection, and progress synchronizes when the server returns;
+changed server progress requires an explicit conflict choice. Puzzle owners
+can disable offline play for sensitive individual puzzles, which prevents the
+offline checking commitment from being downloaded. Protected, hidden,
+scheduled, archived, guest, and Group Solve content stays online-only. See [offline puzzle
 play](docs/offline-puzzle-play.md) for storage, validation, security, and plugin
 requirements.
 

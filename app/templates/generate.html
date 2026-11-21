@@ -66,6 +66,14 @@
       <input name="seed" placeholder="Blank makes a new layout">
     </label>
     <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
+    <label>
+      Offline play
+      <select name="offline_allowed">
+        <option value="true">Allow complete offline play</option>
+        <option value="false">Disable offline play for this puzzle</option>
+      </select>
+      <small class="muted">When supported by the module, allowing offline play downloads a salted solution commitment so players can check their solve without the server.</small>
+    </label>
     <div data-generation-fields></div>
     {% if can_owned(current_user,'puzzles','publish',current_user.id) and can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
       Do not publish until
