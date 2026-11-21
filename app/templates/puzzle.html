@@ -183,7 +183,7 @@
 {% endif %}
 <script src="/static/celebration.js?v=4"></script>
 <script src="/static/group-solve.js?v=17"></script>
-<script src="/static/puzzle-actions.js?v=3"></script>
-{% if offline_eligible %}<script src="/static/offline-puzzles.js?v=1"></script>{% endif %}
+<script src="/static/puzzle-actions.js?v=4"></script>
+{% if offline_eligible %}<script src="/static/offline-puzzles.js?v=2"></script>{% endif %}
 {% if puzzle_type_definition and puzzle_type_definition.play_script %}<script src="{{ puzzle_type_definition.play_script if puzzle_type_definition.play_script.startswith('/') else '/static/' ~ puzzle_type_definition.play_script }}"></script>{% endif %}
 {% endblock %}

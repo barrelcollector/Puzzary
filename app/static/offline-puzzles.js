@@ -24,6 +24,38 @@
   }
   hydrateOfflineProgress();
 
+  function stableStringify(value) {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+    if (value && typeof value === "object") return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+    return JSON.stringify(value);
+  }
+
+  function verificationState(progress, mode) {
+    const answers = progress?.answers && typeof progress.answers === "object" ? progress.answers : {};
+    const normalized = Object.fromEntries(Object.entries(answers)
+      .map(([key, value]) => [String(key), String(value)])
+      .filter(([_key, value]) => mode !== "filled_cells" || value === "1"));
+    return {answers: normalized};
+  }
+
+  window.PuzzaryOfflineCheck = async progress => {
+    const node = document.getElementById("puzzary-offline-verification");
+    if (!node) return {available: false, correct: false, message: "This puzzle does not include an offline checker."};
+    let verification = {};
+    try { verification = JSON.parse(node.textContent || "{}"); } catch (_error) { return {available: false, correct: false, message: "The offline checker could not be read."}; }
+    if (verification.method === "local_rules") return {available: false, correct: false, message: "Use this puzzle's local rule checker."};
+    if (verification.method !== "solution_hash" || !verification.salt || !verification.digest || !crypto.subtle) return {available: false, correct: false, message: "This puzzle needs a connection to check."};
+    const canonical = stableStringify(verificationState(progress, verification.hash_mode || "exact"));
+    const bytes = new TextEncoder().encode(`${verification.salt}\n${canonical}`);
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map(value => value.toString(16).padStart(2, "0")).join("");
+    const correct = hash === verification.digest;
+    return {
+      available: true,
+      correct,
+      message: correct ? "Solution checks out offline. Server confirmation is pending." : "That solution is not complete or correct yet.",
+    };
+  };
+
   function setStatus(message, danger = false) {
     if (!status) return;
     status.textContent = message;

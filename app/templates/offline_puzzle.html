@@ -5,15 +5,16 @@
   <div><h1>{{ puzzle.title }}</h1><p class="muted">Offline copy · {{ puzzle.puzzle_type }}</p></div>
   <a class="ghost-link" href="/offline">Offline puzzles</a>
 </section>
-<p class="notice" data-offline-status role="status" aria-live="polite">You can play without a connection. Progress is stored on this device; completion is confirmed by the server after synchronization.</p>
+<p class="notice" data-offline-status role="status" aria-live="polite">You can play and check this puzzle without a connection. Progress is stored on this device; completion is recorded on your account after synchronization.</p>
 <div id="puzzle-play-context" data-puzzle="{{ puzzle.id }}" data-group="false" hidden></div>
 <section class="puzzle-layout">
   <div class="panel">{% if has_puzzle_template %}{% include puzzle_template %}{% endif %}</div>
-  <aside class="side"><div class="panel"><h2>Offline play</h2><p class="muted">Checks, hints, reveals, uploads, and Group Solve need a connection. Local rule checks may still be available when this module supports them.</p><a class="button-link" href="/offline">Manage downloads</a></div></aside>
+  <aside class="side"><div class="panel"><h2>Offline play</h2><p class="muted">Whole-puzzle checks work offline. Hints, reveals, uploads, and Group Solve need a connection.</p><a class="button-link" href="/offline">Manage downloads</a></div></aside>
 </section>
 <script type="application/json" id="puzzary-offline-progress">{{ {"found_words": progress_found_words, "answers": progress_answers} | tojson }}</script>
+<script type="application/json" id="puzzary-offline-verification">{{ offline_verification | tojson }}</script>
 <script>document.body.dataset.offlinePuzzleId = {{ puzzle.id | tojson }};</script>
-<script src="/static/puzzle-actions.js?v=3"></script>
-<script src="/static/offline-puzzles.js?v=1"></script>
+<script src="/static/puzzle-actions.js?v=4"></script>
+<script src="/static/offline-puzzles.js?v=2"></script>
 {% if puzzle_type_definition and puzzle_type_definition.play_script %}<script src="{{ puzzle_type_definition.play_script if puzzle_type_definition.play_script.startswith('/') else '/static/' ~ puzzle_type_definition.play_script }}"></script>{% endif %}
 {% endblock %}

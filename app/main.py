@@ -748,6 +748,7 @@ def serialize_puzzle(puzzle: Puzzle, db: Session | None = None) -> PuzzleSummary
         password_protected=bool(puzzle.access_password_hash),
         publication_state=puzzle_publication_state(puzzle),
         publish_at=puzzle.publish_at,
+        offline_allowed=not bool((puzzle.puzzle_metadata or {}).get("offline_disabled")),
     )
 
 
@@ -1002,6 +1003,7 @@ def manual_payload_from_form(
     access_password: str = "",
     remove_access_password: bool = False,
     publish_at: str = "",
+    offline_allowed: bool = True,
 ) -> PuzzleManualWrite:
     hint_lines = [line.strip() for line in hints.splitlines() if line.strip()]
     if not title.strip():
@@ -1023,6 +1025,7 @@ def manual_payload_from_form(
         access_password=access_password,
         remove_access_password=remove_access_password,
         publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
+        offline_allowed=offline_allowed,
     )
 
 
@@ -1046,6 +1049,7 @@ def write_manual_puzzle(
     metadata["manual"] = True
     metadata["draft"] = bool(payload.draft)
     metadata["visibility"] = payload.visibility
+    metadata["offline_disabled"] = not payload.offline_allowed
     metadata["manual_updated_at"] = utcnow().isoformat()
     now = datetime.now(timezone.utc)
     creating = puzzle is None
@@ -1785,6 +1789,7 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "offline_progress_fields": list(puzzle_type.offline_progress_fields),
         "offline_notes": puzzle_type.offline_notes,
         "offline_validation": puzzle_type.offline_validation,
+        "offline_hash_mode": puzzle_type.offline_hash_mode,
         "collaboration_fields": [serialize_generation_field(field) for field in puzzle_type.collaboration_fields],
         "digital_only": puzzle_type.digital_only,
         "supports_gimmes": puzzle_type.supports_gimmes,
@@ -1866,6 +1871,7 @@ def build_manual_payload_from_helper(
     access_password: str = "",
     remove_access_password: bool = False,
     publish_at: str = "",
+    offline_allowed: bool = True,
 ) -> PuzzleManualWrite:
     puzzle_type = get_puzzle_type(puzzle_type_slug)
     if puzzle_type is None or not is_puzzle_type_enabled(db, puzzle_type_slug):
@@ -1903,6 +1909,7 @@ def build_manual_payload_from_helper(
         access_password=access_password,
         remove_access_password=remove_access_password,
         publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
+        offline_allowed=offline_allowed,
     )
 
 
@@ -3337,6 +3344,9 @@ def offline_puzzle_version(puzzle: Puzzle) -> str:
         "module_version": package.version if package else "",
         "play_script": plugin.play_script if plugin else "",
         "offline_progress_fields": list(plugin.offline_progress_fields) if plugin else [],
+        "offline_validation": plugin.offline_validation if plugin else "server",
+        "offline_hash_mode": plugin.offline_hash_mode if plugin else "exact",
+        "offline_disabled": bool((puzzle.puzzle_metadata or {}).get("offline_disabled")),
     }
     return hashlib.sha256(
         json.dumps(public_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -3349,6 +3359,10 @@ def offline_puzzle_eligibility(puzzle: Puzzle, user) -> tuple[bool, str]:
         return False, "Guest sessions stay online-only."
     if plugin is None or not plugin.supports_offline:
         return False, "This puzzle module does not support offline play."
+    if plugin.offline_validation == "server":
+        return False, "This puzzle module has not declared a complete offline checker."
+    if (puzzle.puzzle_metadata or {}).get("offline_disabled"):
+        return False, "Offline play is disabled for this puzzle."
     if not can_discover(user, puzzle, play=True):
         return False, "Only currently published library puzzles can be downloaded."
     archive_at = puzzle.auto_archive_at
@@ -3360,6 +3374,29 @@ def offline_puzzle_eligibility(puzzle: Puzzle, user) -> tuple[bool, str]:
     if puzzle.access_password_hash:
         return False, "Password-protected puzzles stay online-only."
     return True, ""
+
+
+def offline_verification(puzzle: Puzzle) -> dict:
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    if plugin is None:
+        raise HTTPException(409, "Puzzle module unavailable.")
+    if plugin.offline_validation == "local_rules":
+        return {"method": "local_rules"}
+    if plugin.offline_validation != "solution_hash" or plugin.offline_solution_state is None:
+        raise HTTPException(409, "This puzzle does not have a complete offline checker.")
+    expected = plugin.offline_solution_state(deepcopy(puzzle.solution_payload or {}))
+    if not isinstance(expected, dict):
+        raise HTTPException(409, "The puzzle module returned an invalid offline verification state.")
+    salt = secrets.token_hex(16)
+    canonical = json.dumps(expected, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(f"{salt}\n{canonical}".encode("utf-8")).hexdigest()
+    return {
+        "method": "solution_hash",
+        "algorithm": "SHA-256",
+        "salt": salt,
+        "digest": digest,
+        "hash_mode": plugin.offline_hash_mode,
+    }
 
 
 @app.get("/health")
@@ -4062,6 +4099,7 @@ async def web_generate_puzzle(
     seed: str = Form(""),
     publish_at: str = Form(""),
     auto_archive_at: str | None = Form(None),
+    offline_allowed: bool = Form(True),
     db: Session = Depends(get_db),
 ):
     user = require_web_user(request, db)
@@ -4086,6 +4124,7 @@ async def web_generate_puzzle(
             seed=seed or None,
             generation_options=generation_options_from_form(form),
             publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
+            offline_allowed=offline_allowed,
         ),
         db,
         creator=user,
@@ -5436,6 +5475,7 @@ async def admin_create_manual_puzzle(
     visibility: str = Form("public"),
     access_password: str = Form(""),
     publish_at: str = Form(""),
+    offline_allowed: bool = Form(True),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -5444,7 +5484,7 @@ async def admin_create_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, False, publish_at)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, False, publish_at, offline_allowed)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -5463,6 +5503,7 @@ async def admin_create_manual_puzzle(
                 access_password,
                 False,
                 publish_at,
+                offline_allowed,
             )
         puzzle = write_manual_puzzle(db, payload, user)
     except ValueError as error:
@@ -5491,6 +5532,7 @@ async def admin_update_manual_puzzle(
     access_password: str = Form(""),
     remove_access_password: bool = Form(False),
     publish_at: str = Form(""),
+    offline_allowed: bool = Form(True),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -5502,7 +5544,7 @@ async def admin_update_manual_puzzle(
     try:
         form = await request.form()
         if editor_mode == "helper":
-            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, remove_access_password, publish_at)
+            payload = build_manual_payload_from_helper(db, puzzle_type, title, theme, difficulty, completion_message, draft, form, visibility, access_password, remove_access_password, publish_at, offline_allowed)
         else:
             payload = manual_payload_from_form(
                 puzzle_type,
@@ -5521,6 +5563,7 @@ async def admin_update_manual_puzzle(
                 access_password,
                 remove_access_password,
                 publish_at,
+                offline_allowed,
             )
         puzzle = write_manual_puzzle(db, payload, user, puzzle)
     except ValueError as error:
@@ -5742,6 +5785,7 @@ async def admin_update_puzzle_metadata(
     visibility: str = Form("public"),
     access_password: str = Form(""),
     remove_access_password: bool = Form(False),
+    offline_allowed: bool = Form(True),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -5759,6 +5803,7 @@ async def admin_update_puzzle_metadata(
             raise HTTPException(status_code=422, detail=str(error)) from error
         metadata = dict(puzzle.puzzle_metadata or {})
         metadata['visibility'] = 'unlisted' if visibility == 'unlisted' else 'public'
+        metadata['offline_disabled'] = not offline_allowed
         puzzle.puzzle_metadata = metadata
         try:
             update_puzzle_access_password(puzzle, access_password, remove_access_password)
@@ -5795,6 +5840,7 @@ async def admin_generate_puzzle(
     excluded_tag_ids: list[int] = Form(default=[]),
     auto_archive_at: str | None = Form(None),
     publish_at: str = Form(""),
+    offline_allowed: bool = Form(True),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -5828,6 +5874,7 @@ async def admin_generate_puzzle(
             visibility="unlisted" if visibility == "unlisted" else "public",
             access_password=access_password,
             publish_at=parse_local_datetime(publish_at, "Publication date/time") if publish_at.strip() else None,
+            offline_allowed=offline_allowed,
         ),
         db,
         creator=user,
@@ -6574,6 +6621,7 @@ def offline_play_context(request: Request, db: Session, puzzle: Puzzle, user) ->
         "has_puzzle_template": template_exists(puzzle_template_name),
         "hide_app_chrome": True,
         "offline_copy": True,
+        "offline_verification": offline_verification(puzzle),
     }
 
 
@@ -7817,6 +7865,7 @@ def create_puzzle_record(
         require_owned(creator, 'puzzles', 'schedule', creator.id)
     generated.metadata['draft'] = draft
     generated.metadata['visibility'] = payload.visibility
+    generated.metadata['offline_disabled'] = not payload.offline_allowed
     puzzle = Puzzle(
         id=uuid.uuid4().hex[:12],
         puzzle_type=payload.puzzle_type,
@@ -8422,8 +8471,8 @@ def get_offline_package(puzzle_id: str, request: Request, db: Session = Depends(
     assets = [
         "/static/styles.css?v=54",
         "/static/pwa.js?v=2",
-        "/static/puzzle-actions.js?v=3",
-        "/static/offline-puzzles.js?v=1",
+        "/static/puzzle-actions.js?v=4",
+        "/static/offline-puzzles.js?v=2",
         "/static/brand/puzzary-mark.svg?v=1",
     ]
     if play_script:
@@ -8441,6 +8490,7 @@ def get_offline_package(puzzle_id: str, request: Request, db: Session = Depends(
         "offline_progress_fields": list(puzzle_type.offline_progress_fields),
         "completion_requires_sync": True,
         "offline_validation": puzzle_type.offline_validation,
+        "offline_hash_mode": puzzle_type.offline_hash_mode,
     }
 
 

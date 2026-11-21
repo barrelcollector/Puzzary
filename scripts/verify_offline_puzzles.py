@@ -36,17 +36,21 @@ def normalize(payload, solution):
     return {'answers': {str(k): str(v) for k, v in answers.items()} if isinstance(answers, dict) else {}}
 def count(progress, solution):
     return (1 if (progress or {}).get('answers', {}).get('value') == solution.get('answer') else 0, 1)
+def offline_solution(solution):
+    return {'answers': {'value': str(solution.get('answer', ''))}}
 def generate(*args, **kwargs):
     return GeneratedPuzzle('Offline test', 'Enter a value.', {}, {}, {'answer':'correct'}, [], {})
 register_puzzle_type(PuzzleType(slug='offline_test', label='Offline Test', generator=generate,
     source_builder=lambda *_: {}, answer_checker=lambda answer, solution: (False,1,0),
     progress_normalizer=normalize, progress_counter=count, supports_print=False,
     play_script='/plugins/offline_test/static/play.js?v=1', supports_offline=True,
-    offline_progress_fields=('answers',), offline_notes='Progress works offline.'))
+    offline_progress_fields=('answers',), offline_validation='solution_hash',
+    offline_solution_state=offline_solution, offline_notes='Progress and checks work offline.'))
 """, encoding="utf-8")
 (PACKAGE / "templates" / "puzzle_types" / "offline_test.html").write_text("""
 <div class="offline-test" data-answers='{{ progress_answers | tojson }}' data-progress-url="/api/puzzles/{{ puzzle.id }}/progress">
   <label>Value <input data-offline-value autocomplete="off"></label>
+  <button type="button" data-offline-check>Check</button>
   <p class="muted" role="status" data-test-status>Ready.</p>
 </div>
 """, encoding="utf-8")
@@ -54,7 +58,9 @@ register_puzzle_type(PuzzleType(slug='offline_test', label='Offline Test', gener
 (() => { const root=document.querySelector('.offline-test'); if(!root)return;
 const input=root.querySelector('input'),status=root.querySelector('[data-test-status]');
 try{input.value=JSON.parse(root.dataset.answers||'{}').value||'';}catch(_e){}
-input.addEventListener('change',async()=>{const r=await fetch(root.dataset.progressUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answers:{value:input.value}})});status.textContent=r.ok?'Saved.':'Save failed.';}); })();
+window.PuzzarySolo?.register({read:()=>({value:input.value}),apply:state=>{input.value=state.answers?.value||'';}});
+root.querySelector('[data-offline-check]').addEventListener('click',()=>window.PuzzarySolo?.action('check'));
+input.addEventListener('change',async()=>{const r=await fetch(root.dataset.progressUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answers:{value:input.value}})});status.textContent=r.ok?'Saved.':'Save failed.';});root.dataset.ready='true'; })();
 """, encoding="utf-8")
 
 BASE = "http://127.0.0.1:8823"
@@ -93,6 +99,7 @@ with SessionLocal() as db:
         Puzzle(id="offline-public", title="Offline Public", puzzle_metadata={}, **common),
         Puzzle(id="offline-protected", title="Offline Protected", puzzle_metadata={}, access_password_hash=hash_password("Puzzle-test-123"), **common),
         Puzzle(id="offline-hidden", title="Offline Hidden", puzzle_metadata={"visibility": "unlisted"}, **common),
+        Puzzle(id="offline-disabled", title="Offline Disabled", puzzle_metadata={"offline_disabled": True}, **common),
         Puzzle(id="offline-scheduled", title="Offline Scheduled", puzzle_metadata={}, publish_at=datetime.now(timezone.utc) + timedelta(days=1), **common),
     ])
     db.commit()
@@ -112,6 +119,8 @@ try:
         browser = playwright.chromium.launch(headless=True)
         desktop = browser.new_context(service_workers="allow", viewport={"width": 1280, "height": 900})
         desktop.add_cookies([{"name": "session", "value": session_cookie(user_id), "url": BASE}])
+        admin_context = browser.new_context()
+        admin_context.add_cookies([{"name": "session", "value": session_cookie(admin_id), "url": BASE}])
         page = desktop.new_page()
         for _ in range(120):
             try:
@@ -136,11 +145,30 @@ try:
 
         assert desktop.request.get(BASE + "/api/puzzles/offline-protected/offline-package").status == 423
         assert desktop.request.get(BASE + "/api/puzzles/offline-hidden/offline-package").status == 409
+        disabled = desktop.request.get(BASE + "/api/puzzles/offline-disabled/offline-package")
+        assert disabled.status == 409 and "disabled" in disabled.text().lower() and "digest" not in disabled.text().lower()
+        enabled = admin_context.request.post(BASE + "/admin/puzzles/offline-disabled/metadata", form={
+            "category_id": 0, "completion_message": "", "visibility": "public", "offline_allowed": "true",
+        }, max_redirects=0)
+        assert enabled.status == 303 and desktop.request.get(BASE + "/api/puzzles/offline-disabled/offline-package").ok
+        disabled_again = admin_context.request.post(BASE + "/admin/puzzles/offline-disabled/metadata", form={
+            "category_id": 0, "completion_message": "", "visibility": "public", "offline_allowed": "false",
+        }, max_redirects=0)
+        assert disabled_again.status == 303
+        blocked_again = desktop.request.get(BASE + "/api/puzzles/offline-disabled/offline-package")
+        assert blocked_again.status == 409 and "digest" not in blocked_again.text().lower()
         assert desktop.request.get(BASE + "/api/puzzles/offline-scheduled/offline-package").status == 403
 
         desktop.set_offline(True)
         page.goto(BASE + "/puzzles/offline-public", wait_until="domcontentloaded")
         assert "Offline copy" in page.locator("body").inner_text()
+        page.wait_for_function("document.querySelector('.offline-test')?.dataset.ready === 'true'")
+        page.locator("[data-offline-value]").fill("wrong")
+        page.locator("[data-offline-check]").click()
+        page.wait_for_function("document.querySelector('[data-test-status]').textContent.includes('not complete')")
+        page.locator("[data-offline-value]").fill("correct")
+        page.locator("[data-offline-check]").click()
+        page.wait_for_function("document.querySelector('[data-test-status]').textContent.includes('checks out offline')")
         page.locator("[data-offline-value]").fill("device-value")
         page.locator("[data-offline-value]").dispatch_event("change")
         page.wait_for_function("document.querySelector('[data-test-status]').textContent === 'Saved.'")

@@ -334,6 +334,7 @@
               {% if publication_state == 'scheduled' %}<small>Publishes at {{ local_datetime_label(puzzle.publish_at) }} ({{ puzzary_timezone }})</small>{% endif %}
               {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("visibility") == "unlisted" %}<span class="status-pill">Unlisted</span>{% endif %}
               {% if puzzle.access_password_hash %}<span class="status-pill">Password protected</span>{% endif %}
+              {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("offline_disabled") %}<span class="status-pill">Offline disabled</span>{% endif %}
               {% if puzzle.auto_archive_at %}
                 <small>Auto-archives at {{ local_datetime_label(puzzle.auto_archive_at) }}</small>
               {% endif %}
@@ -378,6 +379,14 @@
                   <option value="unlisted" {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("visibility") == "unlisted" %}selected{% endif %}>Unlisted: signed-in direct link only</option>
                 </select>
                 <small class="muted">Unlisted puzzles stay out of search, latest, publishing, and the public Group Solve lobby.</small>
+              </label>
+              <label>
+                Offline play
+                <select name="offline_allowed">
+                  <option value="true" {% if not puzzle.puzzle_metadata or not puzzle.puzzle_metadata.get("offline_disabled") %}selected{% endif %}>Allow complete offline play</option>
+                  <option value="false" {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("offline_disabled") %}selected{% endif %}>Disable offline play and solution commitment downloads</option>
+                </select>
+                <small class="muted">Disable this for a puzzle whose answer must never be distributed as a salted verification hash.</small>
               </label>
               <label>
                 Completion message
@@ -452,6 +461,7 @@
             {% if publication_state == 'scheduled' %}<small>Publishes at {{ local_datetime_label(selected_puzzle.publish_at) }} ({{ puzzary_timezone }})</small>{% endif %}
             {% if manual_meta.get("visibility") == "unlisted" %}<span class="status-pill">Unlisted</span>{% endif %}
             {% if selected_puzzle.access_password_hash %}<span class="status-pill">Password protected</span>{% endif %}
+            {% if manual_meta.get("offline_disabled") %}<span class="status-pill">Offline disabled</span>{% endif %}
           {% endif %}
         </div>
         {% if is_edit %}
@@ -512,6 +522,14 @@
             <option value="unlisted" {% if manual_meta.get("visibility") == "unlisted" %}selected{% endif %}>Unlisted: signed-in direct link only</option>
           </select>
           <small class="muted">This is separate from draft status. Unlisted published puzzles can be played by signed-in users with the direct link.</small>
+        </label>
+        <label>
+          Offline play
+          <select name="offline_allowed">
+            <option value="true" {% if not is_edit or not manual_meta.get("offline_disabled") %}selected{% endif %}>Allow complete offline play</option>
+            <option value="false" {% if is_edit and manual_meta.get("offline_disabled") %}selected{% endif %}>Disable offline play and solution commitment downloads</option>
+          </select>
+          <small class="muted">Supported modules use a salted commitment for offline checking. Disable this when even that verification material must stay on the server.</small>
         </label>
         <label>
           Puzzle access password
@@ -633,6 +651,14 @@
             <input name="seed" placeholder="Blank makes a new layout">
           </label>
           <p class="muted">Use the same seed to recreate the same puzzle. Leave it blank for a fresh one.</p>
+          <label>
+            Offline play
+            <select name="offline_allowed">
+              <option value="true">Allow complete offline play</option>
+              <option value="false">Disable offline play for this puzzle</option>
+            </select>
+            <small class="muted">Supported modules download a salted solution commitment for offline checking. Disable this for sensitive answers.</small>
+          </label>
           <div data-generation-fields></div>
           {% if can_owned(current_user,'puzzles','publish',current_user.id) and can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>
             Do not publish until
