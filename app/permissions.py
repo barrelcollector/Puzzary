@@ -196,6 +196,10 @@ def authorize_request(request, db, user, administrative=False):
         require(user,ROUTE_PERMISSIONS[name]); return
     if path.startswith('/account/') or path in ['/account','/login','/logout','/password/setup']:
         return
+    if path == '/offline':
+        require(user, 'library.view'); return
+    if path.startswith('/offline/puzzles/'):
+        require(user, 'library.view'); require(user, 'puzzles.play'); return
     if path == '/api/account/stats':
         require(user, 'library.view'); return
     if path == '/api/print/manifest':

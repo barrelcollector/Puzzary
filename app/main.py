@@ -128,6 +128,7 @@ from app.schemas import (
     PuzzleGenerateRequest,
     PuzzleProgressResponse,
     PuzzleProgressUpdate,
+    OfflineProgressSync,
     PuzzlePlayAction,
     PuzzleImportRequest,
     PluginInstallRequest,
@@ -1780,6 +1781,10 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "supports_print": puzzle_type.supports_print,
         "supports_web_play": puzzle_type.supports_web_play,
         "supports_group_solve": puzzle_type.collaboration is not None,
+        "supports_offline": puzzle_type.supports_offline,
+        "offline_progress_fields": list(puzzle_type.offline_progress_fields),
+        "offline_notes": puzzle_type.offline_notes,
+        "offline_validation": puzzle_type.offline_validation,
         "collaboration_fields": [serialize_generation_field(field) for field in puzzle_type.collaboration_fields],
         "digital_only": puzzle_type.digital_only,
         "supports_gimmes": puzzle_type.supports_gimmes,
@@ -3290,6 +3295,7 @@ def progress_response(puzzle: Puzzle, user: User, progress: PuzzleProgress | Non
             answers={},
             expected_count=0,
             found_count=0,
+            revision=progress_revision(progress),
         )
     found_count, expected_count = puzzle_type.progress_counter(progress_payload, puzzle.solution_payload)
     return PuzzleProgressResponse(
@@ -3299,7 +3305,61 @@ def progress_response(puzzle: Puzzle, user: User, progress: PuzzleProgress | Non
         answers=progress_payload.get("answers", {}) if isinstance(progress_payload.get("answers", {}), dict) else {},
         expected_count=expected_count,
         found_count=found_count,
+        revision=progress_revision(progress),
     )
+
+
+def progress_revision(progress: PuzzleProgress | None) -> str:
+    if progress is None:
+        return "none"
+    value = progress.updated_at
+    timestamp = ""
+    if value is not None:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        timestamp = value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    material = json.dumps(progress.progress_payload or {}, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(f"{timestamp}\n{material}".encode("utf-8")).hexdigest()
+
+
+def offline_puzzle_version(puzzle: Puzzle) -> str:
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    package = LOADED_PACKAGES.get(puzzle.puzzle_type)
+    public_payload = {
+        "id": puzzle.id,
+        "type": puzzle.puzzle_type,
+        "title": puzzle.title,
+        "prompt": puzzle.prompt,
+        "completion_message": puzzle.completion_message,
+        "play_payload": public_play_payload(puzzle),
+        "publish_at": puzzle.publish_at.isoformat() if puzzle.publish_at else None,
+        "archived_at": puzzle.archived_at.isoformat() if puzzle.archived_at else None,
+        "module_version": package.version if package else "",
+        "play_script": plugin.play_script if plugin else "",
+        "offline_progress_fields": list(plugin.offline_progress_fields) if plugin else [],
+    }
+    return hashlib.sha256(
+        json.dumps(public_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def offline_puzzle_eligibility(puzzle: Puzzle, user) -> tuple[bool, str]:
+    plugin = get_puzzle_type(puzzle.puzzle_type)
+    if getattr(user, "is_guest", False):
+        return False, "Guest sessions stay online-only."
+    if plugin is None or not plugin.supports_offline:
+        return False, "This puzzle module does not support offline play."
+    if not can_discover(user, puzzle, play=True):
+        return False, "Only currently published library puzzles can be downloaded."
+    archive_at = puzzle.auto_archive_at
+    if archive_at is not None:
+        if archive_at.tzinfo is None:
+            archive_at = archive_at.replace(tzinfo=timezone.utc)
+        if archive_at <= utcnow():
+            return False, "Archived puzzles cannot be downloaded."
+    if puzzle.access_password_hash:
+        return False, "Password-protected puzzles stay online-only."
+    return True, ""
 
 
 @app.get("/health")
@@ -6481,6 +6541,61 @@ def group_invite(group_id: str, db: Session = Depends(get_db)):
     return RedirectResponse(f'/puzzles/{group.puzzle_id}?group={group.id}', status_code=303)
 
 
+@app.get("/offline", response_class=HTMLResponse)
+def offline_library(request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    return templates.TemplateResponse(request, "offline_library.html", {
+        "request": request,
+        "current_user": user,
+    })
+
+
+def offline_play_context(request: Request, db: Session, puzzle: Puzzle, user) -> dict:
+    progress = progress_record_for_user(db, puzzle, user)
+    progress_payload = progress.progress_payload if progress is not None else {}
+    progress_answers = progress_payload.get("answers", {})
+    if not isinstance(progress_answers, dict):
+        progress_answers = {}
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    puzzle_template_name = f"puzzle_types/{puzzle.puzzle_type}.html"
+    return {
+        "request": request,
+        "puzzle": puzzle,
+        "play_payload": public_play_payload(puzzle),
+        "current_user": user,
+        "progress_found_words": found_words_for_progress(progress),
+        "progress_payload": progress_payload,
+        "progress_answers": progress_answers,
+        "group_id": "",
+        "puzzle_type_definition": puzzle_type,
+        "puzzle_template": puzzle_template_name,
+        "has_puzzle_template": template_exists(puzzle_template_name),
+        "hide_app_chrome": True,
+        "offline_copy": True,
+    }
+
+
+@app.get("/offline/puzzles/{puzzle_id}", response_class=HTMLResponse)
+def offline_puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
+    user = require_web_user(request, db)
+    if isinstance(user, RedirectResponse):
+        return user
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(404, "Puzzle not found")
+    eligible, reason = offline_puzzle_eligibility(puzzle, user)
+    if not eligible:
+        raise HTTPException(409, reason)
+    require_series_access(db, puzzle, user, series_group_for_request(request, db, puzzle))
+    response = templates.TemplateResponse(
+        request, "offline_puzzle.html", offline_play_context(request, db, puzzle, user)
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.get("/puzzles/{puzzle_id}", response_class=HTMLResponse)
 def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db)):
     group_id = request.query_params.get('group', '')
@@ -6572,6 +6687,10 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
     solution_template_name = f"puzzle_solutions/{puzzle.puzzle_type}.html"
     has_puzzle_template = template_exists(puzzle_template_name)
     has_solution_template = template_exists(solution_template_name)
+    offline_eligible, offline_reason = offline_puzzle_eligibility(puzzle, user)
+    if group_id:
+        offline_eligible = False
+        offline_reason = "Group Solve stays online-only."
     return_to = safe_library_return_to(request.query_params.get("return_to", "/library"))
     return templates.TemplateResponse(
         request,
@@ -6601,6 +6720,8 @@ def puzzle_page(puzzle_id: str, request: Request, db: Session = Depends(get_db))
                 context["current"]["entry"].completion_message for context in series_contexts
                 if context["current"] and context["current"]["entry"].completion_message
             ), ""),
+            "offline_eligible": offline_eligible,
+            "offline_reason": offline_reason,
         },
     )
 
@@ -8280,6 +8401,101 @@ def get_progress(puzzle_id: str, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Puzzle not found")
     progress = progress_record_for_user(db, puzzle, user)
     return progress_response(puzzle, user, progress)
+
+
+@app.get("/api/puzzles/{puzzle_id}/offline-package")
+def get_offline_package(puzzle_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    user = require_api_user(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(404, "Puzzle not found")
+    eligible, reason = offline_puzzle_eligibility(puzzle, user)
+    if not eligible:
+        raise HTTPException(409, reason)
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    if puzzle_type is None or not template_exists(f"puzzle_types/{puzzle.puzzle_type}.html"):
+        raise HTTPException(409, "This puzzle does not have an offline-compatible play view.")
+    progress = progress_record_for_user(db, puzzle, user)
+    play_script = puzzle_type.play_script or ""
+    if play_script and not play_script.startswith("/"):
+        play_script = f"/static/{play_script}"
+    assets = [
+        "/static/styles.css?v=54",
+        "/static/pwa.js?v=2",
+        "/static/puzzle-actions.js?v=3",
+        "/static/offline-puzzles.js?v=1",
+        "/static/brand/puzzary-mark.svg?v=1",
+    ]
+    if play_script:
+        assets.append(play_script)
+    response = progress_response(puzzle, user, progress)
+    return {
+        "puzzle_id": puzzle.id,
+        "title": puzzle.title,
+        "puzzle_type": puzzle.puzzle_type,
+        "canonical_url": f"/puzzles/{puzzle.id}",
+        "download_url": f"/offline/puzzles/{puzzle.id}",
+        "assets": assets,
+        "puzzle_version": offline_puzzle_version(puzzle),
+        "progress": response.model_dump(),
+        "offline_progress_fields": list(puzzle_type.offline_progress_fields),
+        "completion_requires_sync": True,
+        "offline_validation": puzzle_type.offline_validation,
+    }
+
+
+@app.post("/api/puzzles/{puzzle_id}/offline-sync")
+def sync_offline_progress(
+    puzzle_id: str,
+    payload: OfflineProgressSync,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = require_api_user(request, db)
+    puzzle = db.get(Puzzle, puzzle_id)
+    if puzzle is None:
+        raise HTTPException(404, "Puzzle not found")
+    eligible, reason = offline_puzzle_eligibility(puzzle, user)
+    if not eligible:
+        raise HTTPException(410, reason)
+    puzzle_type = get_puzzle_type(puzzle.puzzle_type)
+    if puzzle_type is None:
+        raise HTTPException(410, "Puzzle module unavailable.")
+    current_version = offline_puzzle_version(puzzle)
+    if payload.puzzle_version != current_version:
+        raise HTTPException(409, detail={
+            "conflict": "puzzle_updated",
+            "message": "The puzzle changed while this copy was offline. Use the server copy or download it again.",
+            "puzzle_version": current_version,
+        })
+    db.scalar(select(User).where(User.id == user.id).with_for_update())
+    progress = progress_record_for_user(db, puzzle, user, create=True)
+    current_revision = progress_revision(progress)
+    if not payload.force and payload.base_revision != current_revision:
+        server = progress_response(puzzle, user, progress)
+        raise HTTPException(409, detail={
+            "conflict": "server_changed",
+            "message": "Progress changed on another device while this copy was offline.",
+            "server_progress": server.model_dump(),
+        })
+    permitted = {
+        field: getattr(payload.progress, field)
+        for field in puzzle_type.offline_progress_fields
+    }
+    normalized_payload = PuzzleProgressUpdate.model_validate(permitted)
+    before = deepcopy(progress.progress_payload or {})
+    progress.progress_payload = (
+        puzzle_type.progress_merger(normalized_payload, puzzle.solution_payload, before)
+        if puzzle_type.progress_merger else puzzle_type.progress_normalizer(normalized_payload, puzzle.solution_payload)
+    )
+    record_progress_transition(db, puzzle, user.id, puzzle_type, before, progress.progress_payload)
+    db.commit()
+    db.refresh(progress)
+    return {
+        "status": "synced",
+        "puzzle_version": current_version,
+        "progress": progress_response(puzzle, user, progress).model_dump(),
+    }
 
 
 @app.post("/api/puzzles/{puzzle_id}/progress", response_model=PuzzleProgressResponse)

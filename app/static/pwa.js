@@ -26,8 +26,17 @@
     navigator.serviceWorker.controller?.postMessage({ type: "CLEAR_USER_DATA" });
   }
 
+  function configureWorker(registration) {
+    const worker = navigator.serviceWorker.controller || registration?.active;
+    worker?.postMessage({ type: "SET_USER_SCOPE", scope });
+    if (navigator.onLine) worker?.postMessage({ type: "SYNC_OFFLINE_PROGRESS" });
+  }
+
   showConnectivity();
-  window.addEventListener("online", showConnectivity);
+  window.addEventListener("online", () => {
+    showConnectivity();
+    navigator.serviceWorker.controller?.postMessage({ type: "SYNC_OFFLINE_PROGRESS" });
+  });
   window.addEventListener("offline", showConnectivity);
 
   const scope = document.body.dataset.userScope || "anonymous";
@@ -37,6 +46,7 @@
   document.querySelector('form[action="/logout"]')?.addEventListener("submit", clearUserData);
 
   navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).then((registration) => {
+    configureWorker(registration);
     if (registration.waiting) showUpdate(registration.waiting);
     registration.addEventListener("updatefound", () => {
       const worker = registration.installing;
@@ -52,6 +62,7 @@
     waitingWorker?.postMessage({ type: "SKIP_WAITING" });
   });
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    configureWorker();
     if (refreshRequested) window.location.reload();
   });
 

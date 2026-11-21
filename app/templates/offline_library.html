@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Offline puzzles - Puzzary{% endblock %}
+{% block content %}
+<section class="puzzle-head">
+  <div><h1>Offline puzzles</h1><p class="muted">Saved only in this browser for your account.</p></div>
+  <a class="ghost-link" href="/library">Back to Library</a>
+</section>
+<section class="panel stacked-form">
+  <h2>Device storage</h2>
+  <label>Maximum saved puzzles <input type="number" min="1" max="100" value="20" data-offline-limit></label>
+  <p class="muted" data-offline-storage>Checking browser storage…</p>
+  <div class="action-row"><button type="button" data-offline-sync>Sync now</button></div>
+  <p class="notice" data-offline-status role="status" aria-live="polite" hidden></p>
+</section>
+<section class="panel">
+  <h2>Saved puzzles</h2>
+  <div class="list" data-offline-list><p class="muted">Loading saved puzzles…</p></div>
+</section>
+<script src="/static/offline-puzzles.js?v=1"></script>
+{% endblock %}

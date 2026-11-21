@@ -40,7 +40,7 @@ worker_source = (ROOT / "app" / "static" / "notification-service-worker.js").rea
 for marker in (
     'addEventListener("install"', 'addEventListener("activate"', 'addEventListener("fetch"',
     'addEventListener("push"', 'addEventListener("notificationclick"', "SKIP_WAITING",
-    "CLEAR_USER_DATA", "API responses and authenticated HTML are deliberately always network-only",
+    "CLEAR_USER_DATA", "DOWNLOAD_OFFLINE_PUZZLE", "SYNC_OFFLINE_PROGRESS",
 ):
     assert marker in worker_source, marker
 assert "caches.match(request)" not in worker_source

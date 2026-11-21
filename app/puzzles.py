@@ -87,6 +87,10 @@ class PuzzleType:
     progress_merger: Callable[[Any, dict, dict], dict] | None = None
     private_metadata_keys: tuple[str, ...] = ()
     supports_solution_reveal: bool = True
+    supports_offline: bool = False
+    offline_progress_fields: tuple[str, ...] = ()
+    offline_notes: str = ""
+    offline_validation: str = "server"
 
 
 def fallback_preview(kind: str, label: str) -> dict:
@@ -103,6 +107,17 @@ _PUZZLE_TYPES_LOADED = False
 
 
 def register_puzzle_type(puzzle_type: PuzzleType) -> PuzzleType:
+    allowed_offline_fields = {"answers", "found_words"}
+    if puzzle_type.supports_offline:
+        if not puzzle_type.supports_web_play:
+            raise ValueError("offline puzzle types must support web play")
+        if not puzzle_type.offline_progress_fields:
+            raise ValueError("offline puzzle types must declare serializable progress fields")
+        unsupported = set(puzzle_type.offline_progress_fields) - allowed_offline_fields
+        if unsupported:
+            raise ValueError(f"unsupported offline progress fields: {', '.join(sorted(unsupported))}")
+        if puzzle_type.offline_validation not in {"server", "local_rules"}:
+            raise ValueError("offline validation must be server or local_rules")
     if puzzle_type.slug in PUZZLE_TYPES:
         raise ValueError(f"Puzzle type already registered: {puzzle_type.slug}")
     PUZZLE_TYPES[puzzle_type.slug] = puzzle_type
