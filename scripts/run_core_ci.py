@@ -14,8 +14,10 @@ from bootstrap_official_plugins import install as install_official_plugins
 
 CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
     "portable": (
-        ("-m", "compileall", "-q", "app", "scripts"),
+        ("-m", "compileall", "-q", "app", "migrations", "scripts"),
         ("scripts/verify_documentation.py",),
+        ("scripts/verify_schema_migrations.py",),
+        ("scripts/verify_group_guest_migration.py",),
         ("scripts/verify_release_metadata.py",),
         ("scripts/verify_module_ownership.py",),
         ("scripts/verify_branding.py",),

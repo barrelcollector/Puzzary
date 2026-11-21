@@ -17,7 +17,8 @@ from pathlib import Path
 from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from sqlalchemy import inspect, select
-from app.database import Base, engine, SessionLocal, init_db
+from app.database import Base, engine, SessionLocal
+from app.schema_migrations import upgrade_database
 from app.models import User, Puzzle, PuzzleActivityEvent, PuzzleHint, PuzzleProgress, PuzzleAttempt, PermissionRole
 from app.permissions import initialize_permissions
 from app.main import hash_secret, hash_password, SESSION_SECRET
@@ -27,7 +28,7 @@ from app.user_activity import account_activity, progress_states
 Base.metadata.drop_all(engine)
 Base.metadata.create_all(engine)
 PuzzleActivityEvent.__table__.drop(engine)
-init_db()
+upgrade_database()
 assert 'puzzle_activity_events' in inspect(engine).get_table_names()
 with SessionLocal() as db:
     admin = User(display_name='admin', is_admin=True, is_active=True, password_hash=hash_password('isolated-activity-password'))
@@ -82,7 +83,7 @@ with SessionLocal() as db:
         from app.schemas import PuzzleProgressUpdate
         assert not _changed_from_starters(plugin.progress_normalizer(PuzzleProgressUpdate.model_validate(payload),solution),baseline),slug
     assert _changed_from_starters({'answers':{'0,0':'0'}},{'answers':{}})
-init_db()
+upgrade_database()
 
 base='http://127.0.0.1:8793'
 def cookie(uid):

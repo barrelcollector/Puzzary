@@ -6,7 +6,8 @@ qa_root = qa_directory('group-guest-migration')
 os.environ['DATABASE_URL'] = f"sqlite:///{(qa_root / 'migration.sqlite').as_posix()}"
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text, inspect
-from app.database import Base, engine, SessionLocal, ensure_schema
+from app.database import Base, engine, SessionLocal
+from app.schema_migrations import upgrade_database
 from app.models import User, Puzzle, GroupSolve, GroupMember, GroupAction
 
 Base.metadata.drop_all(engine)
@@ -42,8 +43,8 @@ with engine.begin() as conn:
         CONSTRAINT uq_group_action UNIQUE (group_id, action_id))'''))
     conn.execute(text("INSERT INTO group_members (id,group_id,user_id,status,focus) VALUES (1,'migration-group',:uid,'active','0,0')"), {'uid': uid})
     conn.execute(text("INSERT INTO group_actions (id,group_id,action_id,user_id,revision,kind,changes) VALUES (1,'migration-group','migration-action',:uid,3,'patch',:changes)"), {'uid': uid, 'changes': '{"0,0":"1"}'})
-ensure_schema()
-ensure_schema()
+upgrade_database()
+upgrade_database()
 with SessionLocal() as db:
     group = db.get(GroupSolve, 'migration-group')
     assert not group.allow_guests and group.revision == 3 and group.state['answers']['0,0'] == '1'

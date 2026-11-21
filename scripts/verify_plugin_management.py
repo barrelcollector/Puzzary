@@ -121,6 +121,12 @@ with patch("app.plugin_installer.urllib.request.urlopen", return_value=GitHubRes
     sent_request = github_request.call_args.args[0]
     assert sent_request.headers["Authorization"] == "Bearer write-only-test-token"
 
+subprocess.run(
+    [sys.executable, "-m", "app.schema_migrations"],
+    cwd=ROOT,
+    env=environment,
+    check=True,
+)
 server = subprocess.Popen(
     [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8818"],
     cwd=ROOT,

@@ -22,7 +22,8 @@ from websockets.sync.client import connect
 from websockets.exceptions import ConnectionClosed
 from sqlalchemy import select, text
 from fastapi import HTTPException
-from app.database import Base, engine, SessionLocal, ensure_schema, init_db
+from app.database import Base, engine, SessionLocal
+from app.schema_migrations import upgrade_database
 from app.models import User, Puzzle, PuzzleProgress, PermissionRole, PermissionAudit
 from app.permissions import initialize_permissions, effective_permissions, require, lock_permissions, protect_last_admin, register_permission, register_route_permission, ADMIN_CORE
 from app.main import hash_password, hash_secret, SESSION_SECRET, ensure_admin_user
@@ -43,7 +44,7 @@ with SessionLocal() as db:
 with engine.begin() as connection:
     connection.execute(text('ALTER TABLE users DROP COLUMN permissions_initialized'))
     connection.execute(text('ALTER TABLE users DROP COLUMN permission_overrides'))
-ensure_schema(); init_db()
+upgrade_database()
 with SessionLocal() as db:
     initialize_permissions(db)
     assert db.get(User,admin_id).can('roles.manage')

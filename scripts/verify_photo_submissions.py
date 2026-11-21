@@ -27,7 +27,8 @@ from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from sqlalchemy import inspect, select, text
 
-from app.database import Base, SessionLocal, engine, ensure_schema
+from app.database import Base, SessionLocal, engine
+from app.schema_migrations import upgrade_database
 from app.main import PHOTO_UPLOAD_MAX_BYTES, SESSION_SECRET, hash_password
 from app.models import PermissionRole, Puzzle, PuzzleActivityEvent, PuzzleAttempt, PuzzlePhoto, User
 from app.permissions import initialize_permissions
@@ -49,7 +50,7 @@ with engine.begin() as connection:
         )
     """))
 assert "attempt_id" not in {column["name"] for column in inspect(engine).get_columns("puzzle_photos")}
-ensure_schema()
+upgrade_database()
 assert "attempt_id" in {column["name"] for column in inspect(engine).get_columns("puzzle_photos")}
 with SessionLocal() as db:
     admin = User(

@@ -65,10 +65,25 @@ your only database backup.
 
 ## Schema migrations and upgrades
 
-Puzzary creates missing tables and applies its built-in, idempotent schema
-migrations during application startup. There is no separate Alembic command.
-Back up the database before running a newer revision; do not run an older image
-against a database that has already been migrated by newer code.
+Puzzary uses versioned Alembic migrations. The container entrypoint runs all
+pending revisions before starting the web process. The web application lifecycle
+does not issue schema DDL. A fresh database is created at the baseline;
+an existing unversioned Puzzary database is stamped in place and upgraded without
+rebuilding populated tables. The supported direct upgrade path is the published
+`v0.1.0-beta.1` schema or any later pre-Alembic main revision to the current
+release. For an older or modified schema, first restore a copy and test the exact
+upgrade there.
+
+Create and validate a database backup before every upgrade. You can inspect the
+installed revision after startup with:
+
+```bash
+docker compose exec app alembic current
+```
+
+Do not run an older image against a database that has been migrated by newer
+code. Baseline and compatibility revisions intentionally have no in-place
+downgrade because recreating removed constraints or columns can lose data.
 
 ```bash
 docker compose stop app

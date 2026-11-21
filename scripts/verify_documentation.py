@@ -19,7 +19,9 @@ assert "docs/puzzle-modules.md" in readme
 for marker in (
     "docker compose up -d --build",
     "./data/postgres",
-    "built-in, idempotent schema",
+    "versioned Alembic migrations",
+    "alembic current",
+    "v0.1.0-beta.1",
     "pg_dump",
     "pg_restore --list",
     "pg_restore --clean --if-exists",
