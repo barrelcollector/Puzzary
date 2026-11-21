@@ -158,6 +158,12 @@ def multipart_upload(opener: urllib.request.OpenerDirector, url: str) -> None:
 def exercise_install(source: Path, base_url: str, project: str, version: str | None) -> str:
     administrator = setup_admin(source, base_url, project)
     administrator = login(base_url)
+    for slug in EXPECTED_GAME_SLUGS:
+        with post_form(administrator, base_url + "/admin/plugins/install-official", {"slug": slug}) as response:
+            assert "installed" in urllib.parse.unquote(response.geturl()).lower(), (slug, response.geturl())
+    compose(source, project, "restart", "app")
+    wait_for_health(base_url, version)
+    administrator = login(base_url)
     with administrator.open(base_url + "/generate", timeout=30) as response:
         generate_html = response.read().decode()
     for slug in EXPECTED_GAME_SLUGS:
@@ -180,11 +186,6 @@ def exercise_install(source: Path, base_url: str, project: str, version: str | N
     )
     assert uploaded
 
-    with post_form(administrator, base_url + "/admin/plugins/install-official", {"slug": "word_search"}) as response:
-        assert "Installed" in urllib.parse.unquote(response.geturl())
-    compose(source, project, "restart", "app")
-    wait_for_health(base_url, version)
-    administrator = login(base_url)
     with administrator.open(base_url + "/admin/plugins", timeout=30) as response:
         assert "GitHub package" in response.read().decode()
     return puzzle_id
@@ -195,6 +196,7 @@ def assert_upgrade(source: Path, base_url: str, project: str, puzzle_id: str, ve
     administrator = login(base_url)
     with administrator.open(base_url + f"/puzzles/{puzzle_id}", timeout=30) as response:
         assert response.status == 200
+        assert "Puzzle module unavailable." not in response.read().decode()
     uploaded = run(
         "docker", "compose", "--project-name", project, "exec", "-T", "app", "sh", "-c",
         f"find /data/uploads/{puzzle_id} -type f -print -quit", cwd=source, capture=True,
