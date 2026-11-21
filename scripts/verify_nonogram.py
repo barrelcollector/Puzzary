@@ -4,6 +4,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types.nonogram import (
     runs, line_patterns, generate, build_manual, check_answer, normalize_progress,
 )

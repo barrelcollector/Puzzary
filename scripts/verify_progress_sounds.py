@@ -1,10 +1,12 @@
 """Offline browser checks for progress sounds in each applicable puzzle module."""
 import json
+import os
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 static = Path('/app/app/static')
+plugins = Path(os.getenv("PUZZARY_PLUGIN_DIR", "/data/plugins"))
 
 
 def attr(value):
@@ -25,7 +27,12 @@ with sync_playwright() as p:
         page.evaluate('''window.chimes=0; window.wins=0;
             window.PuzzarySounds.progress=()=>{window.chimes++};
             window.PuzzaryCelebrate={complete:()=>{window.wins++}};''')
-        page.add_script_tag(content=(static / script).read_text())
+        slug = {
+            'crossword.js': 'crossword', 'sudoku.js': 'sudoku',
+            'cross-equations.js': 'cross_equations', 'word-pyramid.js': 'word_pyramid',
+            'word-search.js': 'word_search',
+        }[script]
+        page.add_script_tag(content=(plugins / slug / 'static' / script).read_text())
         assert count() == 0
 
     def count():

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from playwright.sync_api import sync_playwright
 from starlette.templating import Jinja2Templates
 
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types.minesweeper import counts_for
 
 

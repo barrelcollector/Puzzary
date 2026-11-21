@@ -1442,7 +1442,7 @@
       <section class="puzzle-head">
         <div>
           <h1>Puzzle Plugins</h1>
-          <p class="muted">Install and manage puzzle modules. The official modules are versioned packages from GitHub; bundled copies are only a startup fallback.</p>
+          <p class="muted">Install and manage puzzle modules and shared content. Official packages come from the checksummed GitHub release catalog; core does not contain puzzle-specific fallback copies.</p>
         </div>
         <form method="post" action="/admin/plugins/install-official">
           <input type="hidden" name="slug" value="all">
@@ -1465,7 +1465,7 @@
       <section class="panel admin-section">
         <div class="section-heading">
           <div>
-            <h2>Official Modules</h2>
+            <h2>Official Modules and Content</h2>
             <p class="muted">Catalog release {{ plugin_management.official_catalog.release }} from <a href="{{ plugin_management.official_catalog.repository }}" target="_blank" rel="noopener">puzzary-official-plugins</a>.</p>
           </div>
           <span class="status-pill">Public release catalog</span>
@@ -1476,14 +1476,14 @@
               <div class="section-heading">
                 <div>
                   <h3>{{ plugin.name }}</h3>
-                  <small>{{ plugin.slug }} &middot; catalog {{ plugin.version }}</small>
+                  <small>{{ plugin.slug }} &middot; {{ plugin.package_type }} package &middot; catalog {{ plugin.version }}</small>
                 </div>
                 <span class="status-pill">{{ plugin.source }}</span>
               </div>
               <div class="list compact">
-                <div class="row"><span>Loaded version</span><strong>{{ plugin.loaded_version or "Fallback" if plugin.registered else "Not loaded" }}</strong></div>
+                <div class="row"><span>Loaded version</span><strong>{{ plugin.loaded_version or "Not loaded" }}</strong></div>
                 <div class="row"><span>Installed package</span><strong>{{ plugin.installed.version if plugin.installed else "Not installed" }}</strong></div>
-                <div class="row"><span>Generation</span><strong>{{ "Enabled" if plugin.enabled else "Disabled" }}</strong></div>
+                {% if plugin.package_type == "puzzle" %}<div class="row"><span>Generation</span><strong>{{ "Enabled" if plugin.registered and plugin.enabled else "Disabled" if plugin.registered else "Unavailable" }}</strong></div>{% endif %}
                 {% if plugin.installed %}
                 <div class="row"><span>Author / license</span><strong>{{ plugin.installed.author or "Not declared" }}{% if plugin.installed.license %} / {{ plugin.installed.license }}{% endif %}</strong></div>
                 <div class="row"><span>Core compatibility</span><strong>{{ plugin.installed.min_core_version or "Any" }} to {{ plugin.installed.max_core_version or "current" }}</strong></div>
@@ -1499,10 +1499,10 @@
                   <input type="hidden" name="slug" value="{{ plugin.slug }}">
                   <button type="submit" class="ghost-button">Update Module</button>
                 </form>
-                <form method="post" action="/admin/plugins/{{ plugin.slug }}/status">
+                {% if plugin.package_type == "puzzle" and plugin.registered %}<form method="post" action="/admin/plugins/{{ plugin.slug }}/status">
                   <input type="hidden" name="enabled" value="{{ 'false' if plugin.enabled else 'true' }}">
                   <button type="submit" class="ghost-button">{{ "Disable" if plugin.enabled else "Enable" }}</button>
-                </form>
+                </form>{% endif %}
               </div>
               {% if plugin.rollback %}
               <form method="post" action="/admin/plugins/{{ plugin.slug }}/rollback">

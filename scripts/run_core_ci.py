@@ -10,12 +10,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+from bootstrap_official_plugins import install as install_official_plugins
 
 CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
     "portable": (
         ("-m", "compileall", "-q", "app", "scripts"),
         ("scripts/verify_documentation.py",),
         ("scripts/verify_release_metadata.py",),
+        ("scripts/verify_module_ownership.py",),
         ("scripts/verify_branding.py",),
         ("scripts/verify_minesweeper.py",),
         ("scripts/verify_nonogram.py",),
@@ -42,6 +44,9 @@ def run_group(group: str) -> None:
     checks = CHECK_GROUPS[group]
     with tempfile.TemporaryDirectory(prefix=f"puzzary-ci-{group}-") as temporary:
         group_root = Path(temporary)
+        plugin_root = group_root / "official-plugins"
+        archive_directory = os.getenv("PUZZARY_OFFICIAL_PLUGIN_ARCHIVE_DIR", "").strip()
+        install_official_plugins(plugin_root, Path(archive_directory) if archive_directory else None)
         for index, arguments in enumerate(checks, start=1):
             check_root = group_root / f"{index:02d}"
             check_root.mkdir()
@@ -49,6 +54,8 @@ def run_group(group: str) -> None:
             environment.update({
                 "PYTHONPATH": str(ROOT),
                 "PUZZARY_QA_ROOT": str(check_root),
+                "PUZZARY_PLUGIN_DIR": str(plugin_root),
+                "PYTHONPYCACHEPREFIX": str(check_root / "pycache"),
                 "TEMP": str(check_root),
                 "TMP": str(check_root),
                 "TMPDIR": str(check_root),

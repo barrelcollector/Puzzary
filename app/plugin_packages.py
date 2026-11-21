@@ -33,7 +33,8 @@ class PluginPackage:
     name: str
     version: str
     path: Path
-    entrypoint: Path
+    entrypoint: Path | None
+    package_type: str = "puzzle"
     templates: Path | None = None
     static: Path | None = None
     homepage: str = ""
@@ -46,6 +47,7 @@ class PluginPackage:
     settings: tuple[dict[str, Any], ...] = ()
     min_core_version: str = ""
     max_core_version: str = ""
+    content_packs: tuple[dict[str, str], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -144,6 +146,36 @@ def _settings_schema(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(fields)
 
 
+def _content_packs(package_dir: Path, value: Any) -> tuple[dict[str, str], ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise ValueError("content packages require a non-empty content_packs list")
+    packs: list[dict[str, str]] = []
+    identifiers: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"id", "kind", "directory", "manifest"}:
+            raise ValueError("content pack entries require id, kind, directory, and manifest")
+        identifier = str(item["id"]).strip()
+        kind = str(item["kind"]).strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,127}", identifier) or identifier in identifiers:
+            raise ValueError("content pack ids must be unique lowercase identifiers")
+        if not SLUG_PATTERN.fullmatch(kind):
+            raise ValueError("content pack kind must be a lowercase identifier")
+        directory = _child_path(package_dir, str(item["directory"]), "content pack directory")
+        manifest = _child_path(package_dir, str(item["manifest"]), "content pack manifest", must_be_file=True)
+        if directory != manifest.parent and directory not in manifest.parents:
+            raise ValueError("content pack manifest must stay inside its directory")
+        packs.append({
+            "id": identifier,
+            "kind": kind,
+            "directory": str(directory),
+            "manifest": str(manifest),
+        })
+        identifiers.add(identifier)
+    return tuple(packs)
+
+
 def read_manifest(package_dir: Path) -> PluginPackage:
     manifest_path = package_dir / "puzzary-plugin.json"
     try:
@@ -182,7 +214,19 @@ def read_manifest(package_dir: Path) -> PluginPackage:
     if any(not SLUG_PATTERN.fullmatch(required) for required in requires) or slug in requires:
         raise ValueError("plugin dependencies must be other valid plugin slugs")
     settings = _settings_schema(manifest.get("settings"))
-    entrypoint = _child_path(package_dir, str(manifest.get("entrypoint", "plugin.py")), "entrypoint", must_be_file=True)
+    package_type = str(manifest.get("package_type", "puzzle")).strip()
+    if package_type not in {"puzzle", "content"}:
+        raise ValueError("package_type must be puzzle or content")
+    entrypoint = None
+    if package_type == "puzzle":
+        entrypoint = _child_path(package_dir, str(manifest.get("entrypoint", "plugin.py")), "entrypoint", must_be_file=True)
+    elif manifest.get("entrypoint"):
+        raise ValueError("content packages cannot execute an entrypoint")
+    content_packs = _content_packs(package_dir, manifest.get("content_packs"))
+    if package_type == "content" and not content_packs:
+        raise ValueError("content packages must declare content_packs")
+    if package_type == "puzzle" and content_packs:
+        raise ValueError("puzzle packages cannot declare content_packs")
 
     templates = None
     if manifest.get("templates"):
@@ -197,6 +241,7 @@ def read_manifest(package_dir: Path) -> PluginPackage:
         version=version,
         path=package_dir,
         entrypoint=entrypoint,
+        package_type=package_type,
         templates=templates,
         static=static,
         homepage=str(manifest.get("homepage", "")),
@@ -209,6 +254,7 @@ def read_manifest(package_dir: Path) -> PluginPackage:
         settings=settings,
         min_core_version=min_core_version,
         max_core_version=max_core_version,
+        content_packs=content_packs,
     )
 
 
@@ -227,6 +273,10 @@ def load_external_plugin_packages(registry: dict[str, Any]) -> None:
             package_key = package.slug
             if package.slug in LOADED_PACKAGES:
                 raise ValueError(f"duplicate external plugin slug: {package.slug}")
+            if package.package_type == "content":
+                LOADED_PACKAGES[package.slug] = package
+                LOGGER.info("Loaded Puzzary content package %s %s", package.slug, package.version)
+                continue
             previous = registry.get(package.slug)
             if previous is not None and not package.replaces_builtin:
                 raise ValueError(
@@ -252,6 +302,11 @@ def load_external_plugin_packages(registry: dict[str, Any]) -> None:
             if registered is None:
                 raise ValueError(f"entrypoint did not register puzzle type {package.slug}")
             LOADED_PACKAGES[package.slug] = package
+            compatibility_name = f"app.puzzle_types.{package.slug}"
+            sys.modules[compatibility_name] = module
+            puzzle_package = sys.modules.get("app.puzzle_types")
+            if puzzle_package is not None:
+                setattr(puzzle_package, package.slug, module)
             LOGGER.info("Loaded Puzzary plugin %s %s", package.slug, package.version)
         except Exception as exc:
             for registered_slug in registered_slugs:
@@ -260,6 +315,12 @@ def load_external_plugin_packages(registry: dict[str, Any]) -> None:
                 registry.pop(package.slug, None)
             if previous is not None and package is not None:
                 registry[package.slug] = previous
+            if package is not None:
+                compatibility_name = f"app.puzzle_types.{package.slug}"
+                sys.modules.pop(compatibility_name, None)
+                puzzle_package = sys.modules.get("app.puzzle_types")
+                if puzzle_package is not None and hasattr(puzzle_package, package.slug):
+                    delattr(puzzle_package, package.slug)
             PLUGIN_LOAD_ERRORS[package_key] = str(exc)
             LOGGER.exception("Could not load Puzzary plugin package %s", package_dir)
 
@@ -276,6 +337,14 @@ def plugin_static_directories() -> dict[str, Path]:
     }
 
 
+def plugin_content_packs() -> list[dict[str, str]]:
+    return [
+        {**pack, "package_slug": package.slug, "package_version": package.version}
+        for package in LOADED_PACKAGES.values()
+        for pack in package.content_packs
+    ]
+
+
 def official_plugin_catalog() -> dict[str, Any]:
     catalog = json.loads(OFFICIAL_CATALOG_PATH.read_text(encoding="utf-8"))
     if catalog.get("schema") != "puzzary.plugin.catalog.v1":
@@ -283,9 +352,16 @@ def official_plugin_catalog() -> dict[str, Any]:
     plugins = catalog.get("plugins")
     if not isinstance(plugins, list):
         raise ValueError("official plugin catalog must contain a plugins list")
+    seen: set[str] = set()
     for plugin in plugins:
         if not isinstance(plugin, dict) or not SLUG_PATTERN.fullmatch(str(plugin.get("slug", ""))):
             raise ValueError("official plugin catalog contains an invalid slug")
+        slug = str(plugin["slug"])
+        if slug in seen:
+            raise ValueError(f"official plugin catalog contains duplicate slug {slug}")
+        seen.add(slug)
+        if plugin.get("package_type", "puzzle") not in {"puzzle", "content"}:
+            raise ValueError(f"official plugin {slug} has an invalid package type")
         digest = str(plugin.get("sha256", ""))
         if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest.lower()):
             raise ValueError(f"official plugin {plugin['slug']} has an invalid digest")
@@ -346,6 +422,7 @@ def package_status() -> dict[str, Any]:
         "api_version": PLUGIN_API_VERSION,
         "directory": str(plugin_root()),
         "packages": [package.as_dict() for package in LOADED_PACKAGES.values()],
+        "content_packs": plugin_content_packs(),
         "installed": installed,
         "rollbacks": rollbacks,
         "official_catalog": official_plugin_catalog(),

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import pkgutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -123,17 +122,14 @@ def normalize_answer(value: str) -> set[str]:
     return {part.strip().upper() for part in parts if part.strip()}
 
 
-def load_puzzle_types(package_name: str = "app.puzzle_types") -> None:
+def load_puzzle_types() -> None:
     global _PUZZLE_TYPES_LOADED
     if _PUZZLE_TYPES_LOADED:
         return
 
-    package = importlib.import_module(package_name)
-    for module_info in pkgutil.iter_modules(package.__path__, f"{package_name}."):
-        module_name = module_info.name.rsplit(".", 1)[-1]
-        if module_name.startswith("_"):
-            continue
-        importlib.import_module(module_info.name)
+    # Keep the namespace for compatibility imports used by integration tests,
+    # but load implementations exclusively from installed packages.
+    importlib.import_module("app.puzzle_types")
     from app.plugin_packages import load_external_plugin_packages
 
     load_external_plugin_packages(PUZZLE_TYPES)

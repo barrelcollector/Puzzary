@@ -50,10 +50,30 @@ register_puzzle_type(PuzzleType('invalid_extra', 'Invalid', noop, noop, noop, no
 register_puzzle_type(PuzzleType('leaked_extra', 'Leaked', noop, noop, noop, noop, noop))
 """, encoding="utf-8")
 
+CONTENT = ROOT / "shared_dictionary"
+(CONTENT / "packs" / "example-v1").mkdir(parents=True)
+(CONTENT / "packs" / "example-v1" / "manifest.json").write_text(
+    '{"schema":"example.content.v1"}\n', encoding="utf-8"
+)
+(CONTENT / "puzzary-plugin.json").write_text(json.dumps({
+    "schema": "puzzary.plugin.v1",
+    "api_version": "1",
+    "package_type": "content",
+    "slug": "shared_dictionary",
+    "name": "Shared Dictionary",
+    "version": "1.0.0",
+    "content_packs": [{
+        "id": "example-v1",
+        "kind": "dictionary",
+        "directory": "packs/example-v1",
+        "manifest": "packs/example-v1/manifest.json",
+    }],
+}), encoding="utf-8")
+
 os.environ["PUZZARY_PLUGIN_DIR"] = str(ROOT)
 
 try:
-    from app.plugin_packages import package_status, plugin_static_directories, plugin_template_directories
+    from app.plugin_packages import package_status, plugin_content_packs, plugin_static_directories, plugin_template_directories
     from app.main import app, templates
     from app.puzzles import get_puzzle_type
 
@@ -61,6 +81,9 @@ try:
     assert puzzle_type is not None and puzzle_type.label == "Example Clock"
     status = package_status()
     assert status["packages"][0]["slug"] == "example_clock"
+    assert {package["slug"] for package in status["packages"]} == {"example_clock", "shared_dictionary"}
+    assert plugin_content_packs()[0]["id"] == "example-v1"
+    assert plugin_content_packs()[0]["package_slug"] == "shared_dictionary"
     assert "invalid_extra" in status["errors"]
     assert get_puzzle_type("invalid_extra") is None
     assert get_puzzle_type("leaked_extra") is None

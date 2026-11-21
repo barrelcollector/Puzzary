@@ -1,11 +1,13 @@
 """Offline browser regressions for protected brushes and row confirmation."""
 from pathlib import Path
 from types import SimpleNamespace
+import os
 
 from playwright.sync_api import sync_playwright
 from starlette.templating import Jinja2Templates
 
-templates = Jinja2Templates(directory='/app/app/templates')
+plugin = Path(os.getenv("PUZZARY_PLUGIN_DIR", "/data/plugins")) / "nonogram"
+templates = Jinja2Templates(directory=[plugin / "templates", Path('/app/app/templates')])
 grid = [[1, 0, 1, 0, 1], [0, 1, 0, 1, 0], [1, 0, 0, 0, 1],
         [0, 0, 1, 0, 0], [0, 0, 0, 0, 0]]
 payload = {'size':5, 'row_clues':[[1,1,1],[1,1],[1,1],[1],[0]],
@@ -30,7 +32,7 @@ with sync_playwright() as p:
               createGain(){return {gain:{setValueAtTime(){},exponentialRampToValueAtTime(v){window.peaks.push(v)}},connect(){}}}
             }; void 0;''')
         page.add_script_tag(content=Path('/app/app/static/celebration.js').read_text())
-        page.add_script_tag(content=Path('/app/app/static/nonogram.js').read_text())
+        page.add_script_tag(content=(plugin / 'static' / 'nonogram.js').read_text())
     def cell(x,y=0): return page.locator(f'button.nonogram-cell[data-key="{x},{y}"]')
     def mode(value): page.locator(f'[data-mode="{value}"]').click()
     def stroke(start, end, button='left'):
@@ -141,7 +143,7 @@ with sync_playwright() as p:
     phone.route('**/*',lambda route: route.abort())
     phone.set_content(html)
     phone.evaluate('window.fetch=async()=>({ok:true})')
-    phone.add_script_tag(content=Path('/app/app/static/nonogram.js').read_text())
+    phone.add_script_tag(content=(plugin / 'static' / 'nonogram.js').read_text())
     c=phone.locator('button.nonogram-cell').first
     c.tap(); phone.locator('[data-mode="0"]').tap(); c.tap()
     assert c.get_attribute('data-value') == '1'

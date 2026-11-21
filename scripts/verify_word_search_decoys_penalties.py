@@ -22,6 +22,7 @@ from app.database import Base, SessionLocal, engine
 from app.main import SESSION_SECRET, hash_password
 from app.models import Puzzle, User
 from app.puzzles import get_puzzle_type
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types.word_search import placement_cells, placement_signature, word_occurrences
 
 

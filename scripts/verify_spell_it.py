@@ -27,6 +27,7 @@ from app.database import Base, engine, SessionLocal
 from app.models import User, Puzzle, PuzzleAttempt, DictionaryWord, DictionaryDefinition, WordBank, WordBankWord, PermissionRole
 from app.permissions import initialize_permissions
 from app.main import SESSION_SECRET, hash_password
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types import spell_it as game
 
 

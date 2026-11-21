@@ -48,9 +48,17 @@ bundled = {
     if path.stem != "__init__"
 }
 catalog = json.loads((ROOT / "app" / "official_plugins.json").read_text(encoding="utf-8"))
-official = {plugin["slug"] for plugin in catalog["plugins"]}
-assert bundled == expected, bundled
-assert official == expected, official
+official_puzzles = {
+    plugin["slug"] for plugin in catalog["plugins"]
+    if plugin.get("package_type", "puzzle") == "puzzle"
+}
+official_content = {
+    plugin["slug"] for plugin in catalog["plugins"]
+    if plugin.get("package_type", "puzzle") == "content"
+}
+assert bundled == set(), bundled
+assert official_puzzles == expected, official_puzzles
+assert official_content == {"dictionary_content"}, official_content
 
 changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 release_notes = (ROOT / "docs" / "releases" / f"v{version}.md").read_text(encoding="utf-8")

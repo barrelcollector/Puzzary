@@ -4,6 +4,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 import unittest
 
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types.minesweeper import (
     check_answer, collaboration, count_progress, counts_for, generate,
     neighbors, normalize_progress,

@@ -1,1 +1,1 @@
-"""Puzzle type modules register themselves with app.puzzles."""
+"""Compatibility namespace populated by installed Puzzary puzzle packages."""

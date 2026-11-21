@@ -160,13 +160,13 @@ try:
         for phrase in (
             "Puzzle Plugins", "Update All Modules", "Official Modules", "Update Module",
             "Add From GitHub", "Example Clock", "Additional Installed Modules",
-            "GitHub packages loaded", "Bundled fallback", "Restore 0.9.0",
+            "GitHub packages loaded", "Unavailable", "Restore 0.9.0",
             "Public release catalog", "Trusted code only", "Upload Local Package",
             "Puzzary QA", "Apache-2.0", "puzzles.generate", "Configure",
         ):
             assert phrase in html, phrase
-        assert html.count('action="/admin/plugins/install-official"') == 11
-        assert len(re.findall(r'action="/admin/plugins/[^\"]+/status"', html)) == 11
+        assert html.count('action="/admin/plugins/install-official"') == 12
+        assert len(re.findall(r'action="/admin/plugins/[^\"]+/status"', html)) == 1
         assert "Enabled Modules" not in html
         assert html.index("Additional Installed Modules") < html.index("Add From GitHub")
         assert html.index("Add From GitHub") < html.index("Private GitHub Access")
@@ -178,7 +178,7 @@ try:
         assert 'name="disabled_puzzle_types"' not in settings.text()
 
         catalog = request.get(BASE + "/api/plugin-packages/catalog")
-        assert catalog.ok and len(catalog.json()["plugins"]) == 10
+        assert catalog.ok and len(catalog.json()["plugins"]) == 11
         status = request.get(BASE + "/api/plugin-packages")
         assert status.ok and status.json()["external_count"] == 1
         assert status.json()["custom_installed"][0]["slug"] == "example_clock"
@@ -283,12 +283,12 @@ try:
         restored_upload = request.post(BASE + "/api/plugin-packages/uploaded_timer/rollback")
         assert restored_upload.ok and restored_upload.json()["version"] == "1.0.0"
 
-        disabled = request.post(BASE + "/admin/plugins/maze/status", form={"enabled": "false"}, max_redirects=0)
+        disabled = request.post(BASE + "/admin/plugins/example_clock/status", form={"enabled": "false"}, max_redirects=0)
         assert disabled.status == 303
         disabled_page = request.get(BASE + "/admin/plugins").text()
-        assert re.search(r'action="/admin/plugins/maze/status">\s*<input type="hidden" name="enabled" value="true">', disabled_page)
-        enabled = request.patch(BASE + "/api/plugin-packages/maze", data={"enabled": True})
-        assert enabled.ok and enabled.json() == {"slug": "maze", "enabled": True}
+        assert re.search(r'action="/admin/plugins/example_clock/status">\s*<input type="hidden" name="enabled" value="true">', disabled_page)
+        enabled = request.patch(BASE + "/api/plugin-packages/example_clock", data={"enabled": True})
+        assert enabled.ok and enabled.json() == {"slug": "example_clock", "enabled": True}
         web_rollback = request.post(BASE + "/admin/plugins/example_clock/rollback", max_redirects=0)
         assert web_rollback.status == 303
         rolled_back = request.get(BASE + "/api/plugin-packages").json()
@@ -305,9 +305,9 @@ try:
             assert login.status == 303
             page = context.new_page()
             page.goto(BASE + "/admin/plugins")
-            assert page.locator(".plugin-card").count() == 12
-            assert page.locator('.plugin-card form[action$="/status"]').count() == 12
-            assert page.get_by_role("button", name="Update Module").count() == 10
+            assert page.locator(".plugin-card").count() == 13
+            assert page.locator('.plugin-card form[action$="/status"]').count() == 2
+            assert page.get_by_role("button", name="Update Module").count() == 11
             assert page.locator('form[action="/admin/plugins/install"]').is_visible()
             assert page.locator('form[action="/admin/plugins/install-upload"]').is_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")

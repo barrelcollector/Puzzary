@@ -1,9 +1,10 @@
 # Puzzle Module Contract
 
-Puzzary puzzle types are small Python modules that call
-`register_puzzle_type(...)` at startup. Core modules live under
-`app/puzzle_types/`; independently released packages live in
-`PUZZARY_PLUGIN_DIR` (default `/data/plugins`).
+Puzzary puzzle types are independently released packages that call
+`register_puzzle_type(...)` at startup. Installed packages live in
+`PUZZARY_PLUGIN_DIR` (default `/data/plugins`). Core owns the package API and
+shared services, but no canonical puzzle implementation or puzzle-specific
+asset fallback.
 
 ## External Packages
 
@@ -29,10 +30,20 @@ An installed package is one directory containing `puzzary-plugin.json`:
   ],
   "entrypoint": "plugin.py",
   "templates": "templates",
-  "static": "static",
-  "replaces_builtin": false
+  "static": "static"
 }
 ```
+
+Content-only packages use the same installer and checksum protections but do
+not execute Python. They declare `"package_type": "content"`, omit
+`entrypoint`, and provide one or more validated `content_packs` entries with an
+id, kind, directory, and manifest path. Core exposes their resolved installed
+paths through the package status API. A missing content package is reported;
+core never substitutes a stale bundled copy.
+
+The official English Dictionary Content package is the canonical example. Its
+data, build tools, verification history, and third-party license notices live at
+https://github.com/barrelcollector/puzzary-official-plugins/tree/main/plugins/dictionary_content.
 
 The entrypoint registers exactly one puzzle type matching `slug`. Templates use
 `puzzle_types/{slug}.html`, `puzzle_solutions/{slug}.html`, and
@@ -44,8 +55,8 @@ Packages execute trusted server-side Python with the same process privileges as
 Puzzary. Capability declarations are reviewed metadata, not a sandbox. Install
 only reviewed, versioned release archives and pin their published SHA-256
 digest. **Admin -> Plugins** is
-the primary management surface. It shows whether each module is running from an
-official GitHub package or the bundled startup fallback, installs one or all
+the primary management surface. It shows whether each module is loaded from an
+installed package or is unavailable, installs one or all
 official modules, gives each module its own update and enable/disable controls,
 accepts a custom GitHub release URL or local ZIP plus digest, renders declared
 configuration fields, reports load errors, supports recoverable uninstall, and
@@ -111,26 +122,29 @@ The supporting API accepts the credential only in the `PUT` request body and
 returns redacted status fields. `PUZZARY_PLUGIN_GITHUB_TOKEN` remains an optional
 server-environment fallback for recovery and existing deployments.
 
-Independently installable releases for all ten official puzzle types are
+Independently installable releases for all ten official puzzle types and shared
+content packages are
 publicly maintained at https://github.com/barrelcollector/puzzary-official-plugins.
 Official modules install and update without a GitHub credential; private access
-is only needed for additional modules hosted in private repositories. Core
-retains compatible copies only so a new or damaged installation can reach the
-web management page; normal deployments should install and load the official
-packages from the catalog.
+is only needed for additional modules hosted in private repositories. A fresh
+core installation intentionally has no puzzle implementation until packages are
+installed from **Admin -> Plugins**. Existing puzzle records remain preserved
+and show an explicit unavailable-module message if their package is missing.
 
 ## Contributor workflow
 
-1. Create `app/puzzle_types/<slug>.py`; keep the slug stable because saved
-   puzzles use it as their type identifier.
+1. Create `plugins/<slug>/puzzary-plugin.json` and `plugin.py` in the module
+   repository; keep the slug stable because saved puzzles use it as their type
+   identifier.
 2. Implement generation or manual-building behavior and register one
    `PuzzleType` as described below.
 3. Keep player-safe, printable, and secret answer data in separate payloads.
 4. Add optional web, print, solution, editor, and static assets using the
    module slug and the paths documented below.
-5. Add a focused `scripts/verify_<slug>.py` regression check. Use a temporary
-   SQLite database or another disposable database, never a shared deployment.
-6. Run the focused check, Python compilation, and `git diff --check`. If the
+5. Add focused package validation and, when core behavior is involved, a
+   `scripts/verify_<slug>.py` regression check. Use a disposable database.
+6. Run package builds, the focused check, Python compilation, and
+   `git diff --check`. If the
    module supports Group Solve, also run `scripts/verify_all_group_puzzles.py`.
 
 From the repository root with a virtual environment installed:
@@ -240,10 +254,11 @@ register_puzzle_type(
 
 ## Lifecycle
 
-1. Puzzary imports every non-private file in `app/puzzle_types/`.
-2. It validates and imports packages from `PUZZARY_PLUGIN_DIR`. A package may
-   explicitly replace a built-in type while keeping the same saved-data slug.
-3. The module registers a `PuzzleType`.
+1. Puzzary validates packages from `PUZZARY_PLUGIN_DIR`.
+2. Puzzle package entrypoints register exactly one `PuzzleType` matching their
+   manifest slug; content-only packages declare validated content pack paths and
+   execute no entrypoint.
+3. Missing or incompatible packages are reported without loading a fallback.
 4. The generation wizard reads `generation_fields`, `source_requirements`, and `theme_mode`.
 5. Puzzary validates submitted generation options against the declared fields.
 6. The module's `source_builder` receives already-filtered source data.

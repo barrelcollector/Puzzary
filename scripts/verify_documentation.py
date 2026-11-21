@@ -45,7 +45,7 @@ for policy in ("NOTICE", "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md")
     assert (root / policy).is_file(), policy
 assert "Puzzary contributors" in notice
 assert "app/static/icons/LICENSE" in notice
-assert "content_packs/english-wordnet-5000-v1/licenses/" in notice
+assert "distributed with\nthose packages" in notice
 dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
 assert "COPY LICENSE NOTICE /licenses/puzzary/" in dockerfile
 assert not re.search(r"\b(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)", docs)
