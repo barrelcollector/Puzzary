@@ -42,7 +42,7 @@ from app.content import THEMES
 from app.transport import load_transport_config
 from app.clues import properties_with_clues, stored_definition_clues
 from app.activity_events import event_summary, record_progress_transition, record_puzzle_event
-from app.database import SessionLocal, ensure_schema, get_db, init_db
+from app.database import SessionLocal, get_db
 from app.dictionary_imports import ImportedWord, fetch_dictionary_source, parse_imported_words
 from app.dictionary_queries import dictionary_statement, tag_usage_counts, word_bank_entry_counts
 from app.print_pdf import render_pdf, render_png
@@ -322,8 +322,6 @@ def template_exists(template_name: str) -> bool:
 @app.on_event("startup")
 async def startup() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    ensure_schema()
-    init_db()
     with SessionLocal() as db:
         ensure_admin_user(db)
         initialize_permissions(db)

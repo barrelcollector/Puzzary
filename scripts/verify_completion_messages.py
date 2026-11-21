@@ -22,7 +22,8 @@ from itsdangerous import TimestampSigner
 from playwright.sync_api import sync_playwright
 from sqlalchemy import inspect, text
 
-from app.database import Base, SessionLocal, engine, ensure_schema
+from app.database import Base, SessionLocal, engine
+from app.schema_migrations import upgrade_database
 from app.main import SESSION_SECRET, hash_password
 from app.models import Puzzle, User
 from app.puzzles import list_puzzle_types
@@ -31,7 +32,7 @@ from app.puzzles import list_puzzle_types
 Base.metadata.create_all(engine)
 with engine.begin() as connection:
     connection.execute(text("ALTER TABLE puzzles DROP COLUMN completion_message"))
-ensure_schema()
+upgrade_database()
 assert "completion_message" in {column["name"] for column in inspect(engine).get_columns("puzzles")}
 
 message = "Brilliant solve <together> & safely done!"

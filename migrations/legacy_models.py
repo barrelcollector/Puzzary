@@ -1,0 +1,705 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    """Frozen model metadata for the pre-Alembic compatibility revision."""
+
+    pass
+
+
+puzzle_tag_links = Table(
+    "puzzle_tag_links",
+    Base.metadata,
+    Column("puzzle_id", ForeignKey("puzzles.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
+
+
+word_bank_tag_links = Table(
+    "word_bank_tag_links",
+    Base.metadata,
+    Column("word_bank_id", ForeignKey("word_banks.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
+
+
+dictionary_word_tag_links = Table(
+    "dictionary_word_tag_links",
+    Base.metadata,
+    Column("word_id", ForeignKey("dictionary_words.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
+
+
+dictionary_definition_tag_links = Table(
+    "dictionary_definition_tag_links",
+    Base.metadata,
+    Column("definition_id", ForeignKey("dictionary_definitions.id"), primary_key=True),
+    Column("tag_id", ForeignKey("puzzle_tags.id"), primary_key=True),
+)
+
+
+user_role_links = Table(
+    'user_role_links', Base.metadata,
+    Column('user_id', ForeignKey('users.id'), primary_key=True),
+    Column('role_id', ForeignKey('permission_roles.id'), primary_key=True),
+)
+
+
+class PermissionRole(Base):
+    __tablename__ = 'permission_roles'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+    permissions: Mapped[list] = mapped_column(JSON, default=list)
+    description: Mapped[str] = mapped_column(String(255), default='')
+
+
+class PermissionAudit(Base):
+    __tablename__ = 'permission_audit'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    subject_type: Mapped[str] = mapped_column(String(40))
+    subject_id: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(80))
+    before: Mapped[dict] = mapped_column(JSON, default=dict)
+    after: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    reset_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    reset_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    api_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    api_token_prefix: Mapped[str] = mapped_column(String(12), default="")
+    api_token_last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    permissions_initialized: Mapped[bool] = mapped_column(Boolean, default=False)
+    permission_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    appearance_theme: Mapped[str] = mapped_column(String(80), default="")
+    roles: Mapped[list[PermissionRole]] = relationship(secondary=user_role_links)
+
+    def can(self, permission: str) -> bool:
+        from app.permissions import effective_permissions
+        return permission in effective_permissions(self)
+
+    @property
+    def can_manage(self) -> bool:
+        from app.permissions import management_access
+        return management_access(self)
+
+    attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="user")
+    progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="user")
+    activity_events: Mapped[list[PuzzleActivityEvent]] = relationship(back_populates="user")
+    photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="user")
+    created_puzzles: Mapped[list[Puzzle]] = relationship(back_populates="creator")
+    feed_tokens: Mapped[list[PuzzleFeedToken]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    notification_preference: Mapped[PuzzleNotificationPreference | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    push_subscriptions: Mapped[list[PushSubscription]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    puzzle_notifications: Mapped[list[PuzzleNotification]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class OIDCProvider(Base):
+    __tablename__ = "oidc_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+    issuer_url: Mapped[str] = mapped_column(String(500), unique=True, index=True)
+    client_id: Mapped[str] = mapped_column(String(255))
+    client_secret_encrypted: Mapped[str] = mapped_column(Text, default="")
+    scopes: Mapped[str] = mapped_column(String(500), default="openid profile email")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    provisioning_mode: Mapped[str] = mapped_column(String(24), default="link_only")
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_status: Mapped[str] = mapped_column(String(24), default="")
+    last_test_message: Mapped[str] = mapped_column(String(300), default="")
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OIDCIdentity(Base):
+    __tablename__ = "oidc_identities"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_oidc_identity_subject"),
+        UniqueConstraint("provider_id", "user_id", name="uq_oidc_identity_provider_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("oidc_providers.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    issuer: Mapped[str] = mapped_column(String(500), index=True)
+    subject: Mapped[str] = mapped_column(String(500), index=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(160), default="")
+    claims: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OIDCAuthAttempt(Base):
+    __tablename__ = "oidc_auth_attempts"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("oidc_providers.id", ondelete="CASCADE"), index=True)
+    intent: Mapped[str] = mapped_column(String(16), default="login")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    code_verifier_encrypted: Mapped[str] = mapped_column(Text)
+    nonce: Mapped[str] = mapped_column(String(128))
+    return_to: Mapped[str] = mapped_column(String(500), default="/library")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PuzzleFeedToken(Base):
+    __tablename__ = "puzzle_feed_tokens"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_prefix: Mapped[str] = mapped_column(String(12), default="")
+    name: Mapped[str] = mapped_column(String(120))
+    filters: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="feed_tokens")
+
+
+class Puzzle(Base):
+    __tablename__ = "puzzles"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    puzzle_type: Mapped[str] = mapped_column(String(40), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    theme: Mapped[str] = mapped_column(String(80), index=True)
+    difficulty: Mapped[str] = mapped_column(String(40), index=True)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("puzzle_categories.id"), nullable=True, index=True)
+    word_bank_id: Mapped[int | None] = mapped_column(ForeignKey("word_banks.id"), nullable=True, index=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    completion_message: Mapped[str] = mapped_column(Text, default="")
+    access_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    print_payload: Mapped[dict] = mapped_column(JSON)
+    play_payload: Mapped[dict] = mapped_column(JSON)
+    solution_payload: Mapped[dict] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String(80), default="local")
+    puzzle_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    publish_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    auto_archive_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    category: Mapped[PuzzleCategory | None] = relationship(back_populates="puzzles")
+    word_bank: Mapped[WordBank | None] = relationship(back_populates="puzzles")
+    creator: Mapped[User | None] = relationship(back_populates="created_puzzles")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=puzzle_tag_links, back_populates="puzzles")
+    hints: Mapped[list[PuzzleHint]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    attempts: Mapped[list[PuzzleAttempt]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    progress: Mapped[list[PuzzleProgress]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    activity_events: Mapped[list[PuzzleActivityEvent]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    photos: Mapped[list[PuzzlePhoto]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    group_solves: Mapped[list[GroupSolve]] = relationship(cascade="all, delete-orphan")
+    guest_links: Mapped[list[PuzzleGuestLink]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    series_entries: Mapped[list[PuzzleSeriesEntry]] = relationship(back_populates="puzzle", cascade="all, delete-orphan")
+    notifications: Mapped[list[PuzzleNotification]] = relationship(
+        back_populates="puzzle", cascade="all, delete-orphan"
+    )
+
+
+class PuzzleNotificationPreference(Base):
+    __tablename__ = "puzzle_notification_preferences"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    filters: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="notification_preference")
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    endpoint: Mapped[str] = mapped_column(Text)
+    p256dh: Mapped[str] = mapped_column(Text)
+    auth: Mapped[str] = mapped_column(Text)
+    device_name: Mapped[str] = mapped_column(String(120), default="Browser")
+    user_agent: Mapped[str] = mapped_column(String(300), default="")
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="push_subscriptions")
+    deliveries: Mapped[list[PushDelivery]] = relationship(back_populates="subscription", cascade="all, delete-orphan")
+
+
+class PuzzlePublicationEvent(Base):
+    __tablename__ = "puzzle_publication_events"
+
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id", ondelete="CASCADE"), primary_key=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PuzzleNotification(Base):
+    __tablename__ = "puzzle_notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "puzzle_id", "event_type", name="uq_puzzle_notification_event"),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(40), default="published")
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(String(300), default="")
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user: Mapped[User] = relationship(back_populates="puzzle_notifications")
+    puzzle: Mapped[Puzzle] = relationship(back_populates="notifications")
+    deliveries: Mapped[list[PushDelivery]] = relationship(back_populates="notification", cascade="all, delete-orphan")
+
+
+class PushDelivery(Base):
+    __tablename__ = "push_deliveries"
+    __table_args__ = (
+        UniqueConstraint("notification_id", "subscription_id", name="uq_push_delivery_notification_subscription"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    notification_id: Mapped[str] = mapped_column(ForeignKey("puzzle_notifications.id", ondelete="CASCADE"), index=True)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("push_subscriptions.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    notification: Mapped[PuzzleNotification] = relationship(back_populates="deliveries")
+    subscription: Mapped[PushSubscription] = relationship(back_populates="deliveries")
+
+
+class PuzzleSeries(Base):
+    __tablename__ = "puzzle_series"
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    require_previous: Mapped[bool] = mapped_column(Boolean, default=False)
+    group_progression: Mapped[str] = mapped_column(String(16), default="shared")
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    entries: Mapped[list[PuzzleSeriesEntry]] = relationship(
+        back_populates="series", cascade="all, delete-orphan", order_by="PuzzleSeriesEntry.position"
+    )
+
+
+class PuzzleSeriesEntry(Base):
+    __tablename__ = "puzzle_series_entries"
+    __table_args__ = (
+        UniqueConstraint("series_id", "position", name="uq_puzzle_series_position"),
+        UniqueConstraint("series_id", "puzzle_id", name="uq_puzzle_series_puzzle"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    series_id: Mapped[str] = mapped_column(ForeignKey("puzzle_series.id"), index=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    completion_message: Mapped[str] = mapped_column(String(500), default="")
+
+    series: Mapped[PuzzleSeries] = relationship(back_populates="entries")
+    puzzle: Mapped[Puzzle] = relationship(back_populates="series_entries")
+
+
+class PuzzleGuestLink(Base):
+    __tablename__ = "puzzle_guest_links"
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(120), default="")
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    max_uses: Mapped[int] = mapped_column(Integer, default=0)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_concurrent_guests: Mapped[int] = mapped_column(Integer, default=0)
+    allow_group_solve: Mapped[bool] = mapped_column(Boolean, default=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="guest_links")
+    sessions: Mapped[list[PuzzleGuestSession]] = relationship(back_populates="link", cascade="all, delete-orphan")
+
+
+class PuzzleGuestSession(Base):
+    __tablename__ = "puzzle_guest_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    link_id: Mapped[str] = mapped_column(ForeignKey("puzzle_guest_links.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(80))
+    progress_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    link: Mapped[PuzzleGuestLink] = relationship(back_populates="sessions")
+
+
+class GroupSolve(Base):
+    __tablename__ = "group_solves"
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    host_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    participant_limit: Mapped[int] = mapped_column(Integer, default=0)
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    allow_guests: Mapped[bool] = mapped_column(Boolean, default=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    public_lobby: Mapped[bool] = mapped_column(Boolean, default=False)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)
+    cell_versions: Mapped[dict] = mapped_column(JSON, default=dict)
+    puzzle_states: Mapped[dict] = mapped_column(JSON, default=dict)
+    puzzle_started_revision: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    members: Mapped[list[GroupMember]] = relationship(cascade="all, delete-orphan")
+    actions: Mapped[list[GroupAction]] = relationship(cascade="all, delete-orphan")
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_member"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("group_solves.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    guest_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    guest_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    focus: Mapped[str] = mapped_column(String(80), default="")
+    presence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GroupAction(Base):
+    __tablename__ = "group_actions"
+    __table_args__ = (UniqueConstraint("group_id", "action_id", name="uq_group_action"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("group_solves.id"), index=True)
+    action_id: Mapped[str] = mapped_column(String(36))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    guest_member_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))
+    target: Mapped[str] = mapped_column(String(80), default="")
+    changes: Mapped[dict] = mapped_column(JSON, default=dict)
+    contributions: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PublishedIssue(Base):
+    __tablename__ = "published_issues"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    modules: Mapped[list] = mapped_column(JSON, default=list)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PuzzleHint(Base):
+    __tablename__ = "puzzle_hints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    order: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="hints")
+
+
+class PuzzleAttempt(Base):
+    __tablename__ = "puzzle_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    answer: Mapped[str] = mapped_column(Text)
+    is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempt_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="attempts")
+    user: Mapped[User | None] = relationship(back_populates="attempts")
+
+
+class PuzzleActivityEvent(Base):
+    __tablename__ = "puzzle_activity_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(24), index=True)
+    event_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="activity_events")
+    user: Mapped[User] = relationship(back_populates="activity_events")
+
+
+class PuzzleProgress(Base):
+    __tablename__ = "puzzle_progress"
+    __table_args__ = (UniqueConstraint("puzzle_id", "user_id", name="uq_puzzle_progress_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    progress_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="progress")
+    user: Mapped[User] = relationship(back_populates="progress")
+
+
+class PuzzlePhoto(Base):
+    __tablename__ = "puzzle_photos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puzzle_id: Mapped[str] = mapped_column(ForeignKey("puzzles.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    attempt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("puzzle_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    file_path: Mapped[str] = mapped_column(String(500))
+    original_filename: Mapped[str] = mapped_column(String(255))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzle: Mapped[Puzzle] = relationship(back_populates="photos")
+    user: Mapped[User | None] = relationship(back_populates="photos")
+    attempt: Mapped[PuzzleAttempt | None] = relationship()
+
+
+class PuzzleDictionary(Base):
+    __tablename__ = "puzzle_dictionaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    words: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WordBank(Base):
+    __tablename__ = "word_banks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("puzzle_categories.id"), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    category: Mapped[PuzzleCategory | None] = relationship(back_populates="word_banks")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=word_bank_tag_links, back_populates="word_banks")
+    word_links: Mapped[list[WordBankWord]] = relationship(
+        back_populates="word_bank",
+        cascade="all, delete-orphan",
+        order_by="WordBankWord.position",
+    )
+    puzzles: Mapped[list[Puzzle]] = relationship(back_populates="word_bank")
+
+
+class DictionaryWord(Base):
+    __tablename__ = "dictionary_words"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_text: Mapped[str] = mapped_column(String(80))
+    clue: Mapped[str] = mapped_column(Text, default="")
+    part_of_speech: Mapped[str] = mapped_column(String(40), default="")
+    properties: Mapped[dict] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    banned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=dictionary_word_tag_links, back_populates="dictionary_words")
+    bank_links: Mapped[list[WordBankWord]] = relationship(back_populates="word", cascade="all, delete-orphan")
+    definitions: Mapped[list[DictionaryDefinition]] = relationship(
+        back_populates="word",
+        cascade="all, delete-orphan",
+        order_by="DictionaryDefinition.position",
+    )
+
+
+class DictionaryDefinition(Base):
+    __tablename__ = "dictionary_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("dictionary_words.id"), index=True)
+    definition: Mapped[str] = mapped_column(Text)
+    part_of_speech: Mapped[str] = mapped_column(String(40), default="")
+    example: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(120), default="local")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    properties: Mapped[dict] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    word: Mapped[DictionaryWord] = relationship(back_populates="definitions")
+    tags: Mapped[list[PuzzleTag]] = relationship(secondary=dictionary_definition_tag_links, back_populates="dictionary_definitions")
+
+
+class WordBankWord(Base):
+    __tablename__ = "word_bank_words"
+    __table_args__ = (UniqueConstraint("word_bank_id", "word_id", name="uq_word_bank_word"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    word_bank_id: Mapped[int] = mapped_column(ForeignKey("word_banks.id"), index=True)
+    word_id: Mapped[int] = mapped_column(ForeignKey("dictionary_words.id"), index=True)
+    definition_id: Mapped[int | None] = mapped_column(ForeignKey("dictionary_definitions.id"), nullable=True, index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    word_bank: Mapped[WordBank] = relationship(back_populates="word_links")
+    word: Mapped[DictionaryWord] = relationship(back_populates="bank_links")
+    definition: Mapped[DictionaryDefinition | None] = relationship()
+
+
+class PuzzleCategory(Base):
+    __tablename__ = "puzzle_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzles: Mapped[list[Puzzle]] = relationship(back_populates="category")
+    word_banks: Mapped[list[WordBank]] = relationship(back_populates="category")
+
+
+class PuzzleTag(Base):
+    __tablename__ = "puzzle_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    tag_type: Mapped[str] = mapped_column(String(80), default="General", index=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    puzzles: Mapped[list[Puzzle]] = relationship(secondary=puzzle_tag_links, back_populates="tags")
+    word_banks: Mapped[list[WordBank]] = relationship(secondary=word_bank_tag_links, back_populates="tags")
+    dictionary_words: Mapped[list[DictionaryWord]] = relationship(secondary=dictionary_word_tag_links, back_populates="tags")
+    dictionary_definitions: Mapped[list[DictionaryDefinition]] = relationship(
+        secondary=dictionary_definition_tag_links,
+        back_populates="tags",
+    )
+
+    @property
+    def label(self) -> str:
+        if not self.tag_type or self.tag_type == "General":
+            return self.name
+        return f"{self.tag_type}: {self.name}"
+
+
+class ContentItem(Base):
+    __tablename__ = "content_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(60), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(120), default="local")
+    item_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AppearanceTheme(Base):
+    __tablename__ = "appearance_themes"
+
+    slug: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    version: Mapped[str] = mapped_column(String(32), default="1.0.0")
+    author: Mapped[str] = mapped_column(String(120), default="")
+    description: Mapped[str] = mapped_column(String(500), default="")
+    manifest: Mapped[dict] = mapped_column(JSON)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DictionaryImportSource(Base):
+    __tablename__ = "dictionary_import_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    source_url: Mapped[str] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(String(40), default="auto")
+    source_label: Mapped[str] = mapped_column(String(160), default="")
+    source_api_token: Mapped[str] = mapped_column(Text, default="")
+    sync_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
+    max_items: Mapped[int] = mapped_column(Integer, default=500)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_result: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

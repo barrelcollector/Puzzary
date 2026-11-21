@@ -20,7 +20,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install --with-deps chromium
 
 COPY app ./app
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
 EXPOSE 8790
 
-CMD ["python", "-m", "app.server"]
+CMD ["sh", "-c", "python -m app.schema_migrations && exec python -m app.server"]
