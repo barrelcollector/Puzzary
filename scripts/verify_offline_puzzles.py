@@ -60,7 +60,7 @@ const input=root.querySelector('input'),status=root.querySelector('[data-test-st
 try{input.value=JSON.parse(root.dataset.answers||'{}').value||'';}catch(_e){}
 window.PuzzarySolo?.register({read:()=>({value:input.value}),apply:state=>{input.value=state.answers?.value||'';}});
 root.querySelector('[data-offline-check]').addEventListener('click',()=>window.PuzzarySolo?.action('check'));
-input.addEventListener('change',async()=>{const r=await fetch(root.dataset.progressUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answers:{value:input.value}})});status.textContent=r.ok?'Saved.':'Save failed.';}); })();
+input.addEventListener('change',async()=>{const r=await fetch(root.dataset.progressUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answers:{value:input.value}})});status.textContent=r.ok?'Saved.':'Save failed.';});root.dataset.ready='true'; })();
 """, encoding="utf-8")
 
 BASE = "http://127.0.0.1:8823"
@@ -162,6 +162,7 @@ try:
         desktop.set_offline(True)
         page.goto(BASE + "/puzzles/offline-public", wait_until="domcontentloaded")
         assert "Offline copy" in page.locator("body").inner_text()
+        page.wait_for_function("document.querySelector('.offline-test')?.dataset.ready === 'true'")
         page.locator("[data-offline-value]").fill("wrong")
         page.locator("[data-offline-check]").click()
         page.wait_for_function("document.querySelector('[data-test-status]').textContent.includes('not complete')")
