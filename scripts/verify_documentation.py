@@ -6,6 +6,7 @@ root = Path(__file__).resolve().parents[1]
 readme = (root / "README.md").read_text(encoding="utf-8")
 deployment = (root / "docs/docker-deployment.md").read_text(encoding="utf-8")
 modules = (root / "docs/puzzle-modules.md").read_text(encoding="utf-8")
+pwa = (root / "docs/progressive-web-app.md").read_text(encoding="utf-8")
 env_example = (root / ".env.example").read_text(encoding="utf-8")
 license_text = (root / "LICENSE").read_text(encoding="utf-8")
 notice = (root / "NOTICE").read_text(encoding="utf-8")
@@ -16,6 +17,7 @@ docs = "\n".join(
 
 assert "docs/docker-deployment.md" in readme
 assert "docs/puzzle-modules.md" in readme
+assert "docs/progressive-web-app.md" in readme
 for marker in (
     "docker compose up -d --build",
     "./data/postgres",
@@ -40,6 +42,9 @@ for marker in (
     "verify_all_group_puzzles.py",
 ):
     assert marker in modules, marker
+
+for marker in ("/service-worker.js", "secure browser context", "Authenticated HTML", "versioned shell cache"):
+    assert marker in pwa, marker
 
 assert "replace every change-* value" in env_example
 assert "Apache License" in license_text and "Version 2.0" in license_text

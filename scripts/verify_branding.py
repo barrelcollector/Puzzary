@@ -55,11 +55,12 @@ ico = (brand_dir / "favicon.ico").read_bytes()
 assert struct.unpack("<HHH", ico[:6]) == (0, 1, 3)
 assert [ico[6 + (index * 16)] for index in range(3)] == [16, 32, 48]
 assert manifest["name"] == "Puzzary"
+assert manifest["display"] == "standalone" and manifest["id"] == "/"
 assert {icon["sizes"] for icon in manifest["icons"]} == {"192x192", "512x512"}
 assert any(icon["purpose"] == "maskable" for icon in manifest["icons"])
 for reference in (
     'favicon.ico?v=1', 'puzzary-mark.svg?v=1', 'puzzary-32.png?v=1',
-    'apple-touch-icon.png?v=1', 'site.webmanifest?v=1',
+    'apple-touch-icon.png?v=1', 'site.webmanifest?v=2',
 ):
     assert reference in base
 assert '<img src="/static/brand/puzzary-mark.svg?v=1"' in base

@@ -2,11 +2,22 @@
   "name": "Puzzary",
   "short_name": "Puzzary",
   "description": "An extensible puzzle and game library",
-  "start_url": "/library",
+  "id": "/",
+  "start_url": "/library?source=pwa",
   "scope": "/",
-  "display": "browser",
+  "display": "standalone",
+  "orientation": "any",
   "background_color": "#0d3b36",
   "theme_color": "#0d3b36",
+  "categories": ["games", "entertainment"],
+  "shortcuts": [
+    {
+      "name": "Puzzle Library",
+      "short_name": "Library",
+      "url": "/library?source=pwa-shortcut",
+      "icons": [{"src": "/static/brand/puzzary-192.png?v=1", "sizes": "192x192", "type": "image/png"}]
+    }
+  ],
   "icons": [
     {
       "src": "/static/brand/puzzary-192.png?v=1",

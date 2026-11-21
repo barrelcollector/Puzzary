@@ -3,25 +3,38 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d3b36">
+  {% if appearance.slug == 'system' %}
+  <meta name="theme-color" content="#f5f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101512" media="(prefers-color-scheme: dark)">
+  {% else %}
+  <meta name="theme-color" content="{{ appearance.tokens.bg if appearance.tokens else '#0d3b36' }}">
+  {% endif %}
   <title>{% block title %}Puzzary{% endblock %}</title>
   <link rel="icon" href="/static/brand/favicon.ico?v=1" sizes="any">
   <link rel="icon" href="/static/brand/puzzary-mark.svg?v=1" type="image/svg+xml">
   <link rel="icon" href="/static/brand/puzzary-32.png?v=1" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="manifest" href="/static/site.webmanifest?v=1">
+  <link rel="manifest" href="/static/site.webmanifest?v=2">
   {% if print_pdf_css %}
     <style>{{ print_pdf_css | safe }}</style>
   {% else %}
-  <link rel="stylesheet" href="/static/styles.css?v=53">
+  <link rel="stylesheet" href="/static/styles.css?v=54">
   {% endif %}
 </head>
-<body data-signed-in="{{ 'true' if current_user and not current_user.is_guest else 'false' }}">
+<body data-signed-in="{{ 'true' if current_user and not current_user.is_guest else 'false' }}" data-user-scope="{{ current_user.id if current_user and not current_user.is_guest else 'anonymous' }}">
+  {% if not print_pdf_css %}
+    <div class="pwa-connectivity" data-pwa-connectivity role="status" aria-live="polite" hidden></div>
+    <div class="pwa-update" data-pwa-update role="status" aria-live="polite" hidden>
+      <span>A Puzzary update is ready.</span>
+      <button type="button" class="ghost-button" data-pwa-refresh>Refresh</button>
+    </div>
+  {% endif %}
   {% if not hide_app_chrome %}
     <header class="topbar">
       <a class="brand" href="/library"><img src="/static/brand/puzzary-mark.svg?v=1" alt="" width="30" height="30">Puzzary</a>
       <span class="tagline">An extensible puzzle and game library</span>
       <span class="topbar-spacer"></span>
+      <button type="button" class="nav-link pwa-install" data-pwa-install hidden>Install app</button>
       {% if not current_user or not current_user.is_guest %}<a class="nav-link" href="/groups">Group Solve</a>{% endif %}
       {% if current_user and current_user.is_guest %}
         <span class="user-pill">{{ current_user.display_name }} (guest)</span>
@@ -41,7 +54,8 @@
   <main class="page">
     {% block content %}{% endblock %}
   </main>
-  {% if current_user and not current_user.is_guest and not hide_app_chrome and not print_pdf_css %}<script src="/static/notifications.js?v=1" defer></script>{% endif %}
+  {% if not print_pdf_css %}<script src="/static/pwa.js?v=1" defer></script>{% endif %}
+  {% if current_user and not current_user.is_guest and not hide_app_chrome and not print_pdf_css %}<script src="/static/notifications.js?v=2" defer></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

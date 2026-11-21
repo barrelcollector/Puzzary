@@ -1,3 +1,10 @@
+.pwa-install { width:auto; border:1px solid var(--line); background:transparent; color:var(--ink); }
+.pwa-connectivity, .pwa-update { position:fixed; left:50%; z-index:1000; width:min(560px,calc(100% - 32px)); transform:translateX(-50%); border:1px solid var(--line); border-radius:var(--radius); box-shadow:0 6px 20px #0003; background:var(--panel); color:var(--ink); }
+.pwa-connectivity { bottom:16px; padding:12px 16px; text-align:center; }
+.pwa-update { bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 12px 10px 16px; }
+.pwa-update button { width:auto; margin:0; }
+.pwa-connectivity[hidden], .pwa-update[hidden], .pwa-install[hidden] { display:none !important; }
+@media (display-mode: standalone) { body { overscroll-behavior-y:none; } .pwa-install { display:none !important; } }
 .account-page { max-width: 1000px; margin: 0 auto; }
 .account-page-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
 .account-page-head h1 { margin: 0; overflow-wrap: anywhere; }

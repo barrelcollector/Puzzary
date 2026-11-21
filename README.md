@@ -30,6 +30,7 @@ can use the same API for automation and delivery.
 - Photo submission and administrator review workflow
 - Private, filterable RSS and Atom puzzle feeds with revocable per-user URLs
 - Opt-in in-app and background browser notifications for newly available puzzles
+- Installable Progressive Web App shell with safe static caching and offline status
 - Flexible authenticated API for external clients and automation
 - Printable puzzle payloads and PDFs for publishing integrations
 
@@ -51,6 +52,9 @@ The current application version is recorded in [`VERSION`](VERSION). The API
 health response and release image metadata use that same value. See the
 [`CHANGELOG`](CHANGELOG.md) and [v0.1.0-beta.1 release notes](docs/releases/v0.1.0-beta.1.md)
 for beta scope and upgrade warnings.
+
+The [Progressive Web App guide](docs/progressive-web-app.md) covers browser
+installation, HTTPS requirements, cache privacy, offline fallback, and updates.
 
 Copy the sample environment:
 

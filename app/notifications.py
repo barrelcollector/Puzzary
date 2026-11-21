@@ -523,8 +523,9 @@ def notification_indicator(request: Request, db: Session = Depends(get_db)):
 @router.get("/service-worker.js")
 def notification_service_worker():
     path = core().BASE_DIR / "static" / "notification-service-worker.js"
+    source = path.read_text(encoding="utf-8").replace("__PUZZARY_VERSION__", core().__version__)
     return Response(
-        path.read_text(encoding="utf-8"),
+        source,
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
     )
