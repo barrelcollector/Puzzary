@@ -79,6 +79,14 @@ class PuzzleProgressResponse(BaseModel):
     answers: dict[str, str] = {}
     expected_count: int
     found_count: int
+    revision: str = "none"
+
+
+class OfflineProgressSync(BaseModel):
+    base_revision: str = Field("none", max_length=80)
+    puzzle_version: str = Field(..., min_length=64, max_length=64)
+    progress: PuzzleProgressUpdate
+    force: bool = False
 
 
 class PuzzleSummary(BaseModel):

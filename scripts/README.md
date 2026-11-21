@@ -18,7 +18,8 @@ The runner invokes every script with `sys.executable`, gives each check its own
 temporary directory, and adds the repository to `PYTHONPATH`. The `postgres`
 group uses `PERMISSIONS_QA_DATABASE` when supplied; otherwise it creates an
 isolated SQLite fixture for local use. Browser groups require Playwright's
-Chromium package.
+Chromium package. The security group includes authenticated PWA caching and
+offline-puzzle persistence, synchronization, conflict, and responsive checks.
 
 Files named `verify_*_live.py` are deliberately excluded. The historical
 `verify_print_pdf.py` and `verify_booklet_live.py` checks are also live checks:

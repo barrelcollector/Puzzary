@@ -153,6 +153,14 @@ available. See [Browser notifications](docs/browser-notifications.md) for
 publication behavior, HTTPS requirements, device management, and VAPID key
 handling.
 
+Eligible solo puzzles can be saved per browser with **Available offline** and
+managed from **Offline** in the main navigation. Progress persists without a
+connection and synchronizes when the server returns; changed server progress
+requires an explicit conflict choice. Protected, hidden, scheduled, archived,
+guest, and Group Solve content stays online-only. See [offline puzzle
+play](docs/offline-puzzle-play.md) for storage, validation, security, and plugin
+requirements.
+
 ## API
 
 API requests require a token for an active user account. Send it as either:

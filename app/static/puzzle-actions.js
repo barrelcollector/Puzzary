@@ -11,15 +11,25 @@
     register(value) { adapter = value; baseline = adapter.read ? adapter.read() : {}; },
     async action(kind, target = '') {
       if (!adapter) return false;
+      if (!navigator.onLine && kind !== 'patch') {
+        message('This check needs a connection. Your offline progress is still saved.');
+        return false;
+      }
       const current = adapter.read ? adapter.read() : {};
       const changes = Object.fromEntries([...new Set([...Object.keys(baseline),...Object.keys(current)])]
         .filter(key => (baseline[key] || '') !== (current[key] || ''))
         .map(key => [key,current[key] || '']));
-      const response = await fetch(`/api/puzzles/${context.dataset.puzzle}/actions`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({kind, target, changes}),
-      });
+      let response;
+      try {
+        response = await fetch(`/api/puzzles/${context.dataset.puzzle}/actions`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({kind, target, changes}),
+        });
+      } catch (_error) {
+        message('This action needs a connection. Your offline progress is still saved.');
+        return false;
+      }
       const state = await response.json();
       if (!response.ok) {
         message(state.detail || 'Puzzle action failed.');

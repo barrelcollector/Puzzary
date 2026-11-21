@@ -12,6 +12,9 @@
     {% if puzzle_type_definition and puzzle_type_definition.supports_print and not puzzle_type_definition.digital_only %}
       <a class="button-link" href="/puzzles/{{ puzzle.id }}/print">Print</a>
     {% endif %}
+    {% if offline_eligible %}
+      <button type="button" class="ghost-button compact-button" data-offline-download data-puzzle-id="{{ puzzle.id }}">Available offline</button>
+    {% endif %}
     {% endif %}
     <code>{{ puzzle.id }}</code>
   </div>
@@ -180,6 +183,7 @@
 {% endif %}
 <script src="/static/celebration.js?v=4"></script>
 <script src="/static/group-solve.js?v=17"></script>
-<script src="/static/puzzle-actions.js?v=2"></script>
+<script src="/static/puzzle-actions.js?v=3"></script>
+{% if offline_eligible %}<script src="/static/offline-puzzles.js?v=1"></script>{% endif %}
 {% if puzzle_type_definition and puzzle_type_definition.play_script %}<script src="{{ puzzle_type_definition.play_script if puzzle_type_definition.play_script.startswith('/') else '/static/' ~ puzzle_type_definition.play_script }}"></script>{% endif %}
 {% endblock %}

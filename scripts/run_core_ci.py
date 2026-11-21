@@ -32,6 +32,7 @@ CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("scripts/verify_oidc.py",),
         ("scripts/verify_transport_security.py",),
         ("scripts/verify_pwa.py",),
+        ("scripts/verify_offline_puzzles.py",),
         ("scripts/verify_word_search_grid.py",),
     ),
     "plugins": (

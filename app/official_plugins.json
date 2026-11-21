@@ -1,84 +1,84 @@
 {
   "schema": "puzzary.plugin.catalog.v1",
   "repository": "https://github.com/barrelcollector/puzzary-official-plugins",
-  "release": "plugins-v0.1.2",
+  "release": "plugins-v0.1.3",
   "plugins": [
     {
       "slug": "cross_equations",
       "name": "Cross Equations",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-cross_equations-0.1.1.zip",
-      "sha256": "872fc5d78a3363089f668254da127c12ecfc4325e9d90b480516667a975d5ffc"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-cross_equations-0.1.2.zip",
+      "sha256": "61cf1a272ae4f0177609fc1cc6a9c7fb992618f99e49ed77b7863be5cc356b14"
     },
     {
       "slug": "crossword",
       "name": "Crossword",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-crossword-0.1.1.zip",
-      "sha256": "1bb4a5ef07c0b08ba5da785864938959b85dcb40236ca5a56dd040f47088050f"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-crossword-0.1.2.zip",
+      "sha256": "27065a5540bd692aa716799fb1842303c2b629fcd34cd12298caa8c6d7b33404"
     },
     {
       "slug": "dictionary_content",
       "name": "English Dictionary Content",
       "package_type": "content",
       "version": "0.1.0",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-dictionary_content-0.1.0.zip",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-dictionary_content-0.1.0.zip",
       "sha256": "667ebe921d0af6fb9a3af81aa1cf53476a42bce76fe1b59918f5a07af22f9162"
     },
     {
       "slug": "maze",
       "name": "Maze",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-maze-0.1.1.zip",
-      "sha256": "0ed437b501fc2f89e653884e5af17b478078630194fd591344b0506525ea464d"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-maze-0.1.2.zip",
+      "sha256": "c331881ee599ee9a280b800e0a20f0a72fe5d7aa15f6f9a6950667426726be86"
     },
     {
       "slug": "minesweeper",
       "name": "Minesweeper",
       "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-minesweeper-0.1.1.zip",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-minesweeper-0.1.1.zip",
       "sha256": "3bff9871dbf4f7bb5d124919a04253e80d1f8156f2c474230b32be3a2117e3da"
     },
     {
       "slug": "nonogram",
       "name": "Nonogram",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-nonogram-0.1.1.zip",
-      "sha256": "c6f7d4fb424fa03ea2b283cb24954700c1d16e50c2ba680584ca358efb8dd6db"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-nonogram-0.1.2.zip",
+      "sha256": "97f062dfb2bfa6718dd2090aa4d6e24bccb786471915803e06fbaf6c78162698"
     },
     {
       "slug": "spell_it",
       "name": "Spell It",
       "version": "0.1.2",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-spell_it-0.1.2.zip",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-spell_it-0.1.2.zip",
       "sha256": "dcc1d81366bcdeeadfa208d179207f1e4ebe3a36f361f121bf3938860847ab6b"
     },
     {
       "slug": "sudoku",
       "name": "Sudoku",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-sudoku-0.1.1.zip",
-      "sha256": "42329ea8ebe8290e6275eb9270e42aa4c18b1867e1411d1d9dd4e6790c6f511a"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-sudoku-0.1.2.zip",
+      "sha256": "9bbf5a104fdb54775c29bc33da48a0fc2f80f9a836b4428047d1d7365cbe3fe9"
     },
     {
       "slug": "takuzu",
       "name": "Takuzu",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-takuzu-0.1.1.zip",
-      "sha256": "ba5224e0f40dcdc1c86201d74fafdc9c7fbfa12cd9f670ecf467d0cf60bf07f0"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-takuzu-0.1.2.zip",
+      "sha256": "be64e9095c78f5fd266c281e7152660465e4b819bb88a5b07b29865a0cb5ec61"
     },
     {
       "slug": "word_pyramid",
       "name": "Word Pyramid",
-      "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-word_pyramid-0.1.1.zip",
-      "sha256": "25838b03065c10b406d648a749f235b397d9f3fb22a838fc04c7fa0f0f725fec"
+      "version": "0.1.2",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-word_pyramid-0.1.2.zip",
+      "sha256": "adc536e4637c319dd966237b0db6fbfd87604dfbe1d53a38b8af9caefc0cd5e3"
     },
     {
       "slug": "word_search",
       "name": "Word Search",
       "version": "0.1.1",
-      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.2/puzzary-word_search-0.1.1.zip",
+      "url": "https://github.com/barrelcollector/puzzary-official-plugins/releases/download/plugins-v0.1.3/puzzary-word_search-0.1.1.zip",
       "sha256": "b5aa3fb5317c538ce9ce89c99d44e537aeb31530eed893ce9d80f5953b14ea7e"
     }
   ]
