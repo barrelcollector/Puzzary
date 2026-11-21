@@ -25,6 +25,7 @@ from playwright.sync_api import sync_playwright
 from app.database import Base, SessionLocal, engine
 from app.main import SESSION_SECRET, hash_password
 from app.models import Puzzle, User
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types.sudoku import build_manual_puzzle, sudoku_collaboration
 
 

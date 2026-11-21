@@ -6,6 +6,7 @@ import unittest
 
 from ortools.sat.python import cp_model
 
+import app.puzzles  # Load installed packages before compatibility imports.
 from app.puzzle_types.takuzu import generate, build_manual, validate_grid, check_answer, count_progress, normalize_progress
 
 

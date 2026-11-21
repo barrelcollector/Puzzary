@@ -80,6 +80,13 @@ docker compose logs --tail=100 app
 ```
 
 Stopping only `app` keeps PostgreSQL available while the new image is built.
+After the new core version is healthy, sign in to **Admin -> Plugins**, choose
+**Update All Modules**, and restart only `app` once more. This installs the
+checksummed package versions paired with the new core catalog. Until that
+restart, an incompatible older package is shown as unavailable; its puzzles and
+progress remain stored and are not replaced by a bundled fallback. Verify every
+installed puzzle type after the restart before removing the rollback image.
+
 If startup or migration fails, keep the failed logs, restore the matching
 pre-upgrade database backup, and return to the previous application revision.
 

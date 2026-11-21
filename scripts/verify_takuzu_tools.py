@@ -2,14 +2,16 @@
 from pathlib import Path
 from types import SimpleNamespace
 import json
+import os
 
 from playwright.sync_api import sync_playwright
 from starlette.templating import Jinja2Templates
 
 grid=[[0,0,1,1],[0,1,0,1],[1,0,1,0],[1,1,0,0]]
 payload={'size':4,'givens':{'3,3':'0'},'settings':{'auto_confirm_lines':True}}
-templates=Jinja2Templates('/app/app/templates')
-static=Path('/app/app/static')
+plugin=Path(os.getenv("PUZZARY_PLUGIN_DIR", "/data/plugins"))/'takuzu'
+templates=Jinja2Templates([plugin/'templates', Path('/app/app/templates')])
+static=plugin/'static'
 with sync_playwright() as p:
     browser=p.chromium.launch()
     page=browser.new_page()
@@ -21,7 +23,7 @@ with sync_playwright() as p:
         html=templates.env.get_template('puzzle_types/takuzu.html').render(puzzle=puzzle,progress_answers=saved or {})
         page.set_content(html+'<button id="reveal-solution">Reveal</button>')
         page.evaluate('window.fetch=async()=>({ok:true}); window.chimes=0; window.wins=0')
-        page.add_script_tag(content=(static/'celebration.js').read_text())
+        page.add_script_tag(content=Path('/app/app/static/celebration.js').read_text())
         page.evaluate('window.PuzzarySounds.progress=()=>{window.chimes++}; window.PuzzaryCelebrate={complete:()=>{window.wins++}}')
         page.add_script_tag(content=(static/'takuzu.js').read_text())
     def cell(x,y=0): return page.locator(f'button.takuzu-cell[data-key="{x},{y}"]')

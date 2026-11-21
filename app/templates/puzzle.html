@@ -52,14 +52,16 @@
     {% endif %}
     {% if not playable_puzzle_type and not current_user.is_guest %}
       <p>{{ puzzle.prompt }}</p>
-      {% if puzzle_type_definition and not has_puzzle_template %}
+      {% if not puzzle_type_definition %}
+        <p class="notice danger"><strong>Puzzle module unavailable.</strong> Install or repair the <code>{{ puzzle.puzzle_type }}</code> module to play this puzzle. Its saved puzzle and progress data have been preserved.</p>
+      {% elif not has_puzzle_template %}
         <p class="muted">This puzzle type is registered, but it does not have a custom web-play template yet.</p>
       {% endif %}
     {% endif %}
   </div>
 
   <aside class="side">
-    {% if not playable_puzzle_type %}
+    {% if not playable_puzzle_type and puzzle_type_definition %}
       <form class="panel" method="post" action="/web/puzzles/{{ puzzle.id }}/attempts">
         <h2>Submit Answer</h2>
         <label>
@@ -128,7 +130,7 @@
 
 {% if not current_user.is_guest %}
 <section class="history">
-  {% if not playable_puzzle_type %}
+  {% if not playable_puzzle_type and puzzle_type_definition %}
     <div class="panel">
       <h2>Attempts</h2>
       {% if attempts %}

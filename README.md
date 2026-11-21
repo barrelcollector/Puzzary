@@ -35,11 +35,10 @@ can use the same API for automation and delivery.
 
 ## Dictionary Content Pack
 
-The [English dictionary expansion](content_packs/english-wordnet-5000-v1/README.md)
+The optional [English Dictionary Content package](https://github.com/barrelcollector/puzzary-official-plugins/tree/main/plugins/dictionary_content)
 provides licensed definitions, multiple senses, progressive clues and topic tags
-for a library of about 5,000 words. Its opt-in transactional importer preserves
-existing content and adds automatic, sense-specific word banks. Source data has
-its own bundled licenses; it is not part of the application's code license.
+for a library of about 5,000 words. Its data, licenses, maintenance tools, and
+documentation are owned by the official package repository rather than core.
 
 ## Run
 
@@ -355,13 +354,17 @@ The [API client and print automation guide](docs/api-clients.md) documents beare
 
 ## Puzzle Types
 
-Puzzle types are auto-discovered modules under `app/puzzle_types`.
-
-Each type owns its generator, source adapter, answer checker, and progress logic. Browser UI lives in `app/templates/puzzle_types/{slug}.html`, with optional admin solution display in `app/templates/puzzle_solutions/{slug}.html`.
+Puzzle types are auto-discovered from installed packages under
+`PUZZARY_PLUGIN_DIR` (default `/data/plugins`). Each package owns its generator,
+source adapter, answer checker, progress logic, browser templates, print
+templates, and static assets.
 
 The full contributor contract is documented in [`docs/puzzle-modules.md`](docs/puzzle-modules.md). **Admin -> Plugins** is the primary management surface: it installs or updates official modules from their pinned GitHub releases, accepts reviewed custom GitHub release URLs and checksums, displays load failures and restart state, and enables or disables generation. The plugin APIs mirror these web operations for automation. Disabled modules stay playable for existing puzzles but disappear from generation screens and API generation.
 
-To add a type, drop a new Python file into `app/puzzle_types/`. Files whose names start with `_` are ignored. The module must call `register_puzzle_type(...)` at import time:
+To add a type, create a complete installable package in the
+[official module repository](https://github.com/barrelcollector/puzzary-official-plugins)
+or another trusted GitHub repository. Its entrypoint calls
+`register_puzzle_type(...)` at import time:
 
 ```python
 from app.puzzles import GeneratedPuzzle, GenerationField, PrintLayout, PuzzleType, register_puzzle_type
@@ -637,11 +640,10 @@ understanding and licensing accepted changes. See [CONTRIBUTING.md](CONTRIBUTING
 Puzzary application code is licensed under the
 [Apache License 2.0](LICENSE). Copyright 2026 Puzzary contributors.
 
-The optional dictionary content pack and bundled third-party assets retain
-their own licenses. See [NOTICE](NOTICE), `app/static/icons/LICENSE`, and the
-license files under `content_packs/english-wordnet-5000-v1/licenses/`. The
-Apache license does not grant permission to use project names or branding
-beyond describing the origin of the software.
+Optional module content and bundled third-party assets retain their own
+licenses. See [NOTICE](NOTICE), `app/static/icons/LICENSE`, and each installed
+package's license files. The Apache license does not grant permission to use
+project names or branding beyond describing the origin of the software.
 ## Word-bank transfers
 
 Word Banks includes an import wizard for UTF-8 TXT, CSV and JSON, pasted data,

@@ -4096,15 +4096,17 @@ def plugin_management_context(db: Session) -> dict:
         slug = catalog_plugin["slug"]
         installed = installed_by_slug.get(slug)
         loaded = LOADED_PACKAGES.get(slug)
-        registered = get_puzzle_type(slug)
+        package_type = catalog_plugin.get("package_type", "puzzle")
+        registered = loaded is not None if package_type == "content" else get_puzzle_type(slug) is not None
         official.append({
             **catalog_plugin,
             "installed": installed,
             "rollback": rollback_by_slug.get(slug),
             "loaded_version": loaded.version if loaded else None,
-            "registered": registered is not None,
-            "enabled": slug not in disabled,
-            "source": "GitHub package" if loaded else "Bundled fallback" if registered else "Unavailable",
+            "package_type": package_type,
+            "registered": registered,
+            "enabled": package_type == "content" or slug not in disabled,
+            "source": "GitHub package" if loaded else "Unavailable",
             "restart_required": bool(installed and installed.get("restart_required")),
             "update_available": bool(installed and installed.get("version") != catalog_plugin["version"]),
         })
@@ -7916,12 +7918,16 @@ def update_plugin_package_status(
 ) -> dict:
     user = require_admin_api(request, db)
     status = package_status()
-    known = (
-        {plugin.slug for plugin in list_puzzle_types()}
-        | {plugin["slug"] for plugin in status["installed"]}
-        | {plugin["slug"] for plugin in status["official_catalog"]["plugins"]}
-    )
-    if slug not in known:
+    known_puzzles = {plugin.slug for plugin in list_puzzle_types()}
+    known_puzzles |= {
+        plugin["slug"] for plugin in status["installed"]
+        if plugin.get("package_type", "puzzle") == "puzzle"
+    }
+    known_puzzles |= {
+        plugin["slug"] for plugin in status["official_catalog"]["plugins"]
+        if plugin.get("package_type", "puzzle") == "puzzle"
+    }
+    if slug not in known_puzzles:
         raise HTTPException(status_code=404, detail="Plugin not found")
     disabled = disabled_puzzle_type_slugs(db)
     before = slug not in disabled

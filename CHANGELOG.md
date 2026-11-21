@@ -6,12 +6,19 @@ are versioned independently in their own repositories.
 
 ## [Unreleased]
 
+### Changed
+
+- Puzzle implementations, templates, browser assets, guides, and the English
+  Dictionary Content pack now have one canonical home in the official package
+  repository. Core loads installed packages and reports missing modules without
+  silently using bundled fallbacks.
+
 ## [0.1.0-beta.1] - Unreleased
 
 ### Added
 
 - First-run administrator setup without a universal default password.
-- Ten bundled fallback puzzle types with installable official module updates.
+- Ten official installable puzzle types.
 - Web and API workflows for puzzle generation, play, progress, groups,
   publishing, printable PDF/PNG output, uploads, themes, feeds, notifications,
   permissions, OIDC sign-in, and module management.
