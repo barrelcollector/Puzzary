@@ -42,6 +42,7 @@ class PuzzleGenerateRequest(BaseModel):
     visibility: Literal["public", "unlisted"] = "public"
     access_password: str = Field("", max_length=128)
     publish_at: datetime | None = None
+    offline_allowed: bool = True
 
 
 class PuzzleAttemptCreate(BaseModel):
@@ -105,6 +106,7 @@ class PuzzleSummary(BaseModel):
     password_protected: bool = False
     publication_state: Literal["draft", "scheduled", "published", "archived"] = "published"
     publish_at: datetime | None = None
+    offline_allowed: bool = True
 
 
 class PuzzlePrintPreview(BaseModel):
@@ -153,6 +155,7 @@ class PuzzleManualWrite(BaseModel):
     access_password: str = Field("", max_length=128)
     remove_access_password: bool = False
     publish_at: datetime | None = None
+    offline_allowed: bool = True
 
 
 class DictionaryDefinitionWrite(BaseModel):

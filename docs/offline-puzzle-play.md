@@ -29,10 +29,20 @@ device saved progress, automatic synchronization stops and the player chooses
 the server progress or explicitly keeps the device progress. Inaccessible,
 unpublished, archived, and removed puzzles fail closed.
 
-Completion always receives authoritative server confirmation after sync. A
-module may additionally declare `local_rules` validation when correctness can
-be derived from public puzzle rules without shipping an answer key. Other
-modules can save state offline but checks, hints, and reveals remain online.
+Players can check and solve every downloaded puzzle without a connection.
+Modules either validate from public puzzle rules (`local_rules`) or download a
+puzzle-specific salted SHA-256 commitment (`solution_hash`) that lets the
+browser compare the completed progress without receiving the answer key.
+Completion receives authoritative server confirmation and is recorded on the
+account after synchronization. Hints, reveals, uploads, and Group Solve remain
+online-only.
+
+A solution commitment is intentionally less secret than keeping all checking
+data on the server. It does not reveal the answer directly, but a person with
+the downloaded file can test guesses, and small answer spaces may be practical
+to brute-force. Puzzle owners can turn off **Offline play** for an individual
+puzzle in the web UI. A disabled puzzle cannot be downloaded and its solution
+commitment is never sent to the browser.
 
 ## Plugin contract
 
@@ -41,11 +51,16 @@ modules can save state offline but checks, hints, and reveals remain online.
 - `supports_offline=True`;
 - `offline_progress_fields`, limited to serializable `answers` and/or
   `found_words` state accepted by its normal progress normalizer;
-- `offline_validation="local_rules"` only when the client can validate using
-  public constraints, otherwise the default `server`;
+- `offline_validation="local_rules"` when the client can validate from public
+  constraints, or `offline_validation="solution_hash"` together with an
+  `offline_solution_state` callback that returns the canonical progress state;
+- `offline_hash_mode="exact"` for exact answer maps, or `"filled_cells"` when
+  only filled cells are significant;
 - `offline_notes` explaining which actions still require a connection; and
 - every required script in `play_script`, so the download can pre-cache it.
 
+The legacy `server` validation value remains loadable for compatibility but is
+not eligible for download, because it cannot provide a complete offline game.
 An offline-capable module must still treat the server normalizer, counter, and
-access checks as authoritative. It must not expose solution data or claim that
-realtime/collaborative actions work offline.
+access checks as authoritative after synchronization. It must not expose raw
+solution data or claim that realtime/collaborative actions work offline.

@@ -11,11 +11,17 @@
     register(value) { adapter = value; baseline = adapter.read ? adapter.read() : {}; },
     async action(kind, target = '') {
       if (!adapter) return false;
+      const current = adapter.read ? adapter.read() : {};
       if (!navigator.onLine && kind !== 'patch') {
-        message('This check needs a connection. Your offline progress is still saved.');
+        if (kind === 'check' && window.PuzzaryOfflineCheck) {
+          const result = await window.PuzzaryOfflineCheck({answers: current});
+          message(result.message);
+          if (result.correct) window.PuzzaryCelebrate?.complete();
+          return result.correct;
+        }
+        message(kind === 'check_entry' ? 'Offline checking is available for the completed puzzle, not individual entries.' : 'This action needs a connection. Your offline progress is still saved.');
         return false;
       }
-      const current = adapter.read ? adapter.read() : {};
       const changes = Object.fromEntries([...new Set([...Object.keys(baseline),...Object.keys(current)])]
         .filter(key => (baseline[key] || '') !== (current[key] || ''))
         .map(key => [key,current[key] || '']));

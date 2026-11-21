@@ -91,6 +91,8 @@ class PuzzleType:
     offline_progress_fields: tuple[str, ...] = ()
     offline_notes: str = ""
     offline_validation: str = "server"
+    offline_solution_state: Callable[[dict], dict] | None = None
+    offline_hash_mode: str = "exact"
 
 
 def fallback_preview(kind: str, label: str) -> dict:
@@ -116,8 +118,12 @@ def register_puzzle_type(puzzle_type: PuzzleType) -> PuzzleType:
         unsupported = set(puzzle_type.offline_progress_fields) - allowed_offline_fields
         if unsupported:
             raise ValueError(f"unsupported offline progress fields: {', '.join(sorted(unsupported))}")
-        if puzzle_type.offline_validation not in {"server", "local_rules"}:
-            raise ValueError("offline validation must be server or local_rules")
+        if puzzle_type.offline_validation not in {"server", "local_rules", "solution_hash"}:
+            raise ValueError("offline validation must be server, local_rules, or solution_hash")
+        if puzzle_type.offline_validation == "solution_hash" and puzzle_type.offline_solution_state is None:
+            raise ValueError("solution-hash validation requires an offline solution-state builder")
+        if puzzle_type.offline_hash_mode not in {"exact", "filled_cells"}:
+            raise ValueError("offline hash mode must be exact or filled_cells")
     if puzzle_type.slug in PUZZLE_TYPES:
         raise ValueError(f"Puzzle type already registered: {puzzle_type.slug}")
     PUZZLE_TYPES[puzzle_type.slug] = puzzle_type
