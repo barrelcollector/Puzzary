@@ -8,7 +8,7 @@ psycopg[binary]==3.2.3
 pydantic==2.10.4
 itsdangerous==2.2.0
 qrcode==7.4.2
-playwright==1.58.0
+playwright==1.65.2
 ortools==9.15.6755
 pypdf==6.21.4
 pywebpush==2.5.0
