@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Verify Account - Puzzary{% endblock %}
+{% block content %}
+<section class="login-wrap">
+  <div class="panel login-panel">
+    {% if verified %}
+      <h1>Email verified</h1>
+      {% if local_login_available %}
+        <p class="notice" role="status">Your Puzzary account is active and you are signed in.</p>
+        <a class="button-link" href="/library">Open library</a>
+      {% else %}
+        <p class="notice" role="status">Your email is verified. This server currently requires single sign-on for ordinary users.</p>
+        <a class="button-link" href="/login">Back to login</a>
+      {% endif %}
+    {% else %}
+      <h1>Verification link unavailable</h1>
+      <p class="notice danger" role="alert">This verification link is invalid, expired, or already used.</p>
+      {% if registration_available %}
+        <a class="button-link" href="/register">Request another verification email</a>
+      {% else %}
+        <a class="button-link" href="/login">Back to login</a>
+      {% endif %}
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

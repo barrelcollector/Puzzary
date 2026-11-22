@@ -5,10 +5,13 @@ supports automation but does not replace a required web workflow.
 
 ## Accounts, roles, and sign-in
 
-Puzzary does not enable public self-registration. Administrators create and
-deactivate accounts, issue one-time password setup links, revoke sessions, and
-rotate API tokens under **Admin > Users**. Do not remove the last active account
-with the permissions needed to administer users, roles, and server settings.
+Puzzary does not enable public self-registration by default. Administrators
+create and deactivate accounts, issue one-time password setup links, revoke
+sessions, and rotate API tokens under **Admin > Users**. Deployments that want
+verified public signup can enable and configure [public account
+registration](public-registration.md) under **Admin > Settings**. Do not remove
+the last active account with the permissions needed to administer users, roles,
+and server settings.
 
 Roles provide reusable permission sets. Per-account allows and denies refine
 those sets, with an explicit deny taking precedence. Review the effective

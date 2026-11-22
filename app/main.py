@@ -11,11 +11,15 @@ import hashlib
 import hmac
 import math
 import secrets
+import smtplib
+import ssl
 import time
 import threading
 import tempfile
+import unicodedata
 from collections import deque
 from copy import deepcopy
+from email.message import EmailMessage
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,6 +40,7 @@ from playwright.sync_api import Error as PlaywrightError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.content import THEMES
@@ -69,6 +74,7 @@ from app.models import (
     OIDCAuthAttempt,
     OIDCIdentity,
     OIDCProvider,
+    PermissionRole,
     User,
     WordBank,
     WordBankWord,
@@ -111,7 +117,7 @@ from app.permissions import (
     can_view, can_discover, puzzle_is_unlisted, puzzle_is_published,
     puzzle_is_scheduled, puzzle_publication_state, require_owned, can_owned,
     audit, lock_permissions, protect_last_admin,
-    register_route_permission,
+    register_route_permission, PLAYER,
 )
 from app.schemas import (
     DictionaryDefinitionPatch,
@@ -143,6 +149,8 @@ from app.schemas import (
     OIDCLoginSettingsWrite,
     OIDCProviderPatch,
     OIDCProviderWrite,
+    PublicRegistrationCreate,
+    PublicRegistrationResend,
     UserCreate,
     WordBankEntryWrite,
     WordBankPatch,
@@ -196,7 +204,7 @@ async def redact_legacy_password_setup_query(request: Request, call_next):
     path = request.scope.get("path", "")
     original_query = request.scope.get("query_string", b"")
     response = await call_next(request)
-    if path == "/password/setup" and b"token=" in original_query:
+    if path in {"/password/setup", "/register/verify"} and b"token=" in original_query:
         request.scope["query_string"] = b"token=REDACTED"
     return response
 
@@ -243,6 +251,15 @@ RESET_TOKEN_TTL_HOURS = 24
 LOGIN_RATE_LIMIT_WINDOW = 300
 LOGIN_RATE_LIMIT_MAX = 8
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+REGISTRATION_RATE_LIMIT_WINDOW = 15 * 60
+REGISTRATION_RATE_LIMIT_MAX = 5
+REGISTRATION_IP_RATE_LIMIT_MAX = 20
+REGISTRATION_RESEND_WINDOW = 60 * 60
+REGISTRATION_RESEND_MAX = 5
+REGISTRATION_RESEND_MIN_SECONDS = 60
+REGISTRATION_RETENTION_DAYS = 7
+REGISTRATION_ATTEMPTS: dict[str, deque[float]] = {}
+REGISTRATION_ATTEMPT_LOCK = threading.Lock()
 PUZZLE_PASSWORD_ATTEMPT_LIMIT = 5
 PUZZLE_PASSWORD_ATTEMPT_WINDOW = 60
 PUZZLE_PASSWORD_ATTEMPTS: dict[tuple[str, str], deque[float]] = {}
@@ -349,6 +366,7 @@ async def startup() -> None:
     app.state.auto_archive_task = asyncio.create_task(auto_archive_loop())
     app.state.dictionary_sync_task = asyncio.create_task(dictionary_import_source_loop())
     app.state.notification_task = asyncio.create_task(puzzle_notifications.notification_loop())
+    app.state.registration_cleanup_task = asyncio.create_task(registration_cleanup_loop())
 
 
 @app.on_event("shutdown")
@@ -362,6 +380,9 @@ async def shutdown() -> None:
     notification_task = getattr(app.state, "notification_task", None)
     if notification_task is not None:
         notification_task.cancel()
+    registration_cleanup_task = getattr(app.state, "registration_cleanup_task", None)
+    if registration_cleanup_task is not None:
+        registration_cleanup_task.cancel()
 
 
 def normalize_base_url(value: str) -> str:
@@ -397,6 +418,305 @@ def set_app_setting(db: Session, key: str, value: str) -> None:
         db.add(setting)
     else:
         setting.value = value
+
+
+def boolean_setting(db: Session, key: str, default: bool = False) -> bool:
+    value = app_setting(db, key, "true" if default else "false").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+REGISTRATION_SETTING_KEYS = {
+    "enabled": "public_registration_enabled",
+    "verification_required": "public_registration_email_verification_required",
+    "role": "public_registration_role_id",
+    "expiry": "public_registration_verification_hours",
+    "smtp_host": "registration_smtp_host",
+    "smtp_port": "registration_smtp_port",
+    "smtp_security": "registration_smtp_security",
+    "smtp_username": "registration_smtp_username",
+    "smtp_password": "registration_smtp_password_encrypted",
+    "smtp_from": "registration_smtp_from",
+}
+
+
+def safe_registration_roles(db: Session) -> list[PermissionRole]:
+    return [
+        role
+        for role in db.scalars(select(PermissionRole).order_by(PermissionRole.name, PermissionRole.id))
+        if set(role.permissions or []) <= PLAYER
+    ]
+
+
+def registration_default_role(db: Session) -> PermissionRole:
+    safe_roles = safe_registration_roles(db)
+    selected = app_setting(db, REGISTRATION_SETTING_KEYS["role"])
+    if selected.isdigit():
+        role = next((item for item in safe_roles if item.id == int(selected)), None)
+        if role is not None:
+            return role
+    player = next((item for item in safe_roles if item.name == "Player"), None)
+    if player is None:
+        initialize_permissions(db)
+        safe_roles = safe_registration_roles(db)
+        player = next((item for item in safe_roles if item.name == "Player"), None)
+    if player is None:
+        raise RuntimeError("The safe Player role is unavailable.")
+    return player
+
+
+def registration_verification_hours(db: Session) -> int:
+    try:
+        return max(1, min(168, int(app_setting(db, REGISTRATION_SETTING_KEYS["expiry"], "24"))))
+    except ValueError:
+        return 24
+
+
+def registration_verification_required(db: Session) -> bool:
+    return boolean_setting(db, REGISTRATION_SETTING_KEYS["verification_required"], False)
+
+
+def registration_mail_settings(db: Session, include_password: bool = False) -> dict:
+    password = ""
+    encrypted = app_setting(db, REGISTRATION_SETTING_KEYS["smtp_password"])
+    if include_password and encrypted:
+        try:
+            password = decrypt_secret(encrypted, SESSION_SECRET)
+        except OIDCError as error:
+            raise ValueError("The saved email password cannot be decrypted with this server key.") from error
+    try:
+        port = int(app_setting(db, REGISTRATION_SETTING_KEYS["smtp_port"], "587"))
+    except ValueError:
+        port = 587
+    security = app_setting(db, REGISTRATION_SETTING_KEYS["smtp_security"], "starttls")
+    if security not in {"starttls", "tls", "none"}:
+        security = "starttls"
+    return {
+        "host": app_setting(db, REGISTRATION_SETTING_KEYS["smtp_host"]),
+        "port": port,
+        "security": security,
+        "username": app_setting(db, REGISTRATION_SETTING_KEYS["smtp_username"]),
+        "password": password,
+        "password_configured": bool(encrypted),
+        "from_address": app_setting(db, REGISTRATION_SETTING_KEYS["smtp_from"]),
+    }
+
+
+def registration_mail_ready(db: Session) -> bool:
+    settings = registration_mail_settings(db)
+    return bool(settings["host"] and settings["from_address"] and 1 <= settings["port"] <= 65535)
+
+
+def registration_public_url_safe(db: Session) -> bool:
+    parsed = urlparse(app_base_url(db))
+    hostname = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" or hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def public_registration_enabled(db: Session) -> bool:
+    return boolean_setting(db, REGISTRATION_SETTING_KEYS["enabled"], False)
+
+
+def public_registration_available(db: Session) -> bool:
+    return (
+        public_registration_enabled(db)
+        and oidc_login_mode(db) != "oidc"
+        and (not registration_verification_required(db) or registration_mail_ready(db))
+        and registration_public_url_safe(db)
+    )
+
+
+def registration_settings_view(db: Session) -> dict:
+    mail = registration_mail_settings(db)
+    selected_role = registration_default_role(db)
+    return {
+        "enabled": public_registration_enabled(db),
+        "available": public_registration_available(db),
+        "verification_required": registration_verification_required(db),
+        "verification_hours": registration_verification_hours(db),
+        "default_role_id": selected_role.id,
+        "safe_roles": safe_registration_roles(db),
+        "mail": mail,
+    }
+
+
+def save_registration_settings(
+    db: Session,
+    actor: User,
+    *,
+    enabled: bool,
+    verification_required: bool,
+    role_id: int,
+    verification_hours: int,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_security: str,
+    smtp_username: str,
+    smtp_password: str,
+    smtp_from: str,
+    remove_smtp_password: bool,
+    target_login_mode: str,
+) -> None:
+    safe_roles = safe_registration_roles(db)
+    role = next((item for item in safe_roles if item.id == role_id), None)
+    if role is None:
+        raise ValueError("Choose a non-privileged default registration role.")
+    if not 1 <= verification_hours <= 168:
+        raise ValueError("Verification links must expire between 1 and 168 hours.")
+    host = smtp_host.strip()
+    if len(host) > 255 or any(character.isspace() for character in host) or any(character in host for character in "/@"):
+        raise ValueError("SMTP host must be a hostname or IP address without a URL or credentials.")
+    if not 1 <= smtp_port <= 65535:
+        raise ValueError("SMTP port must be between 1 and 65535.")
+    if smtp_security not in {"starttls", "tls", "none"}:
+        raise ValueError("Unknown SMTP security mode.")
+    username = smtp_username.strip()
+    if len(username) > 255:
+        raise ValueError("SMTP username is too long.")
+    from_address = validate_mailbox(smtp_from, "From address") if smtp_from.strip() else ""
+    if len(smtp_password) > 2000:
+        raise ValueError("SMTP password is too long.")
+    if smtp_password and remove_smtp_password:
+        raise ValueError("Enter a new SMTP password or remove the saved one, not both.")
+    password_configured = bool(app_setting(db, REGISTRATION_SETTING_KEYS["smtp_password"]))
+    if remove_smtp_password:
+        password_configured = False
+    elif smtp_password:
+        password_configured = True
+    if username and not password_configured:
+        raise ValueError("Save an SMTP password when an SMTP username is configured.")
+    if enabled and target_login_mode == "oidc":
+        raise ValueError("Public local-account registration cannot be enabled in single-sign-on-only mode.")
+    if enabled and verification_required and (not host or not from_address):
+        raise ValueError("Configure an SMTP host and From address before requiring email verification.")
+    if enabled and not registration_public_url_safe(db):
+        raise ValueError("Public registration requires an HTTPS Public Base URL (localhost is allowed for testing).")
+
+    before = registration_settings_view(db)
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["enabled"], "true" if enabled else "false")
+    set_app_setting(
+        db,
+        REGISTRATION_SETTING_KEYS["verification_required"],
+        "true" if verification_required else "false",
+    )
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["role"], str(role.id))
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["expiry"], str(verification_hours))
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["smtp_host"], host)
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["smtp_port"], str(smtp_port))
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["smtp_security"], smtp_security)
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["smtp_username"], username)
+    set_app_setting(db, REGISTRATION_SETTING_KEYS["smtp_from"], from_address)
+    if remove_smtp_password:
+        setting = db.get(AppSetting, REGISTRATION_SETTING_KEYS["smtp_password"])
+        if setting is not None:
+            db.delete(setting)
+    elif smtp_password:
+        set_app_setting(
+            db,
+            REGISTRATION_SETTING_KEYS["smtp_password"],
+            encrypt_secret(smtp_password, SESSION_SECRET),
+        )
+    audit(
+        db,
+        actor,
+        "settings",
+        "public_registration",
+        "registration.settings_updated",
+        {
+            "enabled": before["enabled"],
+            "verification_required": before["verification_required"],
+            "role_id": before["default_role_id"],
+            "verification_hours": before["verification_hours"],
+            "mail_configured": bool(before["mail"]["host"] and before["mail"]["from_address"]),
+        },
+        {
+            "enabled": enabled,
+            "verification_required": verification_required,
+            "role_id": role.id,
+            "verification_hours": verification_hours,
+            "mail_configured": bool(host and from_address),
+        },
+    )
+
+
+def validate_mailbox(value: str, label: str = "Email address") -> str:
+    address = unicodedata.normalize("NFKC", value.strip()).casefold()
+    if (
+        not address
+        or len(address) > 255
+        or address.count("@") != 1
+        or any(character.isspace() for character in address)
+    ):
+        raise ValueError(f"{label} is not valid.")
+    local, domain = address.rsplit("@", 1)
+    if not local or not domain or domain.startswith(".") or domain.endswith(".") or "." not in domain:
+        raise ValueError(f"{label} is not valid.")
+    return address
+
+
+def send_registration_verification(db: Session, user: User, token: str) -> None:
+    settings = registration_mail_settings(db, include_password=True)
+    if not settings["host"] or not settings["from_address"]:
+        raise ValueError("Registration email delivery is not configured.")
+    message = EmailMessage()
+    message["Subject"] = "Verify your Puzzary account"
+    message["From"] = settings["from_address"]
+    message["To"] = user.email or ""
+    verification_url = f"{app_base_url(db)}/register/verify?token={quote(token)}"
+    message.set_content(
+        f"Hello {user.display_name},\n\n"
+        "Verify your Puzzary account by opening this one-time link:\n\n"
+        f"{verification_url}\n\n"
+        f"This link expires in {registration_verification_hours(db)} hours. "
+        "If you did not request this account, ignore this message.\n"
+    )
+    context = ssl.create_default_context()
+    if settings["security"] == "tls":
+        client = smtplib.SMTP_SSL(settings["host"], settings["port"], timeout=10, context=context)
+    else:
+        client = smtplib.SMTP(settings["host"], settings["port"], timeout=10)
+    with client:
+        client.ehlo()
+        if settings["security"] == "starttls":
+            client.starttls(context=context)
+            client.ehlo()
+        if settings["username"]:
+            client.login(settings["username"], settings["password"])
+        client.send_message(message)
+
+
+def cleanup_stale_registrations(db: Session) -> int:
+    cutoff = utcnow() - timedelta(days=REGISTRATION_RETENTION_DAYS)
+    users = list(
+        db.scalars(
+            select(User).where(
+                User.registration_source == "self",
+                User.is_active == False,  # noqa: E712
+                User.email_verified_at.is_(None),
+                User.registration_created_at.is_not(None),
+                User.registration_created_at < cutoff,
+            )
+        )
+    )
+    for user in users:
+        user.display_name = f"Expired registration {user.id}"
+        user.display_name_normalized = f"expired-registration-{user.id}"
+        user.email = None
+        user.email_normalized = None
+        user.password_hash = None
+        user.email_verification_token_hash = None
+        user.email_verification_expires_at = None
+        user.email_verification_sent_at = None
+        user.registration_source = "expired"
+    if users:
+        db.commit()
+    return len(users)
+
+
+async def registration_cleanup_loop() -> None:
+    while True:
+        with SessionLocal() as db:
+            cleanup_stale_registrations(db)
+        await asyncio.sleep(6 * 60 * 60)
 
 
 PLUGIN_GITHUB_TOKEN_SETTING = "plugin_github_token_encrypted"
@@ -592,7 +912,10 @@ def unique_oidc_display_name(db: Session, value: str) -> str:
     base = re.sub(r"\s+", " ", value).strip()[:70] or "OIDC user"
     candidate = base
     number = 2
-    while db.scalar(select(User.id).where(User.display_name == candidate)) is not None:
+    while db.scalar(select(User.id).where(
+        (User.display_name == candidate)
+        | (User.display_name_normalized == normalized_identity(candidate))
+    )) is not None:
         suffix = f" {number}"
         candidate = f"{base[:80 - len(suffix)]}{suffix}"
         number += 1
@@ -2919,16 +3242,214 @@ def clear_login_failures(request: Request, username: str) -> None:
     LOGIN_ATTEMPTS.pop(login_rate_key(request, username), None)
 
 
+def registration_rate_key(request: Request, kind: str, identity: str = "") -> str:
+    host = request.client.host if request.client else "unknown"
+    identity_hash = hash_secret(normalized_identity(identity))[:20] if identity else ""
+    return f"{kind}:{host}:{identity_hash}"
+
+
+def consume_registration_attempt(
+    request: Request,
+    kind: str,
+    identity: str,
+    window: int,
+    maximum: int,
+) -> int:
+    key = registration_rate_key(request, kind, identity)
+    now = time.monotonic()
+    with REGISTRATION_ATTEMPT_LOCK:
+        attempts = REGISTRATION_ATTEMPTS.setdefault(key, deque())
+        while attempts and now - attempts[0] >= window:
+            attempts.popleft()
+        if len(attempts) >= maximum:
+            return max(1, int(window - (now - attempts[0])))
+        attempts.append(now)
+    return 0
+
+
+def registration_csrf_token(request: Request) -> str:
+    token = str(request.session.get("registration_csrf", ""))
+    if not token:
+        token = secrets.token_urlsafe(32)
+        request.session["registration_csrf"] = token
+    return token
+
+
+def require_registration_csrf(request: Request, token: str) -> None:
+    expected = str(request.session.get("registration_csrf", ""))
+    if not expected or not token or not hmac.compare_digest(expected, token):
+        raise HTTPException(403, "Registration form expired. Reload the page and try again.")
+    request.session["registration_csrf"] = secrets.token_urlsafe(32)
+
+
+def registration_form_context(request: Request, db: Session, **values) -> dict:
+    return {
+        "request": request,
+        "current_user": current_user(request, db),
+        "csrf_token": registration_csrf_token(request),
+        "verification_hours": registration_verification_hours(db),
+        "verification_required": registration_verification_required(db),
+        "error": "",
+        "submitted": False,
+        "display_name": "",
+        "email": "",
+        **values,
+    }
+
+
+def validate_registration_input(display_name: str, email: str, password: str) -> tuple[str, str]:
+    clean_name = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", display_name)).strip()
+    if len(clean_name) < 2 or len(clean_name) > 80 or any(ord(character) < 32 for character in clean_name):
+        raise ValueError("Display name must be between 2 and 80 readable characters.")
+    clean_email = validate_mailbox(email)
+    if len(password) > 256:
+        raise ValueError("Password is too long.")
+    error = password_error(password)
+    if error:
+        raise ValueError(error)
+    return clean_name, clean_email
+
+
+def issue_registration_verification(db: Session, user: User) -> str:
+    token = secrets.token_urlsafe(32)
+    user.email_verification_token_hash = hash_secret(token)
+    user.email_verification_expires_at = utcnow() + timedelta(hours=registration_verification_hours(db))
+    user.email_verification_sent_at = utcnow()
+    return token
+
+
+def request_public_registration(
+    request: Request,
+    db: Session,
+    display_name: str,
+    email: str,
+    password: str,
+) -> None:
+    if not public_registration_available(db):
+        raise HTTPException(403, "Public registration is disabled.")
+    ip_retry = consume_registration_attempt(
+        request,
+        "create-ip",
+        "",
+        REGISTRATION_RATE_LIMIT_WINDOW,
+        REGISTRATION_IP_RATE_LIMIT_MAX,
+    )
+    identity_retry = consume_registration_attempt(
+        request,
+        "create-identity",
+        email,
+        REGISTRATION_RATE_LIMIT_WINDOW,
+        REGISTRATION_RATE_LIMIT_MAX,
+    )
+    retry = max(ip_retry, identity_retry)
+    if retry:
+        raise HTTPException(429, "Too many registration attempts. Try again later.", headers={"Retry-After": str(retry)})
+    clean_name, clean_email = validate_registration_input(display_name, email, password)
+    name_identity = normalized_identity(clean_name)
+    existing = db.scalar(select(User.id).where(
+        (User.display_name_normalized == name_identity)
+        | (User.email_normalized == clean_email)
+        | (User.display_name == clean_name)
+        | (User.email == clean_email)
+    ))
+    if existing is not None:
+        return
+    role = registration_default_role(db)
+    now = utcnow()
+    verification_required = registration_verification_required(db)
+    user = User(
+        display_name=clean_name,
+        display_name_normalized=name_identity,
+        email=clean_email,
+        email_normalized=clean_email,
+        password_hash=hash_password(password),
+        is_admin=False,
+        is_active=not verification_required,
+        permissions_initialized=True,
+        permission_overrides={},
+        roles=[role],
+        registration_source="self",
+        registration_created_at=now,
+    )
+    token = issue_registration_verification(db, user) if verification_required else ""
+    try:
+        db.add(user)
+        db.flush()
+        audit(db, user, "user", user.id, "registration.created", {}, {"role_id": role.id})
+        if verification_required:
+            send_registration_verification(db, user, token)
+            audit(db, user, "user", user.id, "registration.email_sent", {}, {})
+        else:
+            audit(db, user, "user", user.id, "registration.activated", {}, {})
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+    except Exception:
+        db.rollback()
+        logging.getLogger("puzzary.registration").exception("Could not deliver a public registration verification email.")
+
+
+def resend_registration_verification(request: Request, db: Session, email: str) -> None:
+    if not public_registration_available(db):
+        raise HTTPException(403, "Public registration is disabled.")
+    if not registration_verification_required(db):
+        return
+    try:
+        clean_email = validate_mailbox(email)
+    except ValueError:
+        clean_email = normalized_identity(email)[:255]
+    ip_retry = consume_registration_attempt(
+        request,
+        "resend-ip",
+        "",
+        REGISTRATION_RESEND_WINDOW,
+        REGISTRATION_IP_RATE_LIMIT_MAX,
+    )
+    identity_retry = consume_registration_attempt(
+        request,
+        "resend-identity",
+        clean_email,
+        REGISTRATION_RESEND_WINDOW,
+        REGISTRATION_RESEND_MAX,
+    )
+    retry = max(ip_retry, identity_retry)
+    if retry:
+        raise HTTPException(429, "Too many verification requests. Try again later.", headers={"Retry-After": str(retry)})
+    user = db.scalar(select(User).where(
+        User.email_normalized == clean_email,
+        User.registration_source == "self",
+        User.is_active == False,  # noqa: E712
+        User.email_verified_at.is_(None),
+    ))
+    if user is None:
+        return
+    sent_at = as_utc(user.email_verification_sent_at) if user.email_verification_sent_at else None
+    if sent_at and (utcnow() - sent_at).total_seconds() < REGISTRATION_RESEND_MIN_SECONDS:
+        return
+    token = issue_registration_verification(db, user)
+    try:
+        send_registration_verification(db, user, token)
+        audit(db, user, "user", user.id, "registration.email_resent", {}, {})
+        db.commit()
+    except Exception:
+        db.rollback()
+        logging.getLogger("puzzary.registration").exception("Could not resend a registration verification email.")
+
+
 def find_login_user(db: Session, username: str) -> User | None:
     normalized = username.strip()
     if not normalized:
         return None
-    email = normalized.lower()
-    return db.scalar(
+    identity = normalized_identity(normalized)
+    display_name_user = db.scalar(
         select(User).where(
-            (User.display_name == normalized) | (User.email == email)
+            (User.display_name == normalized)
+            | (User.display_name_normalized == identity)
         )
     )
+    if display_name_user is not None:
+        return display_name_user
+    return db.scalar(select(User).where(User.email_normalized == identity))
 
 
 def api_user_from_token(request: Request, db: Session) -> User | None:
@@ -2966,8 +3487,12 @@ def require_api_user(request: Request, db: Session) -> User:
     return user
 
 
+def normalized_identity(value: str) -> str:
+    return unicodedata.normalize("NFKC", value.strip()).casefold()
+
+
 def normalized_email(value: str) -> str | None:
-    email = value.strip().lower()
+    email = normalized_identity(value)
     return email or None
 
 
@@ -2981,12 +3506,26 @@ def create_user_record(
     clean_name = display_name.strip()
     if not clean_name:
         raise HTTPException(status_code=400, detail="Display name is required")
-    if db.scalar(select(User).where(User.display_name == clean_name)):
+    clean_name_identity = normalized_identity(clean_name)
+    if db.scalar(select(User).where(
+        (User.display_name == clean_name) | (User.display_name_normalized == clean_name_identity)
+    )):
         raise HTTPException(status_code=400, detail="That display name is already in use")
     clean_email = normalized_email(email)
-    if clean_email and db.scalar(select(User).where(User.email == clean_email)):
+    if clean_email and db.scalar(select(User).where(
+        (User.email == clean_email) | (User.email_normalized == clean_email)
+    )):
         raise HTTPException(status_code=400, detail="That email is already in use")
-    user = User(display_name=clean_name, email=clean_email, is_admin=is_admin, is_active=True)
+    user = User(
+        display_name=clean_name,
+        display_name_normalized=clean_name_identity,
+        email=clean_email,
+        email_normalized=clean_email,
+        email_verified_at=utcnow() if clean_email else None,
+        registration_source="admin",
+        is_admin=is_admin,
+        is_active=True,
+    )
     from app.models import PermissionRole
     role = db.scalar(select(PermissionRole).where(PermissionRole.name == ('Admin' if is_admin else 'Player')))
     if role is None:
@@ -3022,12 +3561,22 @@ def ensure_admin_user(db: Session) -> None:
         admin_user = db.scalar(select(User).order_by(User.created_at, User.id))
     if admin_user is None:
         display_name = os.getenv("PUZZARY_BOOTSTRAP_ADMIN_NAME", "admin").strip() or "admin"
-        admin_user = User(display_name=display_name, is_admin=True, is_active=True)
+        admin_user = User(
+            display_name=display_name,
+            display_name_normalized=normalized_identity(display_name),
+            registration_source="bootstrap",
+            is_admin=True,
+            is_active=True,
+        )
         db.add(admin_user)
         db.flush()
     else:
         admin_user.is_admin = True
         admin_user.is_active = True
+        if not admin_user.display_name_normalized:
+            admin_user.display_name_normalized = normalized_identity(admin_user.display_name)
+        if admin_user.email and not admin_user.email_normalized:
+            admin_user.email_normalized = normalized_email(admin_user.email)
     if admin_user.password_hash:
         db.commit()
         clear_bootstrap_setup_link()
@@ -3762,12 +4311,19 @@ def oidc_callback(
         if role is None:
             initialize_permissions(db)
             role = db.scalar(select(PermissionRole).where(PermissionRole.name == "Player"))
-        verified_email = result.email if result.email_verified else None
-        if verified_email and db.scalar(select(User.id).where(User.email == verified_email)) is not None:
+        verified_email = normalized_email(result.email) if result.email_verified else None
+        if verified_email and db.scalar(select(User.id).where(
+            (User.email == verified_email) | (User.email_normalized == verified_email)
+        )) is not None:
             verified_email = None
+        oidc_display_name = unique_oidc_display_name(db, result.display_name)
         user = User(
-            display_name=unique_oidc_display_name(db, result.display_name),
+            display_name=oidc_display_name,
+            display_name_normalized=normalized_identity(oidc_display_name),
             email=verified_email,
+            email_normalized=verified_email,
+            email_verified_at=utcnow() if verified_email else None,
+            registration_source="oidc",
             is_admin=False,
             is_active=True,
             permissions_initialized=True,
@@ -3822,8 +4378,173 @@ def login_page(request: Request, db: Session = Depends(get_db)):
             "oidc_providers": oidc_enabled_providers(db) if mode != "local" else [],
             "show_local_login": mode != "oidc" or request.query_params.get("local") == "1",
             "bootstrap_admin_pending": bootstrap_admin_pending(db),
+            "public_registration_available": public_registration_available(db),
         },
     )
+
+
+@app.get("/register", response_class=HTMLResponse)
+def registration_page(request: Request, db: Session = Depends(get_db)):
+    if not public_registration_available(db):
+        raise HTTPException(404, "Public registration is not available.")
+    cleanup_stale_registrations(db)
+    return templates.TemplateResponse(request, "register.html", registration_form_context(request, db))
+
+
+@app.post("/register", response_class=HTMLResponse)
+def registration_submit(
+    request: Request,
+    csrf_token: str = Form(""),
+    display_name: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(""),
+    confirm_password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not public_registration_available(db):
+        raise HTTPException(403, "Public registration is disabled.")
+    require_registration_csrf(request, csrf_token)
+    if password != confirm_password:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            registration_form_context(
+                request, db, error="Passwords do not match.", display_name=display_name, email=email
+            ),
+            status_code=400,
+        )
+    try:
+        request_public_registration(request, db, display_name, email, password)
+    except ValueError as error:
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            registration_form_context(
+                request, db, error=str(error), display_name=display_name, email=email
+            ),
+            status_code=400,
+        )
+    except HTTPException as error:
+        if error.status_code != 429:
+            raise
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            registration_form_context(request, db, error=error.detail),
+            status_code=error.status_code,
+            headers=error.headers,
+        )
+    return templates.TemplateResponse(
+        request,
+        "register.html",
+        registration_form_context(request, db, submitted=True),
+        status_code=202,
+    )
+
+
+@app.post("/register/resend", response_class=HTMLResponse)
+def registration_resend(
+    request: Request,
+    csrf_token: str = Form(""),
+    email: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not public_registration_available(db):
+        raise HTTPException(403, "Public registration is disabled.")
+    require_registration_csrf(request, csrf_token)
+    try:
+        resend_registration_verification(request, db, email)
+    except HTTPException as error:
+        if error.status_code != 429:
+            raise
+        return templates.TemplateResponse(
+            request,
+            "register.html",
+            registration_form_context(request, db, error=error.detail),
+            status_code=error.status_code,
+            headers=error.headers,
+        )
+    return templates.TemplateResponse(
+        request,
+        "register.html",
+        registration_form_context(request, db, submitted=True),
+        status_code=202,
+    )
+
+
+@app.get("/register/verify", response_class=HTMLResponse)
+def registration_verify(request: Request, token: str = "", db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.email_verification_token_hash == hash_secret(token))) if token else None
+    valid = bool(
+        user
+        and user.registration_source == "self"
+        and not user.is_active
+        and user.email_verification_expires_at
+        and as_utc(user.email_verification_expires_at) > utcnow()
+    )
+    if not valid:
+        return templates.TemplateResponse(
+            request,
+            "registration_verified.html",
+            {
+                "request": request,
+                "current_user": current_user(request, db),
+                "verified": False,
+                "registration_available": public_registration_available(db),
+            },
+            status_code=400,
+        )
+    user.is_active = True
+    user.email_verified_at = utcnow()
+    user.email_verification_token_hash = None
+    user.email_verification_expires_at = None
+    user.email_verification_sent_at = None
+    user.session_version = max(1, user.session_version or 1)
+    audit(db, user, "user", user.id, "registration.verified", {}, {})
+    db.commit()
+    if oidc_login_mode(db) != "oidc":
+        request.session.clear()
+        request.session["user_id"] = user.id
+        request.session["session_version"] = user.session_version
+        request.session["auth_method"] = "local"
+    return templates.TemplateResponse(
+        request,
+        "registration_verified.html",
+        {
+            "request": request,
+            "current_user": user if oidc_login_mode(db) != "oidc" else None,
+            "verified": True,
+            "local_login_available": oidc_login_mode(db) != "oidc",
+        },
+    )
+
+
+@app.post("/api/register", status_code=202)
+def api_public_registration(
+    payload: PublicRegistrationCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        request_public_registration(request, db, payload.display_name, payload.email, payload.password)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    message = (
+        "If the account details can be registered, a verification email will be sent."
+        if registration_verification_required(db)
+        else "If the account details can be registered, the account is ready to sign in."
+    )
+    return {"accepted": True, "message": message}
+
+
+@app.post("/api/register/resend", status_code=202)
+def api_public_registration_resend(
+    payload: PublicRegistrationResend,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    resend_registration_verification(request, db, payload.email)
+    return {"accepted": True, "message": "If an unverified registration exists, a verification email will be sent."}
 
 
 @app.post("/login")
@@ -4362,6 +5083,7 @@ def admin_context(
                 oidc_provider_payload(provider, db)
                 for provider in db.scalars(select(OIDCProvider).order_by(OIDCProvider.display_name, OIDCProvider.id))
             ],
+            "registration": registration_settings_view(db),
             "disabled_puzzle_types": sorted(disabled_puzzle_type_slugs(db)),
             "transport": {
                 "native_tls": TRANSPORT_CONFIG.native_tls,
@@ -5185,6 +5907,19 @@ def admin_update_settings(
     request: Request,
     public_base_url: str | None = Form(None),
     oidc_login_mode_value: str | None = Form(None, alias="oidc_login_mode"),
+    public_registration_enabled_value: str | None = Form(None, alias="public_registration_enabled"),
+    public_registration_verification_required_value: str | None = Form(
+        None, alias="public_registration_verification_required"
+    ),
+    public_registration_role_id: str | None = Form(None),
+    public_registration_verification_hours: str | None = Form(None),
+    registration_smtp_host: str | None = Form(None),
+    registration_smtp_port: str | None = Form(None),
+    registration_smtp_security: str | None = Form(None),
+    registration_smtp_username: str | None = Form(None),
+    registration_smtp_password: str = Form(""),
+    registration_smtp_from: str | None = Form(None),
+    remove_registration_smtp_password: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_admin_user(request, db)
@@ -5209,6 +5944,16 @@ def admin_update_settings(
         login_mode = oidc_login_mode_value.strip().lower()
         if login_mode not in OIDC_LOGIN_MODES:
             return RedirectResponse(url="/admin/settings?error=Unknown%20login%20mode.", status_code=303)
+        registration_will_remain_enabled = (
+            public_registration_enabled(db)
+            if public_registration_enabled_value is None
+            else public_registration_enabled_value.strip().lower() in {"1", "true", "yes", "on"}
+        )
+        if login_mode == "oidc" and registration_will_remain_enabled:
+            return RedirectResponse(
+                url="/admin/settings?error=Disable%20public%20local-account%20registration%20before%20using%20single-sign-on-only%20mode.",
+                status_code=303,
+            )
         if login_mode != "local" and not oidc_enabled_providers(db):
             return RedirectResponse(
                 url="/admin/settings?error=Enable%20a%20successfully%20tested%20OIDC%20provider%20before%20turning%20on%20single%20sign-on.",
@@ -5216,6 +5961,29 @@ def admin_update_settings(
             )
         set_app_setting(db, "oidc_login_mode", login_mode)
         audit(db, user, "settings", "oidc_login_mode", "oidc.login_mode", {}, {"mode": login_mode})
+    if public_registration_enabled_value is not None:
+        require_permission(user, "settings.manage")
+        try:
+            save_registration_settings(
+                db,
+                user,
+                enabled=public_registration_enabled_value.strip().lower() in {"1", "true", "yes", "on"},
+                verification_required=(public_registration_verification_required_value or "off").strip().lower()
+                in {"1", "true", "yes", "on"},
+                role_id=int(public_registration_role_id or "0"),
+                verification_hours=int(public_registration_verification_hours or "24"),
+                smtp_host=registration_smtp_host or "",
+                smtp_port=int(registration_smtp_port or "587"),
+                smtp_security=(registration_smtp_security or "starttls").strip().lower(),
+                smtp_username=registration_smtp_username or "",
+                smtp_password=registration_smtp_password,
+                smtp_from=registration_smtp_from or "",
+                remove_smtp_password=remove_registration_smtp_password == "on",
+                target_login_mode=oidc_login_mode(db),
+            )
+        except (TypeError, ValueError) as error:
+            db.rollback()
+            return RedirectResponse(url=f"/admin/settings?error={quote(str(error))}", status_code=303)
     db.commit()
     return RedirectResponse(url="/admin/settings?message=Settings%20saved.", status_code=303)
 
@@ -5383,18 +6151,29 @@ def admin_update_user(
     clean_name = user.display_name if display_name is None else display_name.strip()
     if not clean_name:
         return RedirectResponse(url="/admin/users?error=Display%20name%20is%20required.", status_code=303)
-    existing_name = db.scalar(select(User).where(User.display_name == clean_name, User.id != user.id))
+    clean_name_identity = normalized_identity(clean_name)
+    existing_name = db.scalar(select(User).where(
+        ((User.display_name == clean_name) | (User.display_name_normalized == clean_name_identity)),
+        User.id != user.id,
+    ))
     if existing_name:
         return RedirectResponse(url="/admin/users?error=That%20display%20name%20is%20already%20in%20use.", status_code=303)
     clean_email = user.email if email is None else normalized_email(email)
     if clean_name != user.display_name or clean_email != user.email:
         require_permission(admin,'users.edit')
     if clean_email:
-        existing_email = db.scalar(select(User).where(User.email == clean_email, User.id != user.id))
+        existing_email = db.scalar(select(User).where(
+            ((User.email == clean_email) | (User.email_normalized == clean_email)),
+            User.id != user.id,
+        ))
         if existing_email:
             return RedirectResponse(url="/admin/users?error=That%20email%20is%20already%20in%20use.", status_code=303)
     user.display_name = clean_name
+    user.display_name_normalized = clean_name_identity
     user.email = clean_email
+    user.email_normalized = clean_email
+    if clean_email != before["email"]:
+        user.email_verified_at = utcnow() if clean_email else None
     if is_admin is not None:
         from app.models import PermissionRole
         user.roles = [db.scalar(select(PermissionRole).where(PermissionRole.name == ('Admin' if is_admin == 'on' else 'Player')))]

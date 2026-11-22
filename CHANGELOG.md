@@ -6,6 +6,12 @@ are versioned independently in their own repositories.
 
 ## [Unreleased]
 
+### Added
+
+- Optional, administrator-controlled public account registration with optional
+  email verification, safe default roles, web and API signup, abuse controls,
+  audit history, and explicit separation from OpenID Connect identity linking.
+
 ### Changed
 
 - Puzzle implementations, templates, browser assets, module-specific guides,

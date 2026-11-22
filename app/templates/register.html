@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Create Account - Puzzary{% endblock %}
+{% block content %}
+<section class="login-wrap">
+  <div class="panel login-panel">
+    <h1>Create account</h1>
+    <p class="muted">Create a local Puzzary account.{% if verification_required %} You must verify your email before signing in.{% endif %}</p>
+
+    {% if error %}<p class="notice danger" role="alert">{{ error }}</p>{% endif %}
+    {% if submitted %}
+      {% if verification_required %}
+        <p class="notice" role="status">If the account details can be registered, a verification email will arrive shortly. The link expires in {{ verification_hours }} hours.</p>
+      {% else %}
+        <p class="notice" role="status">If the account details can be registered, the account is ready to sign in.</p>
+      {% endif %}
+    {% else %}
+      <form method="post" action="/register">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          Display name / username
+          <input name="display_name" value="{{ display_name }}" autocomplete="username" minlength="2" maxlength="80" required aria-describedby="registration-name-help">
+          <small id="registration-name-help" class="muted">Used to sign in and shown to other players.</small>
+        </label>
+        <label>
+          Email address
+          <input name="email" value="{{ email }}" type="email" autocomplete="email" maxlength="255" required>
+        </label>
+        <label>
+          Password
+          <input name="password" type="password" autocomplete="new-password" minlength="10" maxlength="256" required aria-describedby="registration-password-help">
+          <small id="registration-password-help" class="muted">Use at least 10 characters with uppercase, lowercase, and a number.</small>
+        </label>
+        <label>
+          Confirm password
+          <input name="confirm_password" type="password" autocomplete="new-password" minlength="10" maxlength="256" required>
+        </label>
+        <button type="submit">Create account</button>
+      </form>
+    {% endif %}
+
+    {% if verification_required %}<details>
+      <summary>Resend verification email</summary>
+      <form method="post" action="/register/resend">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Email address<input name="email" type="email" autocomplete="email" maxlength="255" required></label>
+        <button class="ghost-button" type="submit">Resend verification</button>
+      </form>
+    </details>{% endif %}
+    <p class="muted"><a href="/login">Back to login</a></p>
+  </div>
+</section>
+{% endblock %}

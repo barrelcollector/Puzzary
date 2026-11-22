@@ -1714,6 +1714,54 @@
           </select>
         </label>
 
+        <h2>Public Account Registration</h2>
+        <p class="muted">Optional local-account sign-up is off by default. New accounts can receive only a Player-equivalent role; email verification can be required when the deployment needs it.</p>
+        <label>Public self-registration
+          <select name="public_registration_enabled" {% if not current_user.can('settings.manage') %}disabled{% endif %}>
+            <option value="off" {% if not app_settings.registration.enabled %}selected{% endif %}>Disabled (default)</option>
+            <option value="on" {% if app_settings.registration.enabled %}selected{% endif %}>Enabled</option>
+          </select>
+        </label>
+        {% if app_settings.registration.enabled and not app_settings.registration.available %}
+        <p class="notice danger" role="alert">Registration is configured on but unavailable. Check email delivery and the local-account login mode.</p>
+        {% endif %}
+        <label>Default role
+          <select name="public_registration_role_id" {% if not current_user.can('settings.manage') %}disabled{% endif %}>
+            {% for role in app_settings.registration.safe_roles %}
+            <option value="{{ role.id }}" {% if role.id == app_settings.registration.default_role_id %}selected{% endif %}>{{ role.name }}</option>
+            {% endfor %}
+          </select>
+          <small class="muted">Only roles whose permissions are no broader than the Player preset are eligible.</small>
+        </label>
+        <label>Email verification
+          <select name="public_registration_verification_required" {% if not current_user.can('settings.manage') %}disabled{% endif %}>
+            <option value="off" {% if not app_settings.registration.verification_required %}selected{% endif %}>Optional / not required (default)</option>
+            <option value="on" {% if app_settings.registration.verification_required %}selected{% endif %}>Required before sign-in</option>
+          </select>
+        </label>
+        <label>Verification link expiry (hours)
+          <input name="public_registration_verification_hours" type="number" min="1" max="168" value="{{ app_settings.registration.verification_hours }}" {% if not current_user.can('settings.manage') %}readonly{% endif %}>
+        </label>
+
+        <h3>Registration Email Delivery</h3>
+        <p class="muted">Required only when email verification is enabled. SMTP settings are stored by Puzzary. The password is encrypted and is never displayed again.</p>
+        <label>SMTP host<input name="registration_smtp_host" value="{{ app_settings.registration.mail.host }}" placeholder="smtp.example.com" maxlength="255" {% if not current_user.can('settings.manage') %}readonly{% endif %}></label>
+        <label>SMTP port<input name="registration_smtp_port" type="number" min="1" max="65535" value="{{ app_settings.registration.mail.port }}" {% if not current_user.can('settings.manage') %}readonly{% endif %}></label>
+        <label>SMTP security
+          <select name="registration_smtp_security" {% if not current_user.can('settings.manage') %}disabled{% endif %}>
+            <option value="starttls" {% if app_settings.registration.mail.security == 'starttls' %}selected{% endif %}>STARTTLS</option>
+            <option value="tls" {% if app_settings.registration.mail.security == 'tls' %}selected{% endif %}>TLS from connection</option>
+            <option value="none" {% if app_settings.registration.mail.security == 'none' %}selected{% endif %}>No transport encryption (local relay only)</option>
+          </select>
+        </label>
+        <label>SMTP username<input name="registration_smtp_username" value="{{ app_settings.registration.mail.username }}" autocomplete="off" maxlength="255" {% if not current_user.can('settings.manage') %}readonly{% endif %}></label>
+        <label>New SMTP password
+          <input name="registration_smtp_password" type="password" autocomplete="new-password" maxlength="2000" placeholder="Leave blank to keep the saved password" {% if not current_user.can('settings.manage') %}disabled{% endif %}>
+          <small class="muted">Saved password: {{ 'Yes' if app_settings.registration.mail.password_configured else 'No' }}</small>
+        </label>
+        {% if app_settings.registration.mail.password_configured %}<label class="check-row"><input type="checkbox" name="remove_registration_smtp_password" {% if not current_user.can('settings.manage') %}disabled{% endif %}> Remove saved SMTP password</label>{% endif %}
+        <label>From address<input name="registration_smtp_from" type="email" value="{{ app_settings.registration.mail.from_address }}" placeholder="puzzary@example.com" maxlength="255" {% if not current_user.can('settings.manage') %}readonly{% endif %}></label>
+
         {% if current_user.can('plugins.manage') %}<p class="muted">Puzzle modules are installed and enabled from <a href="/admin/plugins">Plugins</a>.</p>{% endif %}
         <button type="submit">Save Settings</button>
       </form>
