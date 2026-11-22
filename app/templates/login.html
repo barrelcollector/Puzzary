@@ -34,6 +34,9 @@
       </label>
       <button type="submit">Log in</button>
     </form>
+    {% if public_registration_available %}
+    <p class="muted registration-link">Need an account? <a href="/register">Create account</a></p>
+    {% endif %}
     {% elif login_mode == 'oidc' %}
     <p class="muted emergency-login"><a href="/login?local=1{% if return_to != '/library' %}&amp;return_to={{ return_to|urlencode }}{% endif %}">Administrator recovery login</a></p>
     {% endif %}

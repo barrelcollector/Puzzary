@@ -9,6 +9,16 @@ class UserCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=80)
 
 
+class PublicRegistrationCreate(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=80)
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=10, max_length=256)
+
+
+class PublicRegistrationResend(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+
+
 class PluginInstallRequest(BaseModel):
     url: str = Field(..., min_length=1, max_length=2048)
     sha256: str = Field(..., min_length=64, max_length=64)

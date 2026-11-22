@@ -11,13 +11,18 @@ from app.transport import TransportConfigurationError, load_transport_config
 
 
 class FeedTokenLogFilter(logging.Filter):
-    """Keep private feed credentials out of Uvicorn access-log request paths."""
+    """Keep credentials and one-time tokens out of Uvicorn access logs."""
 
     pattern = re.compile(r"(/feeds/)[A-Za-z0-9_-]{32,128}(\.(?:atom|rss)(?:\?[^ ]*)?)")
+    query_token_pattern = re.compile(
+        r"(/(?:register/verify|password/setup)\?[^ ]*?\btoken=)[^& ]+",
+        re.IGNORECASE,
+    )
 
     @classmethod
     def redact(cls, value: str) -> str:
-        return cls.pattern.sub(r"\1[REDACTED]\2", value)
+        value = cls.pattern.sub(r"\1[REDACTED]\2", value)
+        return cls.query_token_pattern.sub(r"\1[REDACTED]", value)
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.msg, str):

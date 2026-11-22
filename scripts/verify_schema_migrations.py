@@ -62,7 +62,12 @@ def child_check(scenario: str) -> None:
         upgrade_database()
         upgrade_database()
         columns = {column["name"] for column in inspect(engine).get_columns("users")}
-        assert {"permissions_initialized", "permission_overrides", "appearance_theme"} <= columns
+        assert {
+            "permissions_initialized", "permission_overrides", "appearance_theme",
+            "display_name_normalized", "email_normalized", "email_verified_at",
+            "email_verification_token_hash", "email_verification_expires_at",
+            "email_verification_sent_at", "registration_source", "registration_created_at",
+        } <= columns
         puzzle_columns = {column["name"] for column in inspect(engine).get_columns("puzzles")}
         assert {"completion_message", "publish_at", "auto_archive_at"} <= puzzle_columns
         assert "dictionary_import_sources" in inspect(engine).get_table_names()
@@ -72,7 +77,7 @@ def child_check(scenario: str) -> None:
             assert db.scalar(select(WordBankWord).join(DictionaryWord).where(DictionaryWord.display_text == "Preserved")) is not None
 
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0002_legacy_bridge"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003_public_registration"
     command.check(alembic_config())
 
 

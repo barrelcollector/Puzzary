@@ -20,6 +20,8 @@ features, automation, and extension development.
   feeds, notifications, printing, and Group Solve.
 - [Administration](administration.md): accounts, permissions, publishing,
   content, themes, modules, and optional sign-in providers.
+- [Public account registration](public-registration.md): optional public
+  signup, email verification, role safety, abuse controls, and API support.
 - [Group Solve](group-solve.md): hosting, joining, guests, privacy, and realtime
   collaboration behavior.
 - [Publishing and printing](publishing-and-printing.md): puzzle sheets, PNG/PDF
