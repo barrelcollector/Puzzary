@@ -8487,7 +8487,8 @@ def get_offline_package(puzzle_id: str, request: Request, db: Session = Depends(
     if play_script and not play_script.startswith("/"):
         play_script = f"/static/{play_script}"
     assets = [
-        "/static/styles.css?v=54",
+        "/static/styles.css?v=55",
+        "/static/navigation.js?v=1",
         "/static/pwa.js?v=2",
         "/static/puzzle-actions.js?v=4",
         "/static/offline-puzzles.js?v=2",

@@ -3,7 +3,7 @@ const SHELL_PREFIX = "puzzary-shell-";
 const USER_CACHE_PREFIX = "puzzary-user-";
 const OFFLINE_FALLBACK = "/static/offline.html?v=2";
 const DB_NAME = "puzzary-offline-v1";
-const SHELL_ASSETS = [OFFLINE_FALLBACK, "/static/styles.css?v=54", "/static/pwa.js?v=2", "/static/offline-puzzles.js?v=2", "/static/brand/puzzary-mark.svg?v=1", "/static/brand/puzzary-192.png?v=1", "/static/brand/puzzary-512.png?v=1"];
+const SHELL_ASSETS = [OFFLINE_FALLBACK, "/static/styles.css?v=55", "/static/navigation.js?v=1", "/static/pwa.js?v=2", "/static/offline-puzzles.js?v=2", "/static/brand/puzzary-mark.svg?v=1", "/static/brand/puzzary-192.png?v=1", "/static/brand/puzzary-512.png?v=1"];
 
 function database() {
   return new Promise((resolve, reject) => {
