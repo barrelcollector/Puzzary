@@ -22,6 +22,9 @@ assert "docs/README.md" in readme
 assert "docs/puzzle-modules.md" in readme
 assert "docs/progressive-web-app.md" in readme
 assert "https://github.com/barrelcollector/puzzary-official-plugins" in readme
+assert "## AI-assisted development disclosure" in readme
+assert "vibe coding" in readme
+assert "CONTRIBUTING.md#ai-assisted-contributions" in readme
 assert len(readme.splitlines()) <= 160
 for stale_heading in ("## Dictionary Content Pack", "## Nonogram / Picross", "## Takuzu / Binairo"):
     assert stale_heading not in readme, stale_heading

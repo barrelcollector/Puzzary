@@ -106,6 +106,16 @@ Puzzary is public beta software. Review the [changelog](CHANGELOG.md), the
 [security policy](SECURITY.md) before operating a public installation. Back up
 the PostgreSQL database and application data before every upgrade.
 
+## AI-assisted development disclosure
+
+Puzzary has been developed substantially through AI-assisted, sometimes called
+“vibe coding,” workflows. A human maintainer directs the product, reviews and
+accepts changes, runs the project’s tests, and is responsible for releases and
+licensing decisions. AI-produced code can contain mistakes, so users should
+treat the public-beta status, test coverage, security policy, and backup advice
+as important safeguards rather than guarantees. Contributions that use AI must
+follow the [AI-assisted contribution requirements](CONTRIBUTING.md#ai-assisted-contributions).
+
 ## License and contributions
 
 Puzzary core is licensed under the [Apache License 2.0](LICENSE). Puzzle modules
