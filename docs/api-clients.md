@@ -34,7 +34,7 @@ curl --fail --silent \
   -X POST \
   -H "Authorization: Bearer $PUZZARY_API_TOKEN" \
   -H "Content-Type: application/json" \
-  --data '{"puzzle_type":"takuzu","difficulty":"easy","seed":"automation-example"}' \
+  --data '{"puzzle_type":"your_installed_module","difficulty":"easy","seed":"automation-example"}' \
   https://puzzary.example.test/api/puzzles/generate
 ```
 

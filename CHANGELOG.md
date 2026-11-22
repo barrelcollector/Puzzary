@@ -8,17 +8,17 @@ are versioned independently in their own repositories.
 
 ### Changed
 
-- Puzzle implementations, templates, browser assets, guides, and the English
-  Dictionary Content pack now have one canonical home in the official package
+- Puzzle implementations, templates, browser assets, module-specific guides,
+  and packaged content now have one canonical home in the official package
   repository. Core loads installed packages and reports missing modules without
-  silently using bundled fallbacks.
+  silently substituting a core implementation.
 
-## [0.1.0-beta.1] - Unreleased
+## [0.1.0-beta.1] - 2026-11-20
 
 ### Added
 
 - First-run administrator setup without a universal default password.
-- Ten official installable puzzle types.
+- An independently installable catalog of official puzzle types.
 - Web and API workflows for puzzle generation, play, progress, groups,
   publishing, printable PDF/PNG output, uploads, themes, feeds, notifications,
   permissions, OIDC sign-in, and module management.
@@ -29,10 +29,8 @@ are versioned independently in their own repositories.
 
 ### Release status
 
-- Beta release candidate. Back up the PostgreSQL database and application data
-  before upgrading.
-- The tag and source archive will be published only after every issue in the
-  v0.1.0 Public Beta milestone is closed.
+- Public beta. Back up the PostgreSQL database and application data before
+  upgrading.
 
 [Unreleased]: https://github.com/barrelcollector/Puzzary/compare/v0.1.0-beta.1...HEAD
 [0.1.0-beta.1]: https://github.com/barrelcollector/Puzzary/releases/tag/v0.1.0-beta.1

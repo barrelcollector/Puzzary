@@ -41,9 +41,8 @@ id, kind, directory, and manifest path. Core exposes their resolved installed
 paths through the package status API. A missing content package is reported;
 core never substitutes a stale bundled copy.
 
-The official English Dictionary Content package is the canonical example. Its
-data, build tools, verification history, and third-party license notices live at
-https://github.com/barrelcollector/puzzary-official-plugins/tree/main/plugins/dictionary_content.
+Official puzzle and content packages, including their data licenses and build
+tools, live in the separate official package repository rather than core.
 
 The entrypoint registers exactly one puzzle type matching `slug`. Templates use
 `puzzle_types/{slug}.html`, `puzzle_solutions/{slug}.html`, and
@@ -122,9 +121,9 @@ The supporting API accepts the credential only in the `PUT` request body and
 returns redacted status fields. `PUZZARY_PLUGIN_GITHUB_TOKEN` remains an optional
 server-environment fallback for recovery and existing deployments.
 
-Independently installable releases for all ten official puzzle types and shared
-content packages are
-publicly maintained at https://github.com/barrelcollector/puzzary-official-plugins.
+Independently installable releases for the official puzzle catalog and shared
+content packages are publicly maintained at
+https://github.com/barrelcollector/puzzary-official-plugins.
 Official modules install and update without a GitHub credential; private access
 is only needed for additional modules hosted in private repositories. A fresh
 core installation intentionally has no puzzle implementation until packages are
@@ -305,7 +304,7 @@ Use separate payloads for separate audiences:
 - `solution_payload`: server-only answer key, placements, reveal data, and admin-only solution details. Player templates, page source, and ordinary puzzle API responses must not serialize it.
 - `metadata`: generation settings, seed, source references, and module-specific notes.
 
-Interactive checks, hints, and reveals must use the module's server-side `collaboration` action handler. Normal checks may report completion, but must not return per-cell correctness or partial match counts. Explicit hint and reveal actions may return only the answer material the player requested. Public puzzle rules, such as a duplicate in a Sudoku row, may still be validated in the browser because they do not require the stored solution.
+Interactive checks, hints, and reveals must use the module's server-side `collaboration` action handler. Normal checks may report completion, but must not return per-cell correctness or partial match counts. Explicit hint and reveal actions may return only the answer material the player requested. Public constraint violations may still be validated in the browser when they do not require the stored solution.
 
 ## Templates
 
