@@ -9,6 +9,7 @@ deployment = (root / "docs/docker-deployment.md").read_text(encoding="utf-8")
 modules = (root / "docs/puzzle-modules.md").read_text(encoding="utf-8")
 pwa = (root / "docs/progressive-web-app.md").read_text(encoding="utf-8")
 registration = (root / "docs/public-registration.md").read_text(encoding="utf-8")
+lan_offline = (root / "docs/lan-only-offline.md").read_text(encoding="utf-8")
 env_example = (root / ".env.example").read_text(encoding="utf-8")
 license_text = (root / "LICENSE").read_text(encoding="utf-8")
 notice = (root / "NOTICE").read_text(encoding="utf-8")
@@ -55,6 +56,16 @@ for marker in (
 
 for marker in ("/service-worker.js", "secure browser context", "Authenticated HTML", "versioned shell cache"):
     assert marker in pwa, marker
+
+for marker in (
+    "Port forwarding, a public inbound firewall rule",
+    "puzzary.home.arpa",
+    "tls internal",
+    "Trust the internal CA on every client",
+    "DNS-01 validation",
+    "Available offline",
+):
+    assert marker in lan_offline, marker
 
 for marker in (
     "explicitly enabled",
