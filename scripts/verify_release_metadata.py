@@ -64,7 +64,7 @@ changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 release_notes = (ROOT / "docs" / "releases" / f"v{version}.md").read_text(encoding="utf-8")
 deployment = (ROOT / "docs" / "docker-deployment.md").read_text(encoding="utf-8")
 assert f"[{version}]" in changelog
-for marker in ("SHA-256", "backup", "upgrade", "milestone"):
+for marker in ("SHA-256", "backup", "upgrade", "tagged commit"):
     assert marker.lower() in release_notes.lower(), marker
 for marker in ("pg_dump", "pg_restore --list", "rollback"):
     assert marker in deployment, marker

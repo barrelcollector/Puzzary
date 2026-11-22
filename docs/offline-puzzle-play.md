@@ -43,8 +43,7 @@ the downloaded file can test guesses, and small answer spaces may be practical
 to brute-force. Puzzle owners can turn off **Offline play** for an individual
 puzzle in the web UI. A disabled puzzle cannot be downloaded and its solution
 commitment is never sent to the browser. Modules that cannot run from public
-clues alone may instead provide `offline_game_data`; for example, Minesweeper
-must download its mine layout to reveal connected safe cells while disconnected.
+clues alone may instead provide module-specific `offline_game_data`.
 Treat that data as browser-visible and disable offline play for any puzzle whose
 game state must remain server-only.
 

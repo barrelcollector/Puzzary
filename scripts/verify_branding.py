@@ -29,7 +29,8 @@ assert "library and answer portal for Daily Stripe" not in readme
 assert "product's defining purpose" not in readme
 assert "primary purpose" not in readme
 assert "docs/puzzle-modules.md" in readme
-assert "Architecture and integrations" in readme
+assert "## Why Puzzary?" in readme
+assert "## Puzzle modules" in readme
 
 assert 'value="general" placeholder="General"' in admin
 assert 'value="general" placeholder="General"' in generate

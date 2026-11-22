@@ -35,7 +35,7 @@ Docker check that refuses to run while containers named `puzzary` or
 `puzzary-db` exist. In disposable directories it creates production-shaped data
 with the selected baseline revision, upgrades that data with the candidate, and
 then performs a separate clean installation. It verifies first-run setup and
-login, all ten bundled games, official-module installation, upload persistence,
+login, official-module installation and game loading, upload persistence,
 PDF printing, application/image version agreement, and upgrade preservation.
 
 The **Beta release proof** workflow runs this check for release-affecting pull
