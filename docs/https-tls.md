@@ -76,6 +76,12 @@ location / {
 
 The proxy must pass WebSocket upgrades for Group Solve. Browser clients derive `wss://` from the HTTPS page origin; Uvicorn accepts forwarded scheme/client data only from `PUZZARY_TRUSTED_PROXIES`. Test both normal login and a two-browser Group Solve connection through the public hostname.
 
+A reverse proxy can also serve a LAN-only hostname without making Puzzary
+public. The [LAN-only offline travel guide](lan-only-offline.md) provides a
+Caddy `tls internal` example, local DNS requirements, client certificate-trust
+steps, and a DNS-01 alternative for publicly trusted certificates without port
+forwarding.
+
 For Cloudflare Tunnel, point the tunnel service at the Puzzary HTTP listener and use the tunnel connector's exact source address or container-network CIDR if forwarded headers are needed. Do not disable TLS verification when the tunnel connects to an HTTPS origin unless that risk is explicitly accepted and temporary; using Puzzary's HTTP listener on a private Docker network avoids a second certificate boundary.
 
 ## Native HTTPS

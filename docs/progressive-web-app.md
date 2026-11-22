@@ -11,6 +11,10 @@ Service workers and installation require a secure browser context. Use HTTPS
 for a remote deployment. Browsers treat `http://localhost` as secure for local
 development, but a plain HTTP LAN address is not installable. See
 [`https-tls.md`](https-tls.md) for native TLS and trusted reverse-proxy examples.
+For a server that stays private on a home network, follow the
+[LAN-only offline travel guide](lan-only-offline.md). It explains local DNS,
+trusted certificates on phones and tablets, and why public exposure is not
+required.
 
 The manifest and service worker are served at `/static/site.webmanifest` and
 `/service-worker.js`. A reverse proxy must preserve those paths and must not

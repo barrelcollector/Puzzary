@@ -5,6 +5,12 @@ signed-in player chooses **Available offline** on a puzzle, then manages saved
 puzzles, the local item limit, synchronization, removal, and conflicts from
 **Offline** in the main navigation.
 
+A common private-hosting workflow is to download puzzles while connected to a
+home LAN, play while away, and synchronize after returning. The server does not
+need public internet exposure, but PWA and service-worker features on another
+device still require a trusted HTTPS origin. See the
+[LAN-only offline travel guide](lan-only-offline.md).
+
 ## Security and access
 
 Offline HTML is rendered separately from the normal puzzle page. It contains

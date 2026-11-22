@@ -23,6 +23,10 @@ released independently from core.
 - **Ready beyond the browser.** Install the Progressive Web App, save eligible
   puzzles for offline play, create private feeds and notifications, and produce
   PDF or PNG output.
+- **Private at home, playable away.** Keep Puzzary entirely on your home
+  network, download eligible puzzles before leaving, play without a connection,
+  and sync progress when you return. No port forwarding or public server is
+  required; see the [LAN-only offline guide](docs/lan-only-offline.md).
 
 ## Puzzle modules
 
@@ -91,6 +95,7 @@ starting points include:
 - [Installation, upgrades, backup, and restore](docs/docker-deployment.md)
 - [Progressive Web App installation](docs/progressive-web-app.md)
 - [Offline puzzle play](docs/offline-puzzle-play.md)
+- [LAN-only home server and travel play](docs/lan-only-offline.md)
 - [Group Solve](docs/group-solve.md)
 - [Publishing and printing](docs/publishing-and-printing.md)
 - [API clients and print automation](docs/api-clients.md)

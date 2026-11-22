@@ -37,6 +37,8 @@ features, automation, and extension development.
   privacy, and updates.
 - [Offline puzzle play](offline-puzzle-play.md): eligibility, local checking,
   synchronization, conflicts, and the module contract.
+- [LAN-only offline travel play](lan-only-offline.md): private home-server
+  hosting, trusted HTTPS, PWA installation, downloads, and later LAN sync.
 
 ## APIs and extensions
 
