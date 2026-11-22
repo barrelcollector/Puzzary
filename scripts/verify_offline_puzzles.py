@@ -38,6 +38,10 @@ def count(progress, solution):
     return (1 if (progress or {}).get('answers', {}).get('value') == solution.get('answer') else 0, 1)
 def offline_solution(solution):
     return {'answers': {'value': str(solution.get('answer', ''))}}
+def offline_parts(solution):
+    return {'entry-1': offline_solution(solution)}
+def offline_game_data(solution):
+    return {'public_board': 'downloaded-board'}
 def generate(*args, **kwargs):
     return GeneratedPuzzle('Offline test', 'Enter a value.', {}, {}, {'answer':'correct'}, [], {})
 register_puzzle_type(PuzzleType(slug='offline_test', label='Offline Test', generator=generate,
@@ -45,7 +49,8 @@ register_puzzle_type(PuzzleType(slug='offline_test', label='Offline Test', gener
     progress_normalizer=normalize, progress_counter=count, supports_print=False,
     play_script='/plugins/offline_test/static/play.js?v=1', supports_offline=True,
     offline_progress_fields=('answers',), offline_validation='solution_hash',
-    offline_solution_state=offline_solution, offline_notes='Progress and checks work offline.'))
+    offline_solution_state=offline_solution, offline_solution_parts=offline_parts,
+    offline_game_data=offline_game_data, offline_notes='Progress and checks work offline.'))
 """, encoding="utf-8")
 (PACKAGE / "templates" / "puzzle_types" / "offline_test.html").write_text("""
 <div class="offline-test" data-answers='{{ progress_answers | tojson }}' data-progress-url="/api/puzzles/{{ puzzle.id }}/progress">
@@ -142,11 +147,12 @@ try:
         cached_text = page.evaluate("""async () => { let text=''; for (const name of await caches.keys()) { const cache=await caches.open(name); for (const request of await cache.keys()) text += await (await cache.match(request)).clone().text(); } return text; }""")
         assert "NEVER_CACHE_THIS_SOLUTION" not in cached_text
         assert "Admin Solution" not in cached_text
+        assert "downloaded-board" in cached_text
 
         assert desktop.request.get(BASE + "/api/puzzles/offline-protected/offline-package").status == 423
         assert desktop.request.get(BASE + "/api/puzzles/offline-hidden/offline-package").status == 409
         disabled = desktop.request.get(BASE + "/api/puzzles/offline-disabled/offline-package")
-        assert disabled.status == 409 and "disabled" in disabled.text().lower() and "digest" not in disabled.text().lower()
+        assert disabled.status == 409 and "disabled" in disabled.text().lower() and "digest" not in disabled.text().lower() and "game_data" not in disabled.text().lower()
         enabled = admin_context.request.post(BASE + "/admin/puzzles/offline-disabled/metadata", form={
             "category_id": 0, "completion_message": "", "visibility": "public", "offline_allowed": "true",
         }, max_redirects=0)
@@ -169,6 +175,8 @@ try:
         page.locator("[data-offline-value]").fill("correct")
         page.locator("[data-offline-check]").click()
         page.wait_for_function("document.querySelector('[data-test-status]').textContent.includes('checks out offline')")
+        part_result = page.evaluate("PuzzaryOfflineCheck({answers:{value:'correct'}}, 'entry-1')")
+        assert part_result["available"] and part_result["correct"]
         page.locator("[data-offline-value]").fill("device-value")
         page.locator("[data-offline-value]").dispatch_event("change")
         page.wait_for_function("document.querySelector('[data-test-status]').textContent === 'Saved.'")

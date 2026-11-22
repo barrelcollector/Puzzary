@@ -38,17 +38,18 @@
     return {answers: normalized};
   }
 
-  window.PuzzaryOfflineCheck = async progress => {
+  window.PuzzaryOfflineCheck = async (progress, part = "") => {
     const node = document.getElementById("puzzary-offline-verification");
     if (!node) return {available: false, correct: false, message: "This puzzle does not include an offline checker."};
     let verification = {};
     try { verification = JSON.parse(node.textContent || "{}"); } catch (_error) { return {available: false, correct: false, message: "The offline checker could not be read."}; }
     if (verification.method === "local_rules") return {available: false, correct: false, message: "Use this puzzle's local rule checker."};
-    if (verification.method !== "solution_hash" || !verification.salt || !verification.digest || !crypto.subtle) return {available: false, correct: false, message: "This puzzle needs a connection to check."};
-    const canonical = stableStringify(verificationState(progress, verification.hash_mode || "exact"));
-    const bytes = new TextEncoder().encode(`${verification.salt}\n${canonical}`);
+    const check = part ? verification.parts?.[part] : verification;
+    if (verification.method !== "solution_hash" || !check?.salt || !check?.digest || !crypto.subtle) return {available: false, correct: false, message: "This puzzle needs a connection to check."};
+    const canonical = stableStringify(verificationState(progress, check.hash_mode || verification.hash_mode || "exact"));
+    const bytes = new TextEncoder().encode(`${check.salt}\n${canonical}`);
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map(value => value.toString(16).padStart(2, "0")).join("");
-    const correct = hash === verification.digest;
+    const correct = hash === check.digest;
     return {
       available: true,
       correct,

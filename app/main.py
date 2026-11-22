@@ -1790,6 +1790,8 @@ def serialize_puzzle_type_contract(puzzle_type, enabled: bool = True) -> dict:
         "offline_notes": puzzle_type.offline_notes,
         "offline_validation": puzzle_type.offline_validation,
         "offline_hash_mode": puzzle_type.offline_hash_mode,
+        "offline_has_game_data": puzzle_type.offline_game_data is not None,
+        "offline_has_solution_parts": puzzle_type.offline_solution_parts is not None,
         "collaboration_fields": [serialize_generation_field(field) for field in puzzle_type.collaboration_fields],
         "digital_only": puzzle_type.digital_only,
         "supports_gimmes": puzzle_type.supports_gimmes,
@@ -3380,23 +3382,39 @@ def offline_verification(puzzle: Puzzle) -> dict:
     plugin = get_puzzle_type(puzzle.puzzle_type)
     if plugin is None:
         raise HTTPException(409, "Puzzle module unavailable.")
+    verification = {"method": plugin.offline_validation}
+    if plugin.offline_game_data is not None:
+        game_data = plugin.offline_game_data(deepcopy(puzzle.solution_payload or {}))
+        if not isinstance(game_data, dict):
+            raise HTTPException(409, "The puzzle module returned invalid offline game data.")
+        verification["game_data"] = game_data
     if plugin.offline_validation == "local_rules":
-        return {"method": "local_rules"}
+        return verification
     if plugin.offline_validation != "solution_hash" or plugin.offline_solution_state is None:
         raise HTTPException(409, "This puzzle does not have a complete offline checker.")
     expected = plugin.offline_solution_state(deepcopy(puzzle.solution_payload or {}))
     if not isinstance(expected, dict):
         raise HTTPException(409, "The puzzle module returned an invalid offline verification state.")
-    salt = secrets.token_hex(16)
-    canonical = json.dumps(expected, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    digest = hashlib.sha256(f"{salt}\n{canonical}".encode("utf-8")).hexdigest()
-    return {
-        "method": "solution_hash",
+    def commitment(state: dict) -> dict:
+        if not isinstance(state, dict):
+            raise HTTPException(409, "The puzzle module returned an invalid offline verification state.")
+        salt = secrets.token_hex(16)
+        canonical = json.dumps(state, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return {
+            "salt": salt,
+            "digest": hashlib.sha256(f"{salt}\n{canonical}".encode("utf-8")).hexdigest(),
+            "hash_mode": plugin.offline_hash_mode,
+        }
+    verification.update({
         "algorithm": "SHA-256",
-        "salt": salt,
-        "digest": digest,
-        "hash_mode": plugin.offline_hash_mode,
-    }
+        **commitment(expected),
+    })
+    if plugin.offline_solution_parts is not None:
+        parts = plugin.offline_solution_parts(deepcopy(puzzle.solution_payload or {}))
+        if not isinstance(parts, dict) or any(not isinstance(key, str) for key in parts):
+            raise HTTPException(409, "The puzzle module returned invalid offline verification parts.")
+        verification["parts"] = {key: commitment(value) for key, value in parts.items()}
+    return verification
 
 
 @app.get("/health")
@@ -8534,10 +8552,12 @@ def sync_offline_progress(
     }
     normalized_payload = PuzzleProgressUpdate.model_validate(permitted)
     before = deepcopy(progress.progress_payload or {})
-    progress.progress_payload = (
-        puzzle_type.progress_merger(normalized_payload, puzzle.solution_payload, before)
-        if puzzle_type.progress_merger else puzzle_type.progress_normalizer(normalized_payload, puzzle.solution_payload)
-    )
+    if puzzle_type.offline_progress_normalizer:
+        progress.progress_payload = puzzle_type.offline_progress_normalizer(normalized_payload, puzzle.solution_payload)
+    elif puzzle_type.progress_merger:
+        progress.progress_payload = puzzle_type.progress_merger(normalized_payload, puzzle.solution_payload, before)
+    else:
+        progress.progress_payload = puzzle_type.progress_normalizer(normalized_payload, puzzle.solution_payload)
     record_progress_transition(db, puzzle, user.id, puzzle_type, before, progress.progress_payload)
     db.commit()
     db.refresh(progress)
