@@ -21,6 +21,7 @@ CHECK_GROUPS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("scripts/verify_release_metadata.py",),
         ("scripts/verify_module_ownership.py",),
         ("scripts/verify_branding.py",),
+        ("scripts/verify_responsive_navigation.py",),
         ("scripts/verify_minesweeper.py",),
         ("scripts/verify_nonogram.py",),
         ("scripts/verify_takuzu.py",),
