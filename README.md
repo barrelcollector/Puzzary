@@ -158,7 +158,7 @@ managed from **Offline** in the main navigation. They can be played and checked
 without a connection, and progress synchronizes when the server returns;
 changed server progress requires an explicit conflict choice. Puzzle owners
 can disable offline play for sensitive individual puzzles, which prevents the
-offline checking commitment from being downloaded. Protected, hidden,
+offline verification material or game data from being downloaded. Protected, hidden,
 scheduled, archived, guest, and Group Solve content stays online-only. See [offline puzzle
 play](docs/offline-puzzle-play.md) for storage, validation, security, and plugin
 requirements.

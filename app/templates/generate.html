@@ -72,7 +72,7 @@
         <option value="true">Allow complete offline play</option>
         <option value="false">Disable offline play for this puzzle</option>
       </select>
-      <small class="muted">When supported by the module, allowing offline play downloads a salted solution commitment so players can check their solve without the server.</small>
+      <small class="muted">When supported by the module, allowing offline play downloads the verification or game data needed to play and check without the server.</small>
     </label>
     <div data-generation-fields></div>
     {% if can_owned(current_user,'puzzles','publish',current_user.id) and can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>

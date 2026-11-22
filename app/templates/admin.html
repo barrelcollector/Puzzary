@@ -384,7 +384,7 @@
                 Offline play
                 <select name="offline_allowed">
                   <option value="true" {% if not puzzle.puzzle_metadata or not puzzle.puzzle_metadata.get("offline_disabled") %}selected{% endif %}>Allow complete offline play</option>
-                  <option value="false" {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("offline_disabled") %}selected{% endif %}>Disable offline play and solution commitment downloads</option>
+                  <option value="false" {% if puzzle.puzzle_metadata and puzzle.puzzle_metadata.get("offline_disabled") %}selected{% endif %}>Disable offline play and verification data downloads</option>
                 </select>
                 <small class="muted">Disable this for a puzzle whose answer must never be distributed as a salted verification hash.</small>
               </label>
@@ -527,9 +527,9 @@
           Offline play
           <select name="offline_allowed">
             <option value="true" {% if not is_edit or not manual_meta.get("offline_disabled") %}selected{% endif %}>Allow complete offline play</option>
-            <option value="false" {% if is_edit and manual_meta.get("offline_disabled") %}selected{% endif %}>Disable offline play and solution commitment downloads</option>
+            <option value="false" {% if is_edit and manual_meta.get("offline_disabled") %}selected{% endif %}>Disable offline play and verification data downloads</option>
           </select>
-          <small class="muted">Supported modules use a salted commitment for offline checking. Disable this when even that verification material must stay on the server.</small>
+          <small class="muted">Supported modules download the verification or game data needed to play without the server. Disable this when that material must stay server-side.</small>
         </label>
         <label>
           Puzzle access password
@@ -657,7 +657,7 @@
               <option value="true">Allow complete offline play</option>
               <option value="false">Disable offline play for this puzzle</option>
             </select>
-            <small class="muted">Supported modules download a salted solution commitment for offline checking. Disable this for sensitive answers.</small>
+            <small class="muted">Supported modules download the verification or game data needed for offline play. Disable this for sensitive puzzles.</small>
           </label>
           <div data-generation-fields></div>
           {% if can_owned(current_user,'puzzles','publish',current_user.id) and can_owned(current_user,'puzzles','schedule',current_user.id) %}<label>

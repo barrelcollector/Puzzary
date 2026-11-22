@@ -42,7 +42,11 @@ data on the server. It does not reveal the answer directly, but a person with
 the downloaded file can test guesses, and small answer spaces may be practical
 to brute-force. Puzzle owners can turn off **Offline play** for an individual
 puzzle in the web UI. A disabled puzzle cannot be downloaded and its solution
-commitment is never sent to the browser.
+commitment is never sent to the browser. Modules that cannot run from public
+clues alone may instead provide `offline_game_data`; for example, Minesweeper
+must download its mine layout to reveal connected safe cells while disconnected.
+Treat that data as browser-visible and disable offline play for any puzzle whose
+game state must remain server-only.
 
 ## Plugin contract
 
@@ -53,7 +57,9 @@ commitment is never sent to the browser.
   `found_words` state accepted by its normal progress normalizer;
 - `offline_validation="local_rules"` when the client can validate from public
   constraints, or `offline_validation="solution_hash"` together with an
-  `offline_solution_state` callback that returns the canonical progress state;
+  `offline_solution_state` callback that returns the canonical progress state.
+  Sequential modules may also provide `offline_solution_parts` for stage-level
+  commitments, and modules may provide `offline_game_data` for browser-side rules;
 - `offline_hash_mode="exact"` for exact answer maps, or `"filled_cells"` when
   only filled cells are significant;
 - `offline_notes` explaining which actions still require a connection; and
